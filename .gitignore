@@ -1,0 +1,22 @@
+# Env
+.env
+*.env.local
+
+# Go
+backend/vendor/
+backend/*.exe
+backend/*.test
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Claude Code memory
+memory/
+
+# OS
+.DS_Store
+Thumbs.db

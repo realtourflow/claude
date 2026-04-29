@@ -1,0 +1,1113 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  ChevronRight, Check, CheckCircle2, ArrowRight,
+  User, Building2, Users, MessageSquare, Zap,
+  FileText, Upload, Trash2,
+} from 'lucide-react';
+import { useAgentDocStore, DocType, DOC_TYPE_LABELS } from '../../store/agentDocStore';
+import OnboardingLayout from './OnboardingLayout';
+import { MOCK_USERS } from '../../data/mockUsers';
+import { useAgentTCStore } from '../../store/agentTCStore';
+import { useAgentSetupStore } from '../../store/agentSetupStore';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type LenderChoice = 'mountain' | 'other';
+
+type AgentSetupData = {
+  name: string;
+  title: string;
+  phone: string;
+  licenseNumber: string;
+  photoUrl: string;
+  bio: string;
+  brokerage: string;
+  brokerageAddress: string;
+  tcName: string;
+  tcEmail: string;
+  tcPhone: string;
+  tcLinkedUserId: string;
+  buyerMessage: string;
+  sellerMessage: string;
+  lenderChoice: LenderChoice | '';
+  otherLenderName: string;
+  notifDealStage: boolean;
+  notifClientMsg: boolean;
+  notifOverdue: boolean;
+  notifDisclosures: boolean;
+  notifFastPass: boolean;
+  toolDocuSign: boolean;
+  toolGoogleCal: boolean;
+  toolOutlook: boolean;
+  toolDotloop: boolean;
+  toolSkyslope: boolean;
+  toolZapier: boolean;
+};
+
+const DEFAULT_BUYER_MSG =
+  `Hi [ClientName], I'm thrilled to help you find your new home! I've set up your personal portal — it's your one-stop shop to track everything from search through closing. Your first step is to complete the intake questionnaire so I can start finding properties that fit you perfectly. Don't hesitate to reach out anytime. Let's find you a home!`;
+
+const DEFAULT_SELLER_MSG =
+  `Hi [ClientName], thank you for trusting me to sell your home! I've set up your seller portal where we'll manage everything from listing prep through closing day. Please complete the intake questionnaire when you get a chance — it helps me build your pricing strategy. I'll be in touch soon to schedule your listing strategy call. Excited to get started!`;
+
+const EMPTY: AgentSetupData = {
+  name: '', title: '', phone: '', licenseNumber: '', photoUrl: '', bio: '',
+  brokerage: '', brokerageAddress: '', tcName: '', tcEmail: '', tcPhone: '', tcLinkedUserId: '',
+  buyerMessage: DEFAULT_BUYER_MSG, sellerMessage: DEFAULT_SELLER_MSG,
+  lenderChoice: '', otherLenderName: '',
+  notifDealStage: true, notifClientMsg: true, notifOverdue: true,
+  notifDisclosures: true, notifFastPass: true,
+  toolDocuSign: false, toolGoogleCal: false, toolOutlook: false,
+  toolDotloop: false, toolSkyslope: false, toolZapier: false,
+};
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const TOTAL_STEPS = 12; // screens 1–12; 0 = welcome, 13 = done
+
+const STEP_LABELS: Record<number, string> = {
+  1:  'Step 1 of 12 · Your Profile',
+  2:  'Step 2 of 12 · Your Profile',
+  3:  'Step 3 of 12 · Your Profile',
+  4:  'Step 4 of 12 · Your Profile',
+  5:  'Step 5 of 12 · Your Profile',
+  6:  'Step 6 of 12 · Brokerage',
+  7:  'Step 7 of 12 · Your Team',
+  8:  'Step 8 of 12 · Client Experience',
+  9:  'Step 9 of 12 · Preferences',
+  10: 'Step 10 of 12 · Preferences',
+  11: 'Step 11 of 12 · Integrations',
+  12: 'Step 12 of 12 · Documents',
+};
+
+const TITLE_OPTIONS = [
+  'Realtor', 'Senior Agent', 'Team Lead',
+  'Buyer\'s Agent', 'Listing Specialist', 'Broker', 'Broker/Owner',
+];
+
+const BROKERAGE_OPTIONS = [
+  'Keller Williams', 'RE/MAX', 'Coldwell Banker', 'eXp Realty',
+  'Compass', 'Century 21', 'Berkshire Hathaway HomeServices',
+  'Independent', 'Other',
+];
+
+// Sample avatars for the photo picker (demo only)
+const AVATAR_OPTIONS = [
+  'https://i.pravatar.cc/150?img=47',
+  'https://i.pravatar.cc/150?img=32',
+  'https://i.pravatar.cc/150?img=9',
+  'https://i.pravatar.cc/150?img=15',
+  'https://i.pravatar.cc/150?img=22',
+  'https://i.pravatar.cc/150?img=55',
+  'https://i.pravatar.cc/150?img=44',
+  'https://i.pravatar.cc/150?img=60',
+];
+
+const INTEGRATION_TOOLS: {
+  key: keyof AgentSetupData;
+  name: string;
+  logo: string;
+  desc: string;
+}[] = [
+  { key: 'toolDocuSign',  name: 'DocuSign',              logo: '📄', desc: 'E-signatures for contracts and disclosures' },
+  { key: 'toolGoogleCal', name: 'Google Calendar',       logo: '📅', desc: 'Sync closing dates and task deadlines' },
+  { key: 'toolOutlook',   name: 'Outlook / Office 365',  logo: '📆', desc: 'Calendar sync for Microsoft users' },
+  { key: 'toolDotloop',   name: 'Dotloop',               logo: '🔄', desc: 'Transaction management and document storage' },
+  { key: 'toolSkyslope',  name: 'Skyslope',              logo: '🏠', desc: 'Compliance and file management' },
+  { key: 'toolZapier',    name: 'Zapier',                logo: '⚡', desc: 'Connect RealTourFlow to 5,000+ apps' },
+];
+
+const NOTIF_ITEMS: { key: keyof AgentSetupData; label: string; sub: string }[] = [
+  { key: 'notifDealStage',    label: 'Deal stage changes',       sub: 'When a deal advances or falls back a stage' },
+  { key: 'notifClientMsg',    label: 'New client messages',      sub: 'When a client sends a message through the portal' },
+  { key: 'notifOverdue',      label: 'Overdue task alerts',      sub: 'Daily reminder for tasks past their due date' },
+  { key: 'notifDisclosures',  label: 'Disclosure reminders',     sub: 'When disclosures are unsigned for 48+ hours' },
+  { key: 'notifFastPass',     label: 'Fast Pass enrollments',    sub: 'When a client enrolls in Fast Pass' },
+];
+
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+
+function Question({ text, note }: { text: string; note?: string }) {
+  return (
+    <div className="mb-8 text-center">
+      <h2 className="text-2xl font-bold leading-snug text-brand-navy sm:text-3xl">{text}</h2>
+      {note && <p className="mt-2 text-sm text-gray-400">{note}</p>}
+    </div>
+  );
+}
+
+function ContinueBtn({
+  onClick, disabled = false, label = 'Continue',
+}: { onClick: () => void; disabled?: boolean; label?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        'mt-6 flex w-full items-center justify-center gap-2 rounded-xl py-4 text-base font-bold transition-all',
+        disabled
+          ? 'cursor-not-allowed bg-gray-100 text-gray-300'
+          : 'bg-brand-navy text-white hover:bg-brand-navy/80 active:scale-[0.98]',
+      ].join(' ')}
+    >
+      {label} <ChevronRight size={18} />
+    </button>
+  );
+}
+
+function SkipLink({ onClick, label = 'Skip for now' }: { onClick: () => void; label?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className="mt-3 block w-full text-center text-sm text-gray-400 hover:text-gray-600 transition-colors"
+    >
+      {label}
+    </button>
+  );
+}
+
+function OptionBtn({ label, selected, onClick }: { label: string; selected?: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        'w-full rounded-xl py-4 text-center text-base font-bold transition-all active:scale-[0.98]',
+        selected ? 'bg-brand-navy text-white' : 'bg-gray-100 text-brand-navy hover:bg-gray-200',
+      ].join(' ')}
+    >
+      {label}
+    </button>
+  );
+}
+
+// ─── Screen 0: Welcome ────────────────────────────────────────────────────────
+
+function WelcomeScreen({ onStart, onSkip }: { onStart: () => void; onSkip: () => void }) {
+  const steps = [
+    { icon: <User size={15} />,         label: 'Profile & headshot' },
+    { icon: <Building2 size={15} />,    label: 'Brokerage' },
+    { icon: <Users size={15} />,        label: 'Transaction Coordinator' },
+    { icon: <MessageSquare size={15} />,label: 'Client welcome messages' },
+    { icon: <Zap size={15} />,          label: 'Preferences & integrations' },
+  ];
+
+  return (
+    <div className="flex flex-col items-center text-center">
+      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-navy text-white text-2xl font-black">
+        R
+      </div>
+      <h1 className="text-3xl font-black text-brand-navy leading-tight">
+        Welcome to RealTour Flow
+      </h1>
+      <p className="mt-3 max-w-sm text-sm text-gray-500 leading-relaxed">
+        Let's build your office in about 3 minutes. You'll only do this once — every setting here saves time on every deal you open.
+      </p>
+
+      {/* What we'll set up */}
+      <div className="mt-7 w-full max-w-xs rounded-2xl bg-gray-50 px-5 py-4 text-left space-y-2.5">
+        {steps.map(({ icon, label }) => (
+          <div key={label} className="flex items-center gap-3 text-sm text-gray-600">
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-white shadow-sm text-brand-navy">
+              {icon}
+            </span>
+            {label}
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={onStart}
+        className="mt-7 flex w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-brand-navy py-4 text-base font-bold text-white hover:bg-brand-navy/80 active:scale-[0.98] transition-all"
+      >
+        Let's build my office <ArrowRight size={18} />
+      </button>
+
+      <button
+        onClick={onSkip}
+        className="mt-4 text-sm text-gray-300 hover:text-gray-500 transition-colors"
+      >
+        I'll finish this later →
+      </button>
+    </div>
+  );
+}
+
+// ─── Screen 1: Full Name ──────────────────────────────────────────────────────
+
+function NameScreen({ value, onChange, onContinue }: {
+  value: string; onChange: (v: string) => void; onContinue: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center">
+      <Question text="What's your name?" note="This is how you'll appear to clients in the portal" />
+      <div className="w-full max-w-sm">
+        <input
+          autoFocus
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g. Sarah Johnson"
+          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+        />
+        <ContinueBtn onClick={onContinue} disabled={!value.trim()} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 2: Title ──────────────────────────────────────────────────────────
+
+function TitleScreen({ onSelect }: { onSelect: (v: string) => void }) {
+  return (
+    <div className="flex flex-col items-center">
+      <Question text="What's your title?" />
+      <div className="w-full max-w-xs space-y-2.5">
+        {TITLE_OPTIONS.map((t) => (
+          <OptionBtn key={t} label={t} onClick={() => onSelect(t)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 3: Phone + License ────────────────────────────────────────────────
+
+function PhoneLicenseScreen({
+  phone, license, onChangePhone, onChangeLicense, onContinue,
+}: {
+  phone: string; license: string;
+  onChangePhone: (v: string) => void; onChangeLicense: (v: string) => void;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center">
+      <Question text="Contact & credentials" note="Used in your profile and shown to clients" />
+      <div className="w-full max-w-sm space-y-3">
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Phone number
+          </label>
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => onChangePhone(e.target.value)}
+            placeholder="(205) 555-0100"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+            License number
+          </label>
+          <input
+            type="text"
+            value={license}
+            onChange={(e) => onChangeLicense(e.target.value)}
+            placeholder="e.g. AL-092341"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+          />
+        </div>
+        <ContinueBtn onClick={onContinue} disabled={!phone.trim()} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 4: Profile Photo ──────────────────────────────────────────────────
+
+function PhotoScreen({
+  selected, onSelect, onContinue, onSkip,
+}: {
+  selected: string; onSelect: (url: string) => void;
+  onContinue: () => void; onSkip: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center">
+      <Question
+        text="Add your headshot"
+        note="Clients see this in their portal. Pick one below or upload your own."
+      />
+      <div className="w-full max-w-sm">
+        <div className="grid grid-cols-4 gap-3 mb-5">
+          {AVATAR_OPTIONS.map((url) => (
+            <button
+              key={url}
+              onClick={() => onSelect(url)}
+              className={[
+                'relative aspect-square rounded-xl overflow-hidden ring-offset-2 transition-all',
+                selected === url ? 'ring-2 ring-brand-navy scale-105' : 'ring-1 ring-gray-200 hover:ring-gray-300',
+              ].join(' ')}
+            >
+              <img src={url} alt="avatar" className="h-full w-full object-cover" />
+              {selected === url && (
+                <div className="absolute inset-0 flex items-center justify-center bg-brand-navy/30">
+                  <CheckCircle2 size={20} className="text-white drop-shadow" />
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Upload placeholder */}
+        <div className="mb-4 rounded-xl border-2 border-dashed border-gray-200 px-4 py-3 text-center">
+          <p className="text-xs font-semibold text-gray-400">Upload from your device</p>
+          <p className="text-[11px] text-gray-300 mt-0.5">Photo upload coming in v1.1</p>
+        </div>
+
+        <ContinueBtn onClick={onContinue} disabled={!selected} />
+        <SkipLink onClick={onSkip} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 5: Bio ────────────────────────────────────────────────────────────
+
+function BioScreen({
+  value, onChange, onContinue, onSkip,
+}: {
+  value: string; onChange: (v: string) => void; onContinue: () => void; onSkip: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center">
+      <Question
+        text="Write a quick intro"
+        note="Shown to clients in their portal — a short paragraph about you works great"
+      />
+      <div className="w-full max-w-sm">
+        <textarea
+          autoFocus
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g. I've been helping Birmingham families buy and sell homes for 8 years. My focus is on clear communication, stress-free transactions, and getting you to closing on time."
+          rows={5}
+          className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 resize-none"
+        />
+        <ContinueBtn onClick={onContinue} />
+        <SkipLink onClick={onSkip} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 6: Brokerage ─────────────────────────────────────────────────────
+
+function BrokerageScreen({
+  onSelect,
+}: {
+  onSelect: (name: string, address: string) => void;
+}) {
+  const [otherSelected, setOtherSelected] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customAddress, setCustomAddress] = useState('');
+
+  const namedOptions = BROKERAGE_OPTIONS.filter((b) => b !== 'Other');
+
+  return (
+    <div className="flex flex-col items-center">
+      <Question text="What brokerage are you with?" />
+      <div className="w-full max-w-xs space-y-2.5">
+        {/* Named brokerages — auto-advance */}
+        {namedOptions.map((b) => (
+          <OptionBtn
+            key={b}
+            label={b}
+            selected={false}
+            onClick={() => onSelect(b, '')}
+          />
+        ))}
+
+        {/* Other — expands inline form */}
+        <button
+          onClick={() => setOtherSelected(true)}
+          className={[
+            'w-full rounded-xl py-4 text-center text-base font-bold transition-all active:scale-[0.98]',
+            otherSelected
+              ? 'bg-brand-navy text-white'
+              : 'bg-gray-100 text-brand-navy hover:bg-gray-200',
+          ].join(' ')}
+        >
+          Other
+        </button>
+
+        {/* Inline expansion for Other */}
+        {otherSelected && (
+          <div className="rounded-xl border border-brand-navy/20 bg-brand-navy/5 px-4 py-4 space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Brokerage name <span className="text-red-400">*</span>
+              </label>
+              <input
+                autoFocus
+                type="text"
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder="e.g. River City Realty"
+                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Office address <span className="font-normal normal-case text-gray-300">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={customAddress}
+                onChange={(e) => setCustomAddress(e.target.value)}
+                placeholder="e.g. 100 Riverchase Pkwy, Hoover, AL 35244"
+                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+              />
+            </div>
+            <ContinueBtn
+              onClick={() => onSelect(customName.trim(), customAddress.trim())}
+              disabled={!customName.trim()}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 7: Transaction Coordinator ───────────────────────────────────────
+
+function TCScreen({
+  tcName, tcEmail, tcPhone, tcLinkedUserId,
+  onChange, onContinue, onSolo,
+}: {
+  tcName: string; tcEmail: string; tcPhone: string; tcLinkedUserId: string;
+  onChange: (field: 'tcName' | 'tcEmail' | 'tcPhone' | 'tcLinkedUserId', val: string) => void;
+  onContinue: () => void;
+  onSolo: () => void;
+}) {
+  const [usesTC, setUsesTC] = useState<boolean | null>(null);
+  const [recognizedTC, setRecognizedTC] = useState<{ name: string; id: string } | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!tcEmail || dismissed) { setRecognizedTC(null); return; }
+    const match = MOCK_USERS.find(
+      (u) => u.groupId === 'tc' && u.email.toLowerCase() === tcEmail.toLowerCase()
+    );
+    setRecognizedTC(match ? { name: match.name, id: match.id } : null);
+  }, [tcEmail, dismissed]);
+
+  function linkRecognized() {
+    if (!recognizedTC) return;
+    onChange('tcName', recognizedTC.name);
+    onChange('tcLinkedUserId', recognizedTC.id);
+    setDismissed(false);
+  }
+
+  const isLinked = !!tcLinkedUserId;
+
+  // Step 1: yes / no question
+  if (usesTC === null) {
+    return (
+      <div className="flex flex-col items-center">
+        <Question
+          text="Do you work with a Transaction Coordinator?"
+          note="This determines how tasks and file management are routed on your deals"
+        />
+        <div className="w-full max-w-xs space-y-3">
+          <button
+            onClick={() => setUsesTC(true)}
+            className="w-full rounded-xl bg-gray-100 py-4 text-center text-base font-bold text-brand-navy hover:bg-gray-200 active:scale-[0.98] transition-all"
+          >
+            Yes, I work with a TC
+          </button>
+          <button
+            onClick={onSolo}
+            className="w-full rounded-xl bg-gray-100 py-4 text-center text-base font-bold text-brand-navy hover:bg-gray-200 active:scale-[0.98] transition-all"
+          >
+            No, I handle it myself
+          </button>
+        </div>
+        <p className="mt-4 text-xs text-gray-300 text-center max-w-xs">
+          You can always add a TC later in Settings
+        </p>
+      </div>
+    );
+  }
+
+  // Step 2: TC details form
+  return (
+    <div className="flex flex-col items-center">
+      <Question
+        text="Who is your Transaction Coordinator?"
+        note="They'll be automatically added to every deal — messages, checklists, and tasks"
+      />
+      <div className="w-full max-w-sm space-y-3">
+        {recognizedTC && !isLinked && !dismissed && (
+          <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-green-800">
+                Found <span className="font-black">{recognizedTC.name}</span> in RealTourFlow
+              </p>
+              <p className="text-xs text-green-600 mt-0.5">Is this your TC?</p>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button onClick={linkRecognized}
+                className="rounded-lg bg-green-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-600 transition-colors">
+                Yes, link →
+              </button>
+              <button onClick={() => { setDismissed(true); onChange('tcLinkedUserId', ''); }}
+                className="text-xs text-green-500 hover:text-green-700 transition-colors">
+                No
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isLinked && (
+          <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 flex items-center gap-3">
+            <CheckCircle2 size={16} className="text-green-500 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-green-800">{tcName} linked</p>
+              <p className="text-xs text-green-600 mt-0.5">They'll be notified when you open your first deal</p>
+            </div>
+            <button onClick={() => onChange('tcLinkedUserId', '')}
+              className="ml-auto text-xs text-green-500 hover:text-green-700 transition-colors">
+              Unlink
+            </button>
+          </div>
+        )}
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">Full name</label>
+          <input type="text" value={tcName} onChange={(e) => onChange('tcName', e.target.value)}
+            placeholder="e.g. Jamie Taylor" disabled={isLinked}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 disabled:opacity-60" />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">Email</label>
+          <input type="email" value={tcEmail} onChange={(e) => onChange('tcEmail', e.target.value)}
+            placeholder="jamie@youroffice.com" disabled={isLinked}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 disabled:opacity-60" />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Phone <span className="font-normal normal-case text-gray-300">(optional)</span>
+          </label>
+          <input type="tel" value={tcPhone} onChange={(e) => onChange('tcPhone', e.target.value)}
+            placeholder="(205) 555-0244" disabled={isLinked}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 disabled:opacity-60" />
+        </div>
+
+        <ContinueBtn onClick={onContinue} disabled={!tcName.trim() && !isLinked} />
+        <button onClick={() => setUsesTC(null)}
+          className="mt-3 block w-full text-center text-sm text-gray-400 hover:text-gray-600 transition-colors">
+          ← Back
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 8: Welcome Messages ───────────────────────────────────────────────
+
+function WelcomeMessagesScreen({
+  buyerMsg, sellerMsg, onBuyerChange, onSellerChange, onContinue,
+}: {
+  buyerMsg: string; sellerMsg: string;
+  onBuyerChange: (v: string) => void; onSellerChange: (v: string) => void;
+  onContinue: () => void;
+}) {
+  const [tab, setTab] = useState<'buyer' | 'seller'>('buyer');
+
+  return (
+    <div className="flex flex-col items-center">
+      <Question
+        text="Write your default welcome messages"
+        note='Write once, send to every client. Use [ClientName] as a placeholder — customize per deal anytime.'
+      />
+      <div className="w-full max-w-sm">
+        {/* Tabs */}
+        <div className="mb-3 flex rounded-xl bg-gray-100 p-1">
+          {(['buyer', 'seller'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={[
+                'flex-1 rounded-lg py-2 text-sm font-semibold transition-all capitalize',
+                tab === t ? 'bg-white shadow-sm text-brand-navy' : 'text-gray-400 hover:text-gray-600',
+              ].join(' ')}
+            >
+              {t === 'buyer' ? '🏠 Buyer' : '🔑 Seller'}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'buyer' ? (
+          <textarea
+            value={buyerMsg}
+            onChange={(e) => onBuyerChange(e.target.value)}
+            rows={7}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 resize-none"
+          />
+        ) : (
+          <textarea
+            value={sellerMsg}
+            onChange={(e) => onSellerChange(e.target.value)}
+            rows={7}
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 resize-none"
+          />
+        )}
+
+        <p className="mt-2 mb-1 text-center text-[11px] text-gray-300">
+          Use [ClientName] and it'll be replaced with the client's name automatically
+        </p>
+        <ContinueBtn onClick={onContinue} label="Save messages" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 9: Default Lender ─────────────────────────────────────────────────
+
+function LenderScreen({ onSelect }: { onSelect: (v: LenderChoice) => void }) {
+  return (
+    <div className="flex flex-col items-center">
+      <Question
+        text="How lenders work in RealTourFlow"
+        note="You're free to use any lender — here's what that means for your clients"
+      />
+      <div className="w-full max-w-md space-y-3">
+        {/* Mountain Mortgage — featured */}
+        <button
+          onClick={() => onSelect('mountain')}
+          className="group w-full overflow-hidden rounded-2xl bg-brand-navy p-5 text-left transition-all hover:bg-brand-navy/90 active:scale-[0.99]"
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gold text-brand-navy font-black text-sm">M</div>
+            <span className="text-xs font-bold uppercase tracking-widest text-brand-gold">Preferred · Fully Integrated</span>
+          </div>
+          <div className="mt-2 text-lg font-bold text-white">Mountain Mortgage</div>
+          <p className="mt-1 text-sm text-white/70">
+            Already wired into RealTourFlow via ARIVE. Your clients see real-time loan milestones in their portal — no more chasing the lender. Disclosures and clear-to-close sync automatically.
+          </p>
+          <p className="mt-3 text-xs font-semibold text-brand-gold/80 uppercase tracking-wide">
+            Use Mountain Mortgage as my preferred lender →
+          </p>
+        </button>
+
+        {/* Any other lender */}
+        <button
+          onClick={() => onSelect('other')}
+          className="w-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50 p-5 text-left transition-all hover:bg-gray-100 active:scale-[0.99]"
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <Building2 size={16} className="text-gray-400" />
+            <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Any other lender</span>
+          </div>
+          <div className="mt-2 text-lg font-bold text-gray-700">I'll use a different lender</div>
+          <p className="mt-1 text-sm text-gray-500">
+            Totally fine — you can use any lender you want. Loan milestones will need to be updated manually, and ARIVE automation won't apply.
+          </p>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 10: Notifications ─────────────────────────────────────────────────
+
+function NotificationsScreen({
+  data, onToggle, onContinue,
+}: {
+  data: AgentSetupData;
+  onToggle: (key: keyof AgentSetupData) => void;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center">
+      <Question text="How do you want to stay in the loop?" note="You can change these anytime in Settings" />
+      <div className="w-full max-w-sm space-y-2">
+        {NOTIF_ITEMS.map(({ key, label, sub }) => {
+          const on = data[key] as boolean;
+          return (
+            <button
+              key={key}
+              onClick={() => onToggle(key)}
+              className={[
+                'flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3.5 transition-all border',
+                on ? 'bg-brand-navy/5 border-brand-navy/20' : 'bg-gray-50 border-gray-100',
+              ].join(' ')}
+            >
+              <div className="text-left">
+                <p className={`text-sm font-semibold ${on ? 'text-brand-navy' : 'text-gray-500'}`}>{label}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{sub}</p>
+              </div>
+              <div className={[
+                'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
+                on ? 'bg-brand-navy' : 'bg-gray-200',
+              ].join(' ')}>
+                <span className={[
+                  'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                  on ? 'translate-x-6' : 'translate-x-1',
+                ].join(' ')} />
+              </div>
+            </button>
+          );
+        })}
+        <ContinueBtn onClick={onContinue} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 11: Integrations ──────────────────────────────────────────────────
+
+function IntegrationsScreen({
+  data, onToggle, onContinue,
+}: {
+  data: AgentSetupData;
+  onToggle: (key: keyof AgentSetupData) => void;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center">
+      <Question
+        text="What tools are you already using?"
+        note="Tell us your stack — we build integrations in order of what agents actually use"
+      />
+      <div className="w-full max-w-sm">
+        <div className="grid grid-cols-2 gap-2.5 mb-2">
+          {INTEGRATION_TOOLS.map(({ key, name, logo, desc }) => {
+            const selected = data[key] as boolean;
+            return (
+              <button
+                key={key}
+                onClick={() => onToggle(key)}
+                className={[
+                  'flex flex-col items-start rounded-xl p-3.5 text-left transition-all border-2',
+                  selected
+                    ? 'border-brand-navy bg-brand-navy/5'
+                    : 'border-gray-100 bg-white hover:border-gray-200',
+                ].join(' ')}
+              >
+                <div className="flex w-full items-start justify-between mb-2">
+                  <span className="text-2xl leading-none">{logo}</span>
+                  <div className={[
+                    'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full transition-all',
+                    selected ? 'bg-brand-navy text-white' : 'bg-gray-100 text-transparent',
+                  ].join(' ')}>
+                    <Check size={11} strokeWidth={3} />
+                  </div>
+                </div>
+                <span className={`text-xs font-bold ${selected ? 'text-brand-navy' : 'text-gray-700'}`}>{name}</span>
+                <span className="text-[10px] text-gray-400 mt-0.5 leading-snug">{desc}</span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mb-4 text-center text-[11px] text-gray-300">
+          We'll notify you when each integration goes live — no action needed now.
+        </p>
+        <ContinueBtn onClick={onContinue} label="Almost done!" />
+        <SkipLink onClick={onContinue} label="None of these — skip" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Screen 12: Document Templates ───────────────────────────────────────────
+
+const ONBOARDING_DOC_TYPES: { docType: DocType; desc: string }[] = [
+  { docType: 'baa',               desc: 'Required before showing homes to buyers' },
+  { docType: 'listing_agreement', desc: 'For your seller clients' },
+  { docType: 'purchase_contract', desc: 'Standard purchase agreement template' },
+  { docType: 'disclosure',        desc: 'Property disclosure statement' },
+];
+
+function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
+  const { addDoc, removeDoc, docsByAgent } = useAgentDocStore();
+  const docs = docsByAgent['agent-sarah'] ?? [];
+
+  function simulateUpload(docType: DocType) {
+    if (docs.some((d) => d.docType === docType)) return;
+    addDoc({
+      id: `doc-${docType}-${Date.now()}`,
+      agentId: 'agent-sarah',
+      name: DOC_TYPE_LABELS[docType],
+      docType,
+      fileName: `${DOC_TYPE_LABELS[docType].replace(/ /g, '_')}_Template.pdf`,
+      uploadedAt: new Date().toISOString(),
+    });
+  }
+
+  return (
+    <div>
+      <div className="mb-6 text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100">
+          <FileText size={28} className="text-blue-600" />
+        </div>
+        <h2 className="text-2xl font-black text-brand-navy">Upload your templates</h2>
+        <p className="mt-2 text-sm text-gray-500 leading-relaxed max-w-xs mx-auto">
+          Add the documents you use most — they'll be ready to send to clients at the right stage. You can always update these in Settings.
+        </p>
+      </div>
+
+      <div className="space-y-2 mb-6">
+        {ONBOARDING_DOC_TYPES.map(({ docType, desc }) => {
+          const added = docs.some((d) => d.docType === docType);
+          const doc = docs.find((d) => d.docType === docType);
+          return (
+            <div key={docType} className={`flex items-center gap-3 rounded-xl border px-4 py-3.5 transition-all ${
+              added ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-white'
+            }`}>
+              <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${
+                added ? 'bg-green-100' : 'bg-gray-100'
+              }`}>
+                <FileText size={16} className={added ? 'text-green-600' : 'text-gray-400'} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-semibold ${added ? 'text-green-800' : 'text-brand-navy'}`}>
+                  {DOC_TYPE_LABELS[docType]}
+                </p>
+                <p className="text-xs text-gray-400 truncate">
+                  {added ? doc!.fileName : desc}
+                </p>
+              </div>
+              {added ? (
+                <button
+                  onClick={() => removeDoc(doc!.id)}
+                  className="flex-shrink-0 text-gray-300 hover:text-red-400 transition-colors"
+                >
+                  <Trash2 size={14} />
+                </button>
+              ) : (
+                <button
+                  onClick={() => simulateUpload(docType)}
+                  className="flex-shrink-0 flex items-center gap-1.5 rounded-lg border border-brand-navy/20 bg-brand-navy/5 px-3 py-1.5 text-xs font-bold text-brand-navy hover:bg-brand-navy/10 transition-colors"
+                >
+                  <Upload size={11} /> Upload
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        onClick={onContinue}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-navy py-4 text-base font-bold text-white hover:bg-brand-navy/80 active:scale-[0.98] transition-all"
+      >
+        {docs.length > 0 ? `Continue with ${docs.length} template${docs.length !== 1 ? 's' : ''}` : 'Continue'} <ArrowRight size={18} />
+      </button>
+      {docs.length === 0 && (
+        <button onClick={onContinue} className="mt-2 w-full text-sm text-gray-400 hover:text-gray-600 py-2 transition-colors">
+          Skip for now — add later in Settings
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Screen 13: Done ──────────────────────────────────────────────────────────
+
+function DoneScreen({ data }: { data: AgentSetupData }) {
+  const navigate = useNavigate();
+  const { setTC, setSoloMode } = useAgentTCStore();
+  const { markComplete } = useAgentSetupStore();
+  const { docsByAgent } = useAgentDocStore();
+  const docCount = (docsByAgent['agent-sarah'] ?? []).length;
+  const isSolo = !data.tcName;
+
+  useEffect(() => {
+    markComplete();
+    if (data.tcName && data.tcEmail) {
+      setSoloMode(false);
+      setTC('agent-sarah', {
+        name: data.tcName,
+        email: data.tcEmail,
+        phone: data.tcPhone || undefined,
+        userId: data.tcLinkedUserId || undefined,
+      });
+    } else {
+      setSoloMode(true);
+    }
+  }, []);
+
+  const summary = [
+    { label: 'Profile',    value: data.title ? `${data.title}${data.brokerage ? ` · ${data.brokerage}` : ''}` : 'Complete', ok: true },
+    { label: 'TC',         value: isSolo ? 'Solo mode — TC tasks built into your view' : data.tcName, ok: true },
+    { label: 'Lender',     value: data.lenderChoice === 'mountain' ? 'Mountain Mortgage (ARIVE integrated)' : data.lenderChoice === 'other' ? 'Other lender — milestones managed manually' : 'Will configure in Settings', ok: !!data.lenderChoice },
+    { label: 'Messages',   value: 'Buyer & seller templates saved', ok: true },
+    { label: 'Documents',  value: docCount > 0 ? `${docCount} template${docCount !== 1 ? 's' : ''} uploaded` : 'None yet — add in Settings', ok: docCount > 0 },
+    { label: 'Integrations', value: INTEGRATION_TOOLS.filter(t => data[t.key] as boolean).map(t => t.name).join(', ') || 'None selected', ok: true },
+  ];
+
+  return (
+    <div className="flex flex-col items-center text-center">
+      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-green-100">
+        <CheckCircle2 size={36} className="text-green-500" />
+      </div>
+      <h2 className="text-3xl font-black text-brand-navy">Your office is live.</h2>
+      <p className="mt-2 text-sm text-gray-500 max-w-xs">
+        Everything is set. Here's a quick summary of what we configured.
+      </p>
+
+      {/* Summary */}
+      <div className="mt-6 w-full max-w-sm rounded-2xl bg-gray-50 divide-y divide-gray-100 overflow-hidden text-left">
+        {summary.map(({ label, value, ok }) => (
+          <div key={label} className="flex items-start gap-3 px-4 py-3">
+            <div className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${ok ? 'bg-green-100' : 'bg-gray-200'}`}>
+              <Check size={11} strokeWidth={3} className={ok ? 'text-green-600' : 'text-gray-400'} />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">{label}</p>
+              <p className="text-sm text-brand-navy leading-snug mt-0.5">{value}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Actions */}
+      <div className="mt-6 w-full max-w-sm space-y-2.5">
+        <button
+          onClick={() => navigate('/agent')}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-navy py-4 text-base font-bold text-white hover:bg-brand-navy/80 active:scale-[0.98] transition-all"
+        >
+          Go to my dashboard <ArrowRight size={18} />
+        </button>
+        <button
+          onClick={() => navigate('/agent/deals')}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white py-3.5 text-sm font-semibold text-brand-navy hover:bg-gray-50 transition-all"
+        >
+          Create my first deal →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+export default function AgentOnboarding() {
+  const navigate = useNavigate();
+  const { dismissBanner } = useAgentSetupStore();
+  const [screen, setScreen] = useState(0);
+  const [data, setData] = useState<AgentSetupData>(EMPTY);
+
+  function set<K extends keyof AgentSetupData>(key: K, val: AgentSetupData[K]) {
+    setData((d) => ({ ...d, [key]: val }));
+  }
+
+  function toggle(key: keyof AgentSetupData) {
+    setData((d) => ({ ...d, [key]: !d[key] }));
+  }
+
+  function advance() { setScreen((s) => s + 1); }
+  function back()    { setScreen((s) => Math.max(s - 1, 1)); }
+
+  function skipToEnd() {
+    dismissBanner();
+    navigate('/agent');
+  }
+
+  const progress =
+    screen === 0  ? 3 :
+    screen === 13 ? 100 :
+    Math.round((screen / (TOTAL_STEPS + 1)) * 100);
+
+  const stepLabel = STEP_LABELS[screen];
+  const showBack  = screen >= 1 && screen <= TOTAL_STEPS;
+
+  function renderScreen() {
+    switch (screen) {
+      case 0: return <WelcomeScreen onStart={advance} onSkip={skipToEnd} />;
+
+      case 1: return (
+        <NameScreen value={data.name} onChange={(v) => set('name', v)}
+          onContinue={advance} />
+      );
+
+      case 2: return (
+        <TitleScreen onSelect={(v) => { set('title', v); advance(); }} />
+      );
+
+      case 3: return (
+        <PhoneLicenseScreen
+          phone={data.phone} license={data.licenseNumber}
+          onChangePhone={(v) => set('phone', v)}
+          onChangeLicense={(v) => set('licenseNumber', v)}
+          onContinue={advance}
+        />
+      );
+
+      case 4: return (
+        <PhotoScreen
+          selected={data.photoUrl}
+          onSelect={(v) => set('photoUrl', v)}
+          onContinue={advance}
+          onSkip={advance}
+        />
+      );
+
+      case 5: return (
+        <BioScreen
+          value={data.bio}
+          onChange={(v) => set('bio', v)}
+          onContinue={advance}
+          onSkip={advance}
+        />
+      );
+
+      case 6: return (
+        <BrokerageScreen onSelect={(name, address) => { set('brokerage', name); set('brokerageAddress', address); advance(); }} />
+      );
+
+      case 7: return (
+        <TCScreen
+          tcName={data.tcName} tcEmail={data.tcEmail}
+          tcPhone={data.tcPhone} tcLinkedUserId={data.tcLinkedUserId}
+          onChange={(field, val) => set(field, val)}
+          onContinue={advance}
+          onSolo={() => { set('tcName', ''); set('tcEmail', ''); advance(); }}
+        />
+      );
+
+      case 8: return (
+        <WelcomeMessagesScreen
+          buyerMsg={data.buyerMessage} sellerMsg={data.sellerMessage}
+          onBuyerChange={(v) => set('buyerMessage', v)}
+          onSellerChange={(v) => set('sellerMessage', v)}
+          onContinue={advance}
+        />
+      );
+
+      case 9: return (
+        <LenderScreen onSelect={(v) => { set('lenderChoice', v); advance(); }} />
+      );
+
+      case 10: return (
+        <NotificationsScreen data={data} onToggle={toggle} onContinue={advance} />
+      );
+
+      case 11: return (
+        <IntegrationsScreen data={data} onToggle={toggle} onContinue={advance} />
+      );
+
+      case 12: return (
+        <DocumentsScreen onContinue={advance} />
+      );
+
+      case 13: return <DoneScreen data={data} />;
+
+      default: return null;
+    }
+  }
+
+  return (
+    <OnboardingLayout
+      progress={progress}
+      onBack={showBack ? back : undefined}
+      label="Agent"
+      stepLabel={stepLabel}
+    >
+      {renderScreen()}
+    </OnboardingLayout>
+  );
+}
