@@ -16,10 +16,15 @@ func New(db *sql.DB) *Handler {
 	return &Handler{db: db}
 }
 
-func (h *Handler) Routes() http.Handler {
+func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 	r := chi.NewRouter()
 
 	r.Get("/health", h.Health)
+
+	r.Group(func(r chi.Router) {
+		r.Use(auth)
+		// protected routes go here
+	})
 
 	return r
 }

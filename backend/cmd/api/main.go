@@ -32,7 +32,7 @@ func main() {
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
 	h := handlers.New(database)
-	r.Mount("/api", h.Routes())
+	r.Mount("/api", h.Routes(middleware.Auth0(cfg.Auth0Domain, cfg.Auth0Audience)))
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.Port),

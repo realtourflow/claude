@@ -1,0 +1,53 @@
+{
+  "family": "realtourflow-api",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::508859666048:role/realtourflow-task-execution-role",
+  "containerDefinitions": [
+    {
+      "name": "realtourflow-api",
+      "image": "508859666048.dkr.ecr.us-east-1.amazonaws.com/realtourflow-api:latest",
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/database-url"
+        },
+        {
+          "name": "AUTH0_DOMAIN",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-domain"
+        },
+        {
+          "name": "AUTH0_AUDIENCE",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-audience"
+        }
+      ],
+      "environment": [
+        {
+          "name": "PORT",
+          "value": "8080"
+        },
+        {
+          "name": "ALLOWED_ORIGINS",
+          "value": "http://localhost:5173"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/realtourflow-api",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "essential": true
+    }
+  ]
+}
