@@ -122,7 +122,8 @@ VITE_AUTH0_AUDIENCE=https://api.realtourflow.com
 |---|---|---|---|
 | 000001_init | Full schema: users, deals, tasks, documents, messages, deal_stage_history | ✅ Applied | ✅ Applied |
 | 000002_add_task_fields | Adds priority, source, stage_context, role columns to tasks | ✅ Applied | ✅ Applied |
-| 000003_add_message_channel | Adds channel column (client_thread / internal) to messages | ✅ Applied | ✅ Applied on next deploy |
+| 000003_add_message_channel | Adds channel column (client_thread / internal) to messages | ✅ Applied | ✅ Applied |
+| 000004_add_document_fields | Adds mime_type, file_size columns to documents | ✅ Applied | ✅ Applied on next deploy |
 
 ---
 
@@ -143,6 +144,11 @@ All routes are mounted at `/api`. Protected routes require `Authorization: Beare
 | PATCH | /tasks/:taskId/status | ✅ | UpdateTaskStatus | Ownership-checked via deal join |
 | GET | /deals/:dealId/messages | ✅ | ListMessages | `?channel=client_thread\|internal`; JOIN users for sender name/role |
 | POST | /deals/:dealId/messages | ✅ | CreateMessage | CTE insert+join; returns full message with sender info |
+| GET | /deals/:dealId/documents | ✅ | ListDocuments | Ownership-checked via deal; returns docs with uploader name |
+| POST | /deals/:dealId/documents/upload-url | ✅ | GetUploadURL | Returns S3 pre-signed PUT URL (15 min) + s3_key |
+| POST | /deals/:dealId/documents | ✅ | CreateDocument | Confirms upload; stores name, s3_key, mime_type, file_size |
+| GET | /documents/:documentId/download-url | ✅ | GetDownloadURL | Returns S3 pre-signed GET URL (15 min) |
+| DELETE | /documents/:documentId | ✅ | DeleteDocument | Deletes DB record + best-effort S3 object delete |
 
 ### Auth0 JWT custom claims
 
@@ -171,6 +177,8 @@ This tracks what's wired to the real database vs what still uses mock data.
 | Toggle task complete | PATCH /tasks/:id/status |
 | Stage auto-tasks on advance | POST /deals/:id/tasks |
 | User sync on login | POST /users/sync |
+| Messages per deal | GET/POST /deals/:id/messages |
+| Documents per deal | GET /deals/:id/documents, POST /deals/:id/documents/upload-url, POST /deals/:id/documents, GET /documents/:id/download-url, DELETE /documents/:id |
 
 ### Still on mock data ⚠️
 
@@ -178,7 +186,7 @@ This tracks what's wired to the real database vs what still uses mock data.
 |---|---|---|
 | authStore (active user) | ~~wired to real Auth0~~ | **Closed.** `setFromAuth0()` populates authStore from `/users/sync` response. `RoleSwitcher` is dev-only. |
 | Messages tab | ~~wired to real API~~ | **Closed.** `GET/POST /deals/:id/messages?channel=` live. 10s polling. Send wired. |
-| Documents tab | Hardcoded in `DealDetail.tsx` (DEAL_DOCS) | Static mock list |
+| Documents tab | ~~DEAL_DOCS mock~~ | **Closed.** S3 pre-signed upload/download/delete wired. `useDocuments` hook. |
 | Vendor directory | `store/vendorStore.ts` + `data/mockVendors.ts` | Fully functional UI, writes nowhere |
 | Loan milestones | `data/mockDeals.ts` | ARIVE integration not yet built |
 | Properties / offers | `store/propertyStore.ts`, `store/offerStore.ts` | Full UI, writes nowhere |
