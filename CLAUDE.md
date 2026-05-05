@@ -123,7 +123,8 @@ VITE_AUTH0_AUDIENCE=https://api.realtourflow.com
 | 000001_init | Full schema: users, deals, tasks, documents, messages, deal_stage_history | ✅ Applied | ✅ Applied |
 | 000002_add_task_fields | Adds priority, source, stage_context, role columns to tasks | ✅ Applied | ✅ Applied |
 | 000003_add_message_channel | Adds channel column (client_thread / internal) to messages | ✅ Applied | ✅ Applied |
-| 000004_add_document_fields | Adds mime_type, file_size columns to documents | ✅ Applied | ✅ Applied on next deploy |
+| 000004_add_document_fields | Adds mime_type, file_size columns to documents | ✅ Applied | ✅ Applied |
+| 000005_add_vendors | Creates preferred_vendors table with sort_order and is_featured | ✅ Applied | ✅ Applied on next deploy |
 
 ---
 
@@ -149,6 +150,10 @@ All routes are mounted at `/api`. Protected routes require `Authorization: Beare
 | POST | /deals/:dealId/documents | ✅ | CreateDocument | Confirms upload; stores name, s3_key, mime_type, file_size |
 | GET | /documents/:documentId/download-url | ✅ | GetDownloadURL | Returns S3 pre-signed GET URL (15 min) |
 | DELETE | /documents/:documentId | ✅ | DeleteDocument | Deletes DB record + best-effort S3 object delete |
+| GET | /vendors | ✅ | ListVendors | Agent-scoped; ordered by category, sort_order |
+| POST | /vendors | ✅ | CreateVendor | Auto-sets sort_order = max in category + 1 |
+| PATCH | /vendors/:vendorId | ✅ | UpdateVendor | Partial update — company, contact, phone, email, website, notes, is_featured, sort_order |
+| DELETE | /vendors/:vendorId | ✅ | DeleteVendor | Ownership-checked |
 
 ### Auth0 JWT custom claims
 
@@ -179,6 +184,7 @@ This tracks what's wired to the real database vs what still uses mock data.
 | User sync on login | POST /users/sync |
 | Messages per deal | GET/POST /deals/:id/messages |
 | Documents per deal | GET /deals/:id/documents, POST /deals/:id/documents/upload-url, POST /deals/:id/documents, GET /documents/:id/download-url, DELETE /documents/:id |
+| Vendor directory | GET /vendors, POST /vendors, PATCH /vendors/:id, DELETE /vendors/:id |
 
 ### Still on mock data ⚠️
 
@@ -187,7 +193,7 @@ This tracks what's wired to the real database vs what still uses mock data.
 | authStore (active user) | ~~wired to real Auth0~~ | **Closed.** `setFromAuth0()` populates authStore from `/users/sync` response. `RoleSwitcher` is dev-only. |
 | Messages tab | ~~wired to real API~~ | **Closed.** `GET/POST /deals/:id/messages?channel=` live. 10s polling. Send wired. |
 | Documents tab | ~~DEAL_DOCS mock~~ | **Closed.** S3 pre-signed upload/download/delete wired. `useDocuments` hook. |
-| Vendor directory | `store/vendorStore.ts` + `data/mockVendors.ts` | Fully functional UI, writes nowhere |
+| Vendor directory | ~~vendorStore.ts~~ | **Closed.** `useVendors` hook. GET/POST/PATCH/DELETE /vendors live. SettingsPage, VendorDirectory, DealDetail all wired. |
 | Loan milestones | `data/mockDeals.ts` | ARIVE integration not yet built |
 | Properties / offers | `store/propertyStore.ts`, `store/offerStore.ts` | Full UI, writes nowhere |
 | Net sheet | `store/netSheetStore.ts` | Full UI, writes nowhere |
