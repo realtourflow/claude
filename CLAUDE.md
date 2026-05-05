@@ -110,24 +110,18 @@ VITE_AUTH0_AUDIENCE=https://api.realtourflow.com
 1. Write migration files: `backend/migrations/{version}_{title}.up.sql` + `.down.sql`
    - Naming: `000001_init`, `000002_add_task_fields`, `000003_...`  (6-digit zero-padded)
 2. Test locally: `DATABASE_URL="..." make migrate`
-3. Push code (CI deploys new binary)
-4. **Run migration against production RDS manually** before testing new endpoints in prod:
-   ```bash
-   migrate -path backend/migrations \
-     -database "$(aws secretsmanager get-secret-value \
-       --secret-id realtourflow/database-url-DvT938 \
-       --query SecretString --output text)" up
-   ```
-5. Verify: hit the relevant endpoint, check CloudWatch logs if anything errors.
+3. Push code — **migrations run automatically on ECS startup** (golang-migrate in main.go)
+4. Verify: hit the relevant endpoint, check CloudWatch logs if anything errors.
+
+> **No manual CLI access needed.** The server calls `migrate.Up()` before accepting requests.
+> ErrNoChange is handled gracefully — already-applied migrations are skipped automatically.
 
 ### Migration state
 
 | Migration | Description | Local | **Production** |
 |---|---|---|---|
 | 000001_init | Full schema: users, deals, tasks, documents, messages, deal_stage_history | ✅ Applied | ✅ Applied |
-| 000002_add_task_fields | Adds priority, source, stage_context, role columns to tasks | ✅ Applied | ⚠️ **PENDING** |
-
-> **Action required:** Run 000002 against production before using task endpoints in prod.
+| 000002_add_task_fields | Adds priority, source, stage_context, role columns to tasks | ✅ Applied | ✅ Applied on next deploy |
 
 ---
 
@@ -264,10 +258,7 @@ Follow this checklist on every push that includes backend changes:
    - GitHub Actions builds Docker image → pushes to ECR → deploys to ECS
    - Wait for CI green (≈3–5 min)
 
-3. **Run pending migrations in production**
-   - Check the migration table above for any ⚠️ PENDING rows
-   - Run `migrate ... up` against RDS (see Database Migrations section above)
-   - Update the migration table in this file to ✅ Applied
+3. **Migrations run automatically** — server applies all pending migrations on startup before accepting requests. Check CloudWatch logs for `migrations up to date`.
 
 4. **Smoke test**
    - Hit `GET /api/health` → expect `{"status":"ok"}`
@@ -285,9 +276,8 @@ Follow this checklist on every push that includes backend changes:
 
 In rough priority order:
 
-1. **Run migration 000002 in production** — unblocks task endpoints in prod
-2. **Update ALLOWED_ORIGINS** — set real production frontend domain in task-definition.json once frontend is deployed
-3. **Close the Auth0 ↔ authStore identity gap** — read the real Auth0 user into `authStore` so role-switching and multi-agent scenarios work correctly
+1. **Update ALLOWED_ORIGINS** — set real production frontend domain in task-definition.json once frontend is deployed
+2. **Close the Auth0 ↔ authStore identity gap** — read the real Auth0 user into `authStore` so role-switching and multi-agent scenarios work correctly
 4. **Messages backend** — `POST /deals/:id/messages`, `GET /deals/:id/messages` with WebSocket or polling
 5. **Documents backend** — S3 upload, `POST /deals/:id/documents`, `GET /deals/:id/documents`
 6. **Vendor persistence** — `GET/POST/PATCH/DELETE /vendors`, agent-scoped preferred vendor list
