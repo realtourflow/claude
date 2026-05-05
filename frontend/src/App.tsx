@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuth0 } from '@auth0/auth0-react';
 import { useAuthStore } from './store/authStore';
 import { GroupId } from './permissions/groups';
 import { AppLayout } from './components/layout/AppLayout';
@@ -22,16 +23,21 @@ import FastPassSurvey from './pages/onboarding/FastPassSurvey';
 import SmoothExitDetail from './pages/onboarding/SmoothExitDetail';
 import SmoothExitSurvey from './pages/onboarding/SmoothExitSurvey';
 
-// Smart root redirect based on active user group
+// Smart root redirect based on active user group.
+// Returns null while Auth0 and /users/sync are still initializing
+// so we never default-route a buyer or seller to /agent.
 function RootRedirect() {
+  const { isLoading: auth0Loading } = useAuth0();
+  const isLoaded = useAuthStore((s) => s.isLoaded);
   const activeUser = useAuthStore((s) => s.activeUser);
-  const groupId = activeUser?.groupId as GroupId | undefined;
 
+  if (auth0Loading || !isLoaded) return null;
+
+  const groupId = activeUser?.groupId as GroupId | undefined;
   if (groupId === 'admin') return <Navigate to="/admin" replace />;
   if (groupId === 'buyer') return <Navigate to={`/buyer/${activeUser?.id}`} replace />;
   if (groupId === 'seller') return <Navigate to={`/seller/${activeUser?.id}`} replace />;
   if (groupId === 'tc') return <Navigate to="/tc" replace />;
-  // Default: agent
   return <Navigate to="/agent" replace />;
 }
 

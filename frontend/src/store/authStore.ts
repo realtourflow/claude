@@ -1,19 +1,54 @@
 import { create } from 'zustand';
-import { MockUser, MOCK_USERS, DEFAULT_USER_ID } from '../data/mockUsers';
+import { GroupId } from '../permissions/groups';
+import { MockUser, MOCK_USERS } from '../data/mockUsers';
+
+export type AppUser = MockUser;
+
+const ROLE_TO_GROUP: Record<string, GroupId> = {
+  agent: 'agent',
+  buyer: 'buyer',
+  seller: 'seller',
+  admin: 'admin',
+  tc: 'tc',
+  lending_partner: 'agent',
+};
+
+const ROLE_DISPLAY: Record<string, string> = {
+  agent: 'Agent',
+  buyer: 'Buyer',
+  seller: 'Seller',
+  admin: 'Admin',
+  tc: 'Transaction Coordinator',
+  lending_partner: 'Lending Partner',
+};
 
 type AuthStore = {
-  activeUserId: string;
-  activeUser: MockUser | undefined;
+  activeUser: AppUser | undefined;
+  isLoaded: boolean;
+  setFromAuth0: (id: string, name: string, email: string, role: string, avatar?: string) => void;
   setActiveUser: (userId: string) => void;
 };
 
 export const useAuthStore = create<AuthStore>((set) => ({
-  activeUserId: DEFAULT_USER_ID,
-  activeUser: MOCK_USERS.find((u) => u.id === DEFAULT_USER_ID),
-  setActiveUser: (userId: string) => {
+  activeUser: undefined,
+  isLoaded: false,
+  setFromAuth0: (id, name, email, role, avatar) => {
+    const groupId = ROLE_TO_GROUP[role] ?? 'agent';
     set({
-      activeUserId: userId,
-      activeUser: MOCK_USERS.find((u) => u.id === userId),
+      isLoaded: true,
+      activeUser: {
+        id,
+        name,
+        email,
+        avatar: avatar || `https://i.pravatar.cc/100?u=${encodeURIComponent(id)}`,
+        groupId,
+        role: ROLE_DISPLAY[role] ?? role,
+        dealIds: [],
+      },
     });
+  },
+  setActiveUser: (userId: string) => {
+    const user = MOCK_USERS.find((u) => u.id === userId);
+    if (user) set({ activeUser: user });
   },
 }));

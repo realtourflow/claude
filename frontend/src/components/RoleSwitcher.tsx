@@ -21,7 +21,9 @@ function getHomeUrl(userId: string, groupId: GroupId): string {
 }
 
 export function RoleSwitcher() {
-  const { activeUserId, activeUser, setActiveUser } = useAuthStore();
+  if (!import.meta.env.DEV) return null;
+
+  const { activeUser, setActiveUser } = useAuthStore();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
 
@@ -64,7 +66,7 @@ export function RoleSwitcher() {
       </div>
       <div className="flex flex-col gap-1">
         {MOCK_USERS.map((user) => {
-          const isActive = user.id === activeUserId;
+          const isActive = user.id === activeUser?.id;
           const dotColor = GROUP_DOT_COLORS[user.groupId];
           return (
             <button
