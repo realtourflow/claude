@@ -46,6 +46,40 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
   };
 }
 
+export function useDeal(id: string | undefined) {
+  const [deal, setDeal] = useState<Deal | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      setError(null);
+      const raw = await api.get<ApiDeal>(`/deals/${id}`);
+      setDeal(apiDealToFrontend(raw));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load deal');
+      setDeal(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { deal, loading, error, refresh: load };
+}
+
+export async function patchStage(dealId: string, stage: string): Promise<ApiDeal> {
+  return api.patch<ApiDeal>(`/deals/${dealId}/stage`, { stage });
+}
+
 export function useDeals() {
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);

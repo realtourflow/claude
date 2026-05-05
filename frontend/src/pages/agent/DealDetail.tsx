@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getDealById, Deal, DealStage, LoanMilestones } from '../../data/mockDeals';
+import { Deal, DealStage, LoanMilestones } from '../../data/mockDeals';
+import { useDeal, patchStage } from '../../hooks/useDeals';
 import { useAuthStore } from '../../store/authStore';
 import { usePermission } from '../../permissions/usePermission';
 import { PERMISSIONS } from '../../permissions/permissions';
@@ -2969,11 +2970,28 @@ export default function DealDetail() {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
 
-  const deal = dealId ? getDealById(dealId) : undefined;
+  const { deal: apiDeal, loading: dealLoading, refresh: refreshDeal } = useDeal(dealId);
   const { stageByDeal, setStage } = useDealStageStore();
   const { addTask } = useTaskStore();
+  const addClientNotification = useNotificationStore((s) => s.addClientNotification);
 
-  if (!deal) {
+  if (dealLoading) {
+    return (
+      <div className="max-w-3xl">
+        <button
+          onClick={() => navigate(-1)}
+          className="mb-4 flex items-center gap-1.5 text-sm text-gray-400 hover:text-brand-navy transition-colors"
+        >
+          <ArrowLeft size={14} /> Back
+        </button>
+        <div className="rounded-xl bg-white p-10 text-center shadow-sm">
+          <p className="text-gray-400">Loading deal…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!apiDeal) {
     return (
       <div className="max-w-3xl">
         <button
@@ -2989,10 +3007,10 @@ export default function DealDetail() {
     );
   }
 
+  const deal = apiDeal;
   const stage = stageByDeal[deal.id] ?? deal.stage;
   const localDeal = { ...deal, stage };
   const canAdvanceStage = ['agent', 'tc', 'admin'].includes(activeUser?.groupId ?? '');
-  const addClientNotification = useNotificationStore((s) => s.addClientNotification);
 
   const CLIENT_STAGE_MESSAGES: Partial<Record<DealStage, { title: string; body: string }>> = {
     active_search: {
@@ -3033,11 +3051,18 @@ export default function DealDetail() {
     setShowAdvanceModal(true);
   }
 
-  function handleAdvanceConfirm(_draftMessage: string) {
+  async function handleAdvanceConfirm(_draftMessage: string) {
     const idx = STAGE_ORDER.indexOf(stage);
     if (idx < STAGE_ORDER.length - 1) {
       const nextStage = STAGE_ORDER[idx + 1];
+      try {
+        await patchStage(deal.id, nextStage);
+      } catch {
+        setShowAdvanceModal(false);
+        return;
+      }
       setStage(deal.id, nextStage);
+      refreshDeal();
       const msg = CLIENT_STAGE_MESSAGES[nextStage];
       if (msg) {
         addClientNotification({ dealId: deal.id, title: msg.title, body: msg.body });
@@ -3061,9 +3086,18 @@ export default function DealDetail() {
     setShowAdvanceModal(false);
   }
 
-  function retreatStage() {
+  async function retreatStage() {
     const idx = STAGE_ORDER.indexOf(stage);
-    if (idx > 0) setStage(deal.id, STAGE_ORDER[idx - 1]);
+    if (idx > 0) {
+      const prevStage = STAGE_ORDER[idx - 1];
+      try {
+        await patchStage(deal.id, prevStage);
+      } catch {
+        return;
+      }
+      setStage(deal.id, prevStage);
+      refreshDeal();
+    }
   }
 
   const tasks = getTasksByDealId(deal.id);
