@@ -121,7 +121,8 @@ VITE_AUTH0_AUDIENCE=https://api.realtourflow.com
 | Migration | Description | Local | **Production** |
 |---|---|---|---|
 | 000001_init | Full schema: users, deals, tasks, documents, messages, deal_stage_history | ✅ Applied | ✅ Applied |
-| 000002_add_task_fields | Adds priority, source, stage_context, role columns to tasks | ✅ Applied | ✅ Applied on next deploy |
+| 000002_add_task_fields | Adds priority, source, stage_context, role columns to tasks | ✅ Applied | ✅ Applied |
+| 000003_add_message_channel | Adds channel column (client_thread / internal) to messages | ✅ Applied | ✅ Applied on next deploy |
 
 ---
 
@@ -140,6 +141,8 @@ All routes are mounted at `/api`. Protected routes require `Authorization: Beare
 | GET | /deals/:dealId/tasks | ✅ | ListTasks | Ownership-checked via deal |
 | POST | /deals/:dealId/tasks | ✅ | CreateTask | Creates task; auto-tasks posted here on stage advance |
 | PATCH | /tasks/:taskId/status | ✅ | UpdateTaskStatus | Ownership-checked via deal join |
+| GET | /deals/:dealId/messages | ✅ | ListMessages | `?channel=client_thread\|internal`; JOIN users for sender name/role |
+| POST | /deals/:dealId/messages | ✅ | CreateMessage | CTE insert+join; returns full message with sender info |
 
 ### Auth0 JWT custom claims
 
@@ -174,7 +177,7 @@ This tracks what's wired to the real database vs what still uses mock data.
 | Feature | Mock file | Notes |
 |---|---|---|
 | authStore (active user) | ~~wired to real Auth0~~ | **Closed.** `setFromAuth0()` populates authStore from `/users/sync` response. `RoleSwitcher` is dev-only. |
-| Messages tab | `data/mockMessages.ts` | Input field is a UI stub — no send |
+| Messages tab | ~~wired to real API~~ | **Closed.** `GET/POST /deals/:id/messages?channel=` live. 10s polling. Send wired. |
 | Documents tab | Hardcoded in `DealDetail.tsx` (DEAL_DOCS) | Static mock list |
 | Vendor directory | `store/vendorStore.ts` + `data/mockVendors.ts` | Fully functional UI, writes nowhere |
 | Loan milestones | `data/mockDeals.ts` | ARIVE integration not yet built |
@@ -277,7 +280,7 @@ Follow this checklist on every push that includes backend changes:
 In rough priority order:
 
 1. **Update ALLOWED_ORIGINS** — set real production frontend domain in task-definition.json once frontend is deployed
-2. **Messages backend** — `POST /deals/:id/messages`, `GET /deals/:id/messages` with WebSocket or polling
+2. **Documents backend** — S3 upload, `POST /deals/:id/documents`, `GET /deals/:id/documents`
 5. **Documents backend** — S3 upload, `POST /deals/:id/documents`, `GET /deals/:id/documents`
 6. **Vendor persistence** — `GET/POST/PATCH/DELETE /vendors`, agent-scoped preferred vendor list
 7. **Deal health computation** — server-side scoring: green/yellow/red based on task status + days in stage
