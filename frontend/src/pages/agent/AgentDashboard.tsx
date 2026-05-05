@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
-import { MOCK_DEALS, Deal } from '../../data/mockDeals';
+import { Deal } from '../../data/mockDeals';
 import { MOCK_TASKS, Task } from '../../data/mockTasks';
+import { useDeals } from '../../hooks/useDeals';
 import { useNotificationStore, AgentNotification } from '../../store/notificationStore';
 import { useTaskStore } from '../../store/taskStore';
 import { TrendingUp, Layers, CheckSquare, ArrowRight, Clock, AlertCircle, CheckCircle2, DollarSign, Zap, Share2, X, Phone } from 'lucide-react';
@@ -119,7 +120,9 @@ function DealCard({ deal }: { deal: Deal }) {
           <span className="font-semibold text-brand-navy text-sm truncate">{deal.clientName}</span>
           <span className={`flex-shrink-0 inline-block h-2 w-2 rounded-full ${HEALTH_DOT[deal.health]}`} />
         </div>
-        <div className="text-xs text-gray-400 truncate">{deal.property.address}, {deal.property.city}</div>
+        <div className="text-xs text-gray-400 truncate">
+          {[deal.property.address, deal.property.city].filter(Boolean).join(', ')}
+        </div>
       </div>
       <div className="text-right flex-shrink-0">
         <div className="text-xs font-semibold text-brand-navy">{STAGE_LABELS[deal.stage]}</div>
@@ -225,9 +228,8 @@ export default function AgentDashboard() {
   const unread = notifications.filter((n) => !n.read);
 
   const addedTasksFromStore = useTaskStore((s) => s.addedTasks);
+  const { deals: agentDeals } = useDeals();
 
-  // Filter to this agent's deals
-  const agentDeals = MOCK_DEALS.filter((d) => d.agentId === activeUser?.id);
   const allTasks = [...MOCK_TASKS, ...addedTasksFromStore].filter((t) =>
     agentDeals.some((d) => d.id === t.dealId)
   );

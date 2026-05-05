@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
-import { MOCK_DEALS, Deal, DealType } from '../../data/mockDeals';
+import { Deal, DealType } from '../../data/mockDeals';
 import { MOCK_TASKS } from '../../data/mockTasks';
+import { useDeals, apiDealToFrontend, type ApiDeal } from '../../hooks/useDeals';
+import { api } from '../../api/client';
 import { ArrowRight, MapPin, Calendar, Clock, Zap, Plus, X } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -73,55 +75,51 @@ const EMPTY_FORM: NewDealForm = {
 };
 
 function NewDealModal({
-  agentId,
   onClose,
   onCreated,
 }: {
-  agentId: string;
   onClose: () => void;
-  onCreated: (deal: Deal) => void;
+  onCreated: () => void;
 }) {
   const [form, setForm] = useState<NewDealForm>(EMPTY_FORM);
   const [addressTbd, setAddressTbd] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   function set(field: keyof NewDealForm, value: string) {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setSubmitting(true);
+    setSubmitError(null);
     const price = parseFloat(form.price.replace(/[^0-9.]/g, ''));
-    const newDeal: Deal = {
-      id: `deal-${Date.now()}`,
-      type: form.type,
-      clientName: form.clientName.trim(),
-      clientId: `client-${Date.now()}`,
-      agentId,
-      stage: 'intake',
-      health: 'green',
-      priority: 'medium',
-      property: {
-        address: addressTbd ? 'TBD' : form.address.trim(),
-        city: addressTbd ? '' : form.city.trim(),
-        state: addressTbd ? '' : form.state.trim(),
-        zip: addressTbd ? '' : form.zip.trim(),
-        price: isNaN(price) ? 0 : price,
-      },
-      timeline: {
-        createdAt: new Date().toISOString(),
-        closingDate: form.closingDate || undefined,
-        daysInStage: 0,
-        daysToClose: form.closingDate
-          ? Math.max(0, Math.round((new Date(form.closingDate).getTime() - Date.now()) / 86_400_000))
-          : undefined,
-      },
-      flags: [],
-      status: 'active',
-      estimatedCommission: isNaN(price) ? 0 : Math.round(price * 0.03),
-    };
-    onCreated(newDeal);
-    setSubmitted(true);
+    const fullAddress = addressTbd
+      ? null
+      : [
+          form.address.trim(),
+          [form.city.trim(), form.state.trim(), form.zip.trim()].filter(Boolean).join(' '),
+        ]
+          .filter(Boolean)
+          .join(', ') || null;
+
+    try {
+      await api.post<ApiDeal>('/deals', {
+        title: form.clientName.trim(),
+        type: form.type,
+        address: fullAddress,
+        price: isNaN(price) ? null : price,
+        arive_linked: false,
+      });
+      setSubmitted(true);
+      onCreated();
+    } catch {
+      setSubmitError('Failed to create deal. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (submitted) {
@@ -302,21 +300,28 @@ function NewDealModal({
         </form>
 
         {/* Footer */}
-        <div className="flex gap-3 px-6 py-4 border-t border-gray-100">
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex-1 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            form="new-deal-form"
-            className="flex-1 rounded-xl bg-brand-gold px-4 py-2.5 text-sm font-bold text-brand-navy hover:bg-brand-gold-dark transition-colors shadow-sm"
-          >
-            Create Deal
-          </button>
+        <div className="px-6 py-4 border-t border-gray-100 space-y-3">
+          {submitError && (
+            <p className="text-xs text-red-500 text-center">{submitError}</p>
+          )}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="flex-1 rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="new-deal-form"
+              disabled={submitting}
+              className="flex-1 rounded-xl bg-brand-gold px-4 py-2.5 text-sm font-bold text-brand-navy hover:bg-brand-gold-dark transition-colors shadow-sm disabled:opacity-40"
+            >
+              {submitting ? 'Creating…' : 'Create Deal'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -349,7 +354,9 @@ function DealCard({ deal }: { deal: Deal }) {
             </div>
             <div className="flex items-center gap-1 text-xs text-gray-400">
               <MapPin size={11} className="flex-shrink-0" />
-              <span className="truncate">{deal.property.address}, {deal.property.city}, {deal.property.state}</span>
+              <span className="truncate">
+                {[deal.property.address, deal.property.city, deal.property.state].filter(Boolean).join(', ')}
+              </span>
             </div>
           </div>
           <div className="flex-shrink-0 text-right">
@@ -478,11 +485,9 @@ export default function Pipeline() {
   const activeUser = useAuthStore((s) => s.activeUser);
   const [filter, setFilter] = useState<FilterType>('all');
   const [showNewDeal, setShowNewDeal] = useState(false);
-  const [localDeals, setLocalDeals] = useState<Deal[]>(MOCK_DEALS);
+  const { deals, loading, error, refresh } = useDeals();
 
-  const agentDeals = localDeals.filter((d) => d.agentId === activeUser?.id);
-
-  const filteredDeals = agentDeals.filter((d) => {
+  const filteredDeals = deals.filter((d) => {
     if (filter === 'buy') return d.type === 'buy';
     if (filter === 'sell') return d.type === 'sell';
     return true;
@@ -494,12 +499,8 @@ export default function Pipeline() {
     return acc;
   }, {});
 
-  const buyCount = agentDeals.filter((d) => d.type === 'buy').length;
-  const sellCount = agentDeals.filter((d) => d.type === 'sell').length;
-
-  function handleDealCreated(deal: Deal) {
-    setLocalDeals((prev) => [deal, ...prev]);
-  }
+  const buyCount = deals.filter((d) => d.type === 'buy').length;
+  const sellCount = deals.filter((d) => d.type === 'sell').length;
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -508,8 +509,7 @@ export default function Pipeline() {
         <div>
           <h1 className="text-2xl font-bold text-brand-navy">Pipeline</h1>
           <p className="mt-0.5 text-sm text-gray-500">
-            {agentDeals.length} active deal{agentDeals.length !== 1 ? 's' : ''} ·{' '}
-            {buyCount} buyer{buyCount !== 1 ? 's' : ''} · {sellCount} seller{sellCount !== 1 ? 's' : ''}
+            {loading ? 'Loading…' : `${deals.length} active deal${deals.length !== 1 ? 's' : ''} · ${buyCount} buyer${buyCount !== 1 ? 's' : ''} · ${sellCount} seller${sellCount !== 1 ? 's' : ''}`}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -525,7 +525,15 @@ export default function Pipeline() {
       </div>
 
       {/* Deals grouped by stage */}
-      {filteredDeals.length === 0 ? (
+      {error ? (
+        <div className="rounded-xl bg-red-50 p-6 text-center shadow-sm">
+          <p className="text-sm text-red-600">{error}</p>
+        </div>
+      ) : loading ? (
+        <div className="rounded-xl bg-white p-10 text-center shadow-sm">
+          <p className="text-gray-400">Loading deals…</p>
+        </div>
+      ) : filteredDeals.length === 0 ? (
         <div className="rounded-xl bg-white p-10 text-center shadow-sm">
           <p className="text-gray-400">No deals match this filter.</p>
         </div>
@@ -539,9 +547,8 @@ export default function Pipeline() {
 
       {showNewDeal && activeUser && (
         <NewDealModal
-          agentId={activeUser.id}
           onClose={() => setShowNewDeal(false)}
-          onCreated={handleDealCreated}
+          onCreated={refresh}
         />
       )}
     </div>
