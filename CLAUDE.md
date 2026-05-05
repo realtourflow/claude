@@ -173,7 +173,7 @@ This tracks what's wired to the real database vs what still uses mock data.
 
 | Feature | Mock file | Notes |
 |---|---|---|
-| authStore (active user) | `store/authStore.ts` + `data/mockUsers.ts` | Uses `RoleSwitcher` with hardcoded mock users. Auth0 is wired for JWT but the app still reads identity from `useAuthStore` which uses mock data. This identity gap is the next major wiring task. |
+| authStore (active user) | ~~wired to real Auth0~~ | **Closed.** `setFromAuth0()` populates authStore from `/users/sync` response. `RoleSwitcher` is dev-only. |
 | Messages tab | `data/mockMessages.ts` | Input field is a UI stub — no send |
 | Documents tab | Hardcoded in `DealDetail.tsx` (DEAL_DOCS) | Static mock list |
 | Vendor directory | `store/vendorStore.ts` + `data/mockVendors.ts` | Fully functional UI, writes nowhere |
@@ -193,29 +193,29 @@ This tracks what's wired to the real database vs what still uses mock data.
 
 ---
 
-## Auth Architecture — Two Layers (Important)
+## Auth Architecture
 
-There are currently two identity systems running in parallel:
+Single unified identity system — Auth0 JWT is the source of truth end-to-end.
 
-**Layer 1 — Auth0 JWT (backend-facing)**
+**Auth0 JWT (backend-facing)**
 - `Auth0Provider` in `main.tsx` wraps the whole app
-- `AuthSetup.tsx` calls `setTokenGetter(getAccessTokenSilently)` so all `api.*` calls
-  attach a real Bearer token
-- `AuthSetup.tsx` also calls `POST /users/sync` on login to upsert the user in the DB
+- `AuthSetup.tsx` calls `setTokenGetter(getAccessTokenSilently)` so all `api.*` calls attach a real Bearer token
 - The backend validates every protected request via JWKS
 
-**Layer 2 — Mock authStore (frontend-facing)**
-- `useAuthStore` reads from `MOCK_USERS` and `DEFAULT_USER_ID`
-- `RoleSwitcher` component lets you flip between 9 hardcoded mock users
-- Almost every component reads `useAuthStore` for `activeUser` (name, role, permissions)
-- `usePermission` and `PermissionGate` derive from the mock user's `groupId`
+**authStore (frontend-facing)**
+- On login, `AuthSetup.tsx` calls `POST /users/sync` to upsert the user in the DB
+- The sync response (DB UUID, name, email, role) is passed to `authStore.setFromAuth0()`
+- `authStore.activeUser` is now the real Auth0-authenticated user — name, email, DB UUID, groupId, permissions
+- `usePermission` / `PermissionGate` derive from `activeUser.groupId` (mapped from Auth0 role claim)
+- `authStore.isLoaded` is `false` until the sync completes; `RootRedirect` waits on this before routing
 
-**The gap:** Auth0 knows who is really logged in. The app's UI still thinks it's whoever
-the `RoleSwitcher` is set to. Closing this gap — reading real user identity from Auth0 and
-populating `authStore` accordingly — is the next major architecture task.
+**Role → GroupId mapping** (in `authStore.ts`):
+- `agent` → `agent`, `buyer` → `buyer`, `seller` → `seller`, `admin` → `admin`, `tc` → `tc`, `lending_partner` → `agent`
 
-Until that's done: the app works for a single agent (Paul) in local dev with
-`RoleSwitcher` set to `agent-sarah`, but won't correctly handle multiple real agents.
+**Dev RoleSwitcher**
+- Still present in dev (`import.meta.env.DEV`) for testing buyer/seller/TC views
+- Calls `setActiveUser(mockId)` to override identity with a mock user; navigate is handled by the switcher itself
+- Invisible / no-op in production builds
 
 ---
 
@@ -235,7 +235,7 @@ Until that's done: the app works for a single agent (Paul) in local dev with
 | `frontend/src/api/AuthSetup.tsx` | Wires Auth0 token getter + fires /users/sync on login |
 | `frontend/src/hooks/useDeals.ts` | `useDeals()`, `useDeal()`, `apiDealToFrontend()`, `patchStage()` |
 | `frontend/src/hooks/useTasks.ts` | `useTasks()`, `patchTaskStatus()`, `postTask()` |
-| `frontend/src/store/authStore.ts` | Mock identity — replace with Auth0 identity when ready |
+| `frontend/src/store/authStore.ts` | Real identity — `AppUser` type, `setFromAuth0()`, `isLoaded` flag |
 | `frontend/src/data/mockDeals.ts` | Frontend `Deal` type definition (authoritative) |
 | `frontend/src/data/mockTasks.ts` | Frontend `Task` type definition (authoritative) |
 | `frontend/src/pages/agent/Pipeline.tsx` | Deal list page — uses `useDeals()` |
@@ -277,8 +277,7 @@ Follow this checklist on every push that includes backend changes:
 In rough priority order:
 
 1. **Update ALLOWED_ORIGINS** — set real production frontend domain in task-definition.json once frontend is deployed
-2. **Close the Auth0 ↔ authStore identity gap** — read the real Auth0 user into `authStore` so role-switching and multi-agent scenarios work correctly
-4. **Messages backend** — `POST /deals/:id/messages`, `GET /deals/:id/messages` with WebSocket or polling
+2. **Messages backend** — `POST /deals/:id/messages`, `GET /deals/:id/messages` with WebSocket or polling
 5. **Documents backend** — S3 upload, `POST /deals/:id/documents`, `GET /deals/:id/documents`
 6. **Vendor persistence** — `GET/POST/PATCH/DELETE /vendors`, agent-scoped preferred vendor list
 7. **Deal health computation** — server-side scoring: green/yellow/red based on task status + days in stage
