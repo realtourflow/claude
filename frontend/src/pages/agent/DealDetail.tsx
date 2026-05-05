@@ -9,7 +9,7 @@ import { useTaskStore } from '../../store/taskStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { Task } from '../../data/mockTasks';
 import { useTasks, patchTaskStatus, postTask } from '../../hooks/useTasks';
-import { getMessagesByDealId } from '../../data/mockMessages';
+import { useMessages, postMessage, MessageChannel } from '../../hooks/useMessages';
 import {
   ArrowLeft,
   MapPin,
@@ -1666,28 +1666,51 @@ const AVATAR_COLOR: Record<string, string> = {
 
 function MessagesTab({ deal }: { deal: Deal }) {
   const { can } = usePermission();
-  const canSeeInternal = can(PERMISSIONS.MESSAGE_VIEW) && can(PERMISSIONS.MESSAGE_PIN); // proxy: agent/tc/admin
-  const allMessages = getMessagesByDealId(deal.id);
-  const [channel, setChannel] = useState<'client_thread' | 'internal'>('client_thread');
+  const canSeeInternal = can(PERMISSIONS.MESSAGE_VIEW) && can(PERMISSIONS.MESSAGE_PIN);
+  const [channel, setChannel] = useState<MessageChannel>('client_thread');
+  const { messages, loading, refresh } = useMessages(deal.id, channel);
+  const activeUser = useAuthStore((s) => s.activeUser);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
 
-  const messages = allMessages.filter((m) => m.channel === channel);
+  async function handleSend() {
+    const body = draft.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      await postMessage(deal.id, channel, body);
+      setDraft('');
+      await refresh();
+    } catch {
+      // leave draft intact so the user can retry
+    } finally {
+      setSending(false);
+    }
+  }
 
   function Thread() {
+    if (loading && messages.length === 0) {
+      return (
+        <div className="flex items-center justify-center py-10">
+          <Loader2 size={16} className="animate-spin text-gray-300" />
+        </div>
+      );
+    }
     return (
       <div className="p-4 space-y-4">
         {messages.length === 0 && (
           <p className="py-8 text-center text-sm text-gray-400">No messages yet.</p>
         )}
         {messages.map((msg) => {
-          const isAgent = msg.senderRole === 'agent';
+          const isMe = msg.senderId === activeUser?.id;
           const avatarColor = AVATAR_COLOR[msg.senderRole] ?? 'bg-gray-400';
           return (
-            <div key={msg.id} className={`flex gap-3 ${isAgent ? 'flex-row-reverse' : 'flex-row'}`}>
+            <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
               <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white text-xs font-bold ${avatarColor}`}>
                 {msg.senderName.charAt(0)}
               </div>
-              <div className={`flex-1 max-w-[80%] ${isAgent ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
-                <div className={`flex items-center gap-2 text-xs text-gray-400 ${isAgent ? 'flex-row-reverse' : ''}`}>
+              <div className={`flex-1 max-w-[80%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+                <div className={`flex items-center gap-2 text-xs text-gray-400 ${isMe ? 'flex-row-reverse' : ''}`}>
                   <span className="font-medium text-gray-600">{msg.senderName}</span>
                   {msg.senderRole === 'tc' && (
                     <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">TC</span>
@@ -1700,7 +1723,7 @@ function MessagesTab({ deal }: { deal: Deal }) {
                   <span>{formatTimestamp(msg.timestamp)}</span>
                 </div>
                 <div className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                  isAgent
+                  isMe
                     ? 'bg-brand-navy text-white rounded-tr-sm'
                     : channel === 'internal'
                     ? 'bg-amber-50 text-gray-800 rounded-tl-sm border border-amber-100'
@@ -1769,11 +1792,24 @@ function MessagesTab({ deal }: { deal: Deal }) {
         <div className="flex items-center gap-2">
           <input
             type="text"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             placeholder={channel === 'internal' ? 'Message your TC...' : 'Message the client...'}
-            className="flex-1 rounded-full border border-gray-200 bg-brand-bg px-4 py-2 text-sm outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+            className="flex-1 rounded-full border border-gray-200 bg-brand-bg px-4 py-2 text-sm outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 disabled:opacity-50"
+            disabled={sending}
           />
-          <button className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-navy text-white hover:bg-brand-navy/80 transition-colors">
-            <ChevronRight size={16} />
+          <button
+            onClick={handleSend}
+            disabled={!draft.trim() || sending}
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-navy text-white hover:bg-brand-navy/80 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {sending ? <Loader2 size={14} className="animate-spin" /> : <ChevronRight size={16} />}
           </button>
         </div>
       </div>
@@ -3110,7 +3146,6 @@ export default function DealDetail() {
   const dealDocs = DEAL_DOCS[deal.id] ?? [];
   const tabCounts: Partial<Record<TabId, number>> = {
     tasks: dealTasks.filter((t) => t.status !== 'completed').length,
-    messages: getMessagesByDealId(deal.id).length,
     documents: dealDocs.length,
   };
 

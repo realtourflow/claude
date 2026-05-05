@@ -33,6 +33,9 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Get("/deals/{dealId}/tasks", h.ListTasks)
 		r.Post("/deals/{dealId}/tasks", h.CreateTask)
 		r.Patch("/tasks/{taskId}/status", h.UpdateTaskStatus)
+
+		r.Get("/deals/{dealId}/messages", h.ListMessages)
+		r.Post("/deals/{dealId}/messages", h.CreateMessage)
 	})
 
 	return r
