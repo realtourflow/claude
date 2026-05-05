@@ -11,6 +11,8 @@ type Config struct {
 	AllowedOrigins []string
 	Auth0Domain    string
 	Auth0Audience  string
+	S3Bucket       string
+	AWSRegion      string
 }
 
 func Load() *Config {
@@ -20,6 +22,8 @@ func Load() *Config {
 		AllowedOrigins: strings.Split(getEnv("ALLOWED_ORIGINS", "http://localhost:5173"), ","),
 		Auth0Domain:    getEnv("AUTH0_DOMAIN", ""),
 		Auth0Audience:  getEnv("AUTH0_AUDIENCE", ""),
+		S3Bucket:       getEnv("S3_BUCKET", "realtourflow-documents"),
+		AWSRegion:      getEnv("AWS_REGION", "us-east-1"),
 	}
 }
 

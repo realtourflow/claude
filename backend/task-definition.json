@@ -5,6 +5,7 @@
   "cpu": "256",
   "memory": "512",
   "executionRoleArn": "arn:aws:iam::508859666048:role/realtourflow-task-execution-role",
+  "taskRoleArn": "arn:aws:iam::508859666048:role/realtourflow-task-execution-role",
   "containerDefinitions": [
     {
       "name": "realtourflow-api",
@@ -37,6 +38,14 @@
         {
           "name": "ALLOWED_ORIGINS",
           "value": "http://localhost:5173"
+        },
+        {
+          "name": "S3_BUCKET",
+          "value": "realtourflow-documents"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
         }
       ],
       "logConfiguration": {

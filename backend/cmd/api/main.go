@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -9,19 +10,21 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
-	"realtourflow/internal/config"
+	appconfig "realtourflow/internal/config"
 	"realtourflow/internal/db"
 	"realtourflow/internal/handlers"
 	"realtourflow/internal/middleware"
 )
 
 func main() {
-	cfg := config.Load()
+	cfg := appconfig.Load()
 
 	database, err := db.Connect(cfg.DatabaseURL)
 	if err != nil {
@@ -33,13 +36,21 @@ func main() {
 		log.Fatalf("migrations failed: %v", err)
 	}
 
+	awsCfg, err := config.LoadDefaultConfig(context.Background(),
+		config.WithRegion(cfg.AWSRegion),
+	)
+	if err != nil {
+		log.Fatalf("failed to load AWS config: %v", err)
+	}
+	s3Client := s3.NewFromConfig(awsCfg)
+
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
-	h := handlers.New(database)
+	h := handlers.New(database, s3Client, cfg.S3Bucket)
 	r.Mount("/api", h.Routes(middleware.Auth0(cfg.Auth0Domain, cfg.Auth0Audience)))
 
 	srv := &http.Server{

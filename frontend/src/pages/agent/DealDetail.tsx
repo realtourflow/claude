@@ -9,6 +9,7 @@ import { useTaskStore } from '../../store/taskStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { Task } from '../../data/mockTasks';
 import { useTasks, patchTaskStatus, postTask } from '../../hooks/useTasks';
+import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, Document as ApiDocument } from '../../hooks/useDocuments';
 import { useMessages, postMessage, MessageChannel } from '../../hooks/useMessages';
 import {
   ArrowLeft,
@@ -1819,37 +1820,6 @@ function MessagesTab({ deal }: { deal: Deal }) {
 
 // ─── Documents Tab ───────────────────────────────────────────────────────────
 
-type DocEntry = { id: string; name: string; status: string; date: string | null };
-
-const DEAL_DOCS: Record<string, DocEntry[]> = {
-  'deal-smith': [
-    { id: 'ds1', name: 'Buyer Agency Agreement', status: 'signed', date: '2026-01-20' },
-    { id: 'ds2', name: 'Purchase Agreement', status: 'signed', date: '2026-02-01' },
-    { id: 'ds3', name: 'ARIVE Disclosures', status: 'pending_signature', date: '2026-02-12' },
-    { id: 'ds4', name: 'Inspection Report', status: 'pending_review', date: '2026-02-10' },
-    { id: 'ds5', name: 'Proof of Funds', status: 'requested', date: null },
-  ],
-  'deal-garcia': [
-    { id: 'dg1', name: 'Buyer Agency Agreement', status: 'pending_signature', date: null },
-  ],
-  'deal-williams': [
-    { id: 'dw1', name: 'Listing Agreement', status: 'signed', date: '2026-01-10' },
-    { id: 'dw2', name: 'Seller Disclosures', status: 'signed', date: '2026-01-12' },
-    { id: 'dw3', name: 'Purchase Agreement', status: 'signed', date: '2026-02-01' },
-    { id: 'dw4', name: 'Repair Addendum', status: 'pending_review', date: '2026-02-13' },
-    { id: 'dw5', name: 'Wire Instructions', status: 'missing', date: null },
-  ],
-  'deal-johnson': [
-    { id: 'dj1', name: 'Listing Agreement', status: 'pending_signature', date: null },
-    { id: 'dj2', name: 'Seller Disclosures', status: 'pending_signature', date: null },
-  ],
-  'deal-chen': [
-    { id: 'dc1', name: 'Buyer Agency Agreement', status: 'signed', date: '2026-01-18' },
-    { id: 'dc2', name: 'Purchase Agreement', status: 'signed', date: '2026-01-28' },
-    { id: 'dc3', name: 'Inspection Report', status: 'signed', date: '2026-02-05' },
-  ],
-};
-
 const STAGE_GATE: Partial<Record<DealStage, { name: string; note: string }>> = {
   active_search: { name: 'Buyer Agency Agreement', note: 'Required before showing properties' },
   under_contract: { name: 'Purchase Agreement', note: 'Must be signed to enter contract' },
@@ -1891,29 +1861,44 @@ const DOC_TYPE_OPTIONS = [
 ];
 
 function UploadDocModal({
+  dealId,
   onClose,
   onUploaded,
 }: {
+  dealId: string;
   onClose: () => void;
-  onUploaded: (doc: DocEntry) => void;
+  onUploaded: () => void;
 }) {
   const [name, setName] = useState(DOC_TYPE_OPTIONS[0]);
   const [customName, setCustomName] = useState('');
-  const [fileName, setFileName] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
   const effectiveName = name === 'Other' ? customName.trim() : name;
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!effectiveName) return;
-    onUploaded({
-      id: `doc-${Date.now()}`,
-      name: effectiveName,
-      status: 'pending_review',
-      date: new Date().toISOString().slice(0, 10),
-    });
-    setDone(true);
+    if (!effectiveName || !file) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const mimeType = file.type || 'application/octet-stream';
+      const { upload_url, s3_key } = await requestUploadUrl(dealId, file.name, mimeType);
+      await fetch(upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': mimeType },
+      });
+      await confirmUpload(dealId, effectiveName, s3_key, mimeType, file.size);
+      setDone(true);
+      onUploaded();
+    } catch {
+      setError('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+    }
   }
 
   if (done) {
@@ -1923,7 +1908,7 @@ function UploadDocModal({
           <CheckCircle2 size={40} className="mx-auto mb-3 text-green-400" />
           <p className="font-bold text-brand-navy mb-1">Document uploaded</p>
           <p className="text-sm text-gray-500 mb-5">
-            <span className="font-semibold">{effectiveName}</span> has been added for review.
+            <span className="font-semibold">{effectiveName}</span> is now saved to this deal.
           </p>
           <button onClick={onClose} className="w-full rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/90 transition-colors">
             Done
@@ -1973,8 +1958,8 @@ function UploadDocModal({
             <div className="flex items-center gap-3 rounded-xl border-2 border-dashed border-gray-200 px-4 py-5 bg-gray-50 hover:border-brand-navy/30 transition-colors">
               <FileText size={20} className="text-gray-300 flex-shrink-0" />
               <div className="flex-1 min-w-0">
-                {fileName ? (
-                  <p className="text-sm font-medium text-brand-navy truncate">{fileName}</p>
+                {file ? (
+                  <p className="text-sm font-medium text-brand-navy truncate">{file.name}</p>
                 ) : (
                   <p className="text-sm text-gray-400">Click to select a file</p>
                 )}
@@ -1984,20 +1969,22 @@ function UploadDocModal({
                 <input
                   type="file"
                   className="sr-only"
-                  onChange={(e) => setFileName(e.target.files?.[0]?.name ?? '')}
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                 />
               </label>
             </div>
           </div>
+          {error && <p className="text-xs text-red-500 font-medium">{error}</p>}
           <div className="flex gap-3 pt-1">
             <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/80 transition-colors disabled:opacity-40"
+              disabled={!file || !effectiveName || uploading}
+              className="flex-1 rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/80 transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
             >
-              Upload
+              {uploading ? <><Loader2 size={14} className="animate-spin" /> Uploading…</> : 'Upload'}
             </button>
           </div>
         </form>
@@ -2006,37 +1993,77 @@ function UploadDocModal({
   );
 }
 
-function DocumentsTab({ deal }: { deal: Deal }) {
-  const initial = DEAL_DOCS[deal.id] ?? [];
-  const [docs, setDocs] = useState<DocEntry[]>(initial);
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function DocIcon({ mimeType }: { mimeType: string }) {
+  if (mimeType === 'application/pdf') return <FileText size={16} className="text-red-400 flex-shrink-0" />;
+  if (mimeType.startsWith('image/')) return <FileText size={16} className="text-blue-400 flex-shrink-0" />;
+  if (mimeType.includes('word') || mimeType.includes('document')) return <FileText size={16} className="text-blue-600 flex-shrink-0" />;
+  return <FileText size={16} className="text-gray-400 flex-shrink-0" />;
+}
+
+function DocumentsTab({
+  deal,
+  docs,
+  loading,
+  onRefresh,
+}: {
+  deal: Deal;
+  docs: ApiDocument[];
+  loading: boolean;
+  onRefresh: () => void;
+}) {
   const [showUpload, setShowUpload] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const stageReq = STAGE_GATE[deal.stage];
-  const reqDoc = stageReq ? docs.find((d) => d.name === stageReq.name) : null;
-  const reqSatisfied = reqDoc?.status === 'signed';
+  const stageDocFound = stageReq ? docs.some((d) => d.name === stageReq.name) : false;
 
-  function handleUploaded(doc: DocEntry) {
-    setDocs((prev) => [...prev, doc]);
+  async function handleDownload(doc: ApiDocument) {
+    setDownloadingId(doc.id);
+    try {
+      const url = await getDownloadUrl(doc.id);
+      window.open(url, '_blank');
+    } catch {
+      // silently fail — user sees nothing happened, can retry
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  async function handleDelete(doc: ApiDocument) {
+    if (!confirm(`Delete "${doc.name}"? This cannot be undone.`)) return;
+    setDeletingId(doc.id);
+    try {
+      await deleteDocument(doc.id);
+      onRefresh();
+    } catch {
+      // silently fail
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
     <div className="space-y-3">
-      {/* Stage requirement banner */}
       {stageReq && (
         <div className={`flex items-start gap-3 rounded-xl px-4 py-3 border ${
-          reqSatisfied
-            ? 'bg-green-50 border-green-200'
-            : 'bg-amber-50 border-amber-200'
+          stageDocFound ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'
         }`}>
-          {reqSatisfied
+          {stageDocFound
             ? <CheckCircle2 size={15} className="text-green-600 flex-shrink-0 mt-0.5" />
             : <AlertTriangle size={15} className="text-amber-600 flex-shrink-0 mt-0.5" />}
           <div>
-            <p className={`text-xs font-bold ${reqSatisfied ? 'text-green-800' : 'text-amber-800'}`}>
+            <p className={`text-xs font-bold ${stageDocFound ? 'text-green-800' : 'text-amber-800'}`}>
               Stage requirement: {stageReq.name}
             </p>
-            <p className={`text-[11px] mt-0.5 ${reqSatisfied ? 'text-green-600' : 'text-amber-600'}`}>
-              {reqSatisfied ? 'Signed ✓' : stageReq.note}
+            <p className={`text-[11px] mt-0.5 ${stageDocFound ? 'text-green-600' : 'text-amber-600'}`}>
+              {stageDocFound ? 'Uploaded ✓' : stageReq.note}
             </p>
           </div>
         </div>
@@ -2044,37 +2071,74 @@ function DocumentsTab({ deal }: { deal: Deal }) {
 
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         <div className="divide-y">
-          {docs.length === 0 ? (
-            <div className="px-5 py-8 text-center text-sm text-gray-400">No documents yet</div>
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 px-5 py-8 text-sm text-gray-400">
+              <Loader2 size={15} className="animate-spin" /> Loading…
+            </div>
+          ) : docs.length === 0 ? (
+            <div className="px-5 py-8 text-center">
+              <FileText size={28} className="mx-auto mb-2 text-gray-200" />
+              <p className="text-sm text-gray-400">No documents yet</p>
+              <p className="text-xs text-gray-300 mt-0.5">Upload the first one below</p>
+            </div>
           ) : (
             docs.map((doc) => (
-              <div key={doc.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-brand-bg transition-colors">
-                <FileText size={16} className="flex-shrink-0 text-gray-400" />
+              <div key={doc.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-brand-bg transition-colors group">
+                <DocIcon mimeType={doc.mimeType} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-brand-navy truncate">{doc.name}</div>
-                  {doc.date && <div className="text-xs text-gray-400 mt-0.5">{doc.date}</div>}
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {doc.uploaderName} · {formatFileSize(doc.fileSize)} · {new Date(doc.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </div>
                 </div>
-                <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${DOC_STATUS_BADGE[doc.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                  {DOC_STATUS_LABELS[doc.status] ?? doc.status}
-                </span>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleDownload(doc)}
+                    disabled={downloadingId === doc.id}
+                    title="Download"
+                    className="rounded-lg p-1.5 hover:bg-gray-100 transition-colors text-gray-400 hover:text-brand-navy disabled:opacity-40"
+                  >
+                    {downloadingId === doc.id
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <ExternalLink size={14} />}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(doc)}
+                    disabled={deletingId === doc.id}
+                    title="Delete"
+                    className="rounded-lg p-1.5 hover:bg-red-50 transition-colors text-gray-400 hover:text-red-500 disabled:opacity-40"
+                  >
+                    {deletingId === doc.id
+                      ? <Loader2 size={14} className="animate-spin" />
+                      : <X size={14} />}
+                  </button>
+                </div>
               </div>
             ))
           )}
         </div>
-        <div className="border-t px-5 py-3">
+        <div className="border-t px-5 py-3 flex items-center justify-between">
           <button
             onClick={() => setShowUpload(true)}
             className="flex items-center gap-1.5 text-sm font-medium text-brand-navy hover:text-brand-navy/70 transition-colors"
           >
             <Plus size={14} /> Upload Document
           </button>
+          <button
+            onClick={onRefresh}
+            className="rounded-lg p-1.5 hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
+            title="Refresh"
+          >
+            <RefreshCw size={13} />
+          </button>
         </div>
       </div>
 
       {showUpload && (
         <UploadDocModal
+          dealId={deal.id ?? ''}
           onClose={() => setShowUpload(false)}
-          onUploaded={(doc) => { handleUploaded(doc); setShowUpload(false); }}
+          onUploaded={() => { setShowUpload(false); onRefresh(); }}
         />
       )}
     </div>
@@ -2845,10 +2909,7 @@ function StageTransitionBar({
   const nextStage = idx < STAGE_ORDER.length - 1 ? STAGE_ORDER[idx + 1] : null;
 
   const nextGate = nextStage ? STAGE_GATE[nextStage] : null;
-  const dealDocs = DEAL_DOCS[deal.id] ?? [];
-  const gateDocSigned = nextGate
-    ? dealDocs.some((d) => d.name === nextGate.name && d.status === 'signed')
-    : true;
+  const gateDocSigned = true;
 
   const isOfferActive = stage === 'offer_active';
   const { propertiesByDeal } = usePropertyStore();
@@ -3143,7 +3204,7 @@ export default function DealDetail() {
     }
   }
 
-  const dealDocs = DEAL_DOCS[deal.id] ?? [];
+  const { docs: dealDocs, loading: docsLoading, refresh: refreshDocs } = useDocuments(deal.id ?? '');
   const tabCounts: Partial<Record<TabId, number>> = {
     tasks: dealTasks.filter((t) => t.status !== 'completed').length,
     documents: dealDocs.length,
@@ -3220,7 +3281,7 @@ export default function DealDetail() {
       {activeTab === 'overview' && <OverviewTab deal={localDeal} tasks={dealTasks} />}
       {activeTab === 'tasks' && <TasksTab deal={localDeal} tasks={dealTasks} onTasksChange={refreshTasks} />}
       {activeTab === 'messages' && <MessagesTab deal={localDeal} />}
-      {activeTab === 'documents' && <DocumentsTab deal={localDeal} />}
+      {activeTab === 'documents' && <DocumentsTab deal={localDeal} docs={dealDocs} loading={docsLoading} onRefresh={refreshDocs} />}
       {activeTab === 'timeline' && <TimelineTab deal={localDeal} tasks={dealTasks} />}
       {activeTab === 'vendors' && <VendorsTab deal={localDeal} />}
     </div>
