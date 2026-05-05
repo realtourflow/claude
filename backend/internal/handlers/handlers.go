@@ -23,7 +23,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth)
-		// protected routes go here
+		r.Post("/users/sync", h.SyncUser)
 	})
 
 	return r
