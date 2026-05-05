@@ -31,6 +31,7 @@ type Deal struct {
 	AgentID     string    `json:"agent_id"`
 	Type        DealType  `json:"type"`
 	Stage       DealStage `json:"stage"`
+	Health      string    `json:"health"`
 	Title       string    `json:"title"`
 	Address     *string   `json:"address,omitempty"`
 	Price       *float64  `json:"price,omitempty"`

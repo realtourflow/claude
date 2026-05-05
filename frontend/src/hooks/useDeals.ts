@@ -7,6 +7,7 @@ export type ApiDeal = {
   agent_id: string;
   type: 'buy' | 'sell';
   stage: string;
+  health: 'green' | 'yellow' | 'red';
   title: string;
   address: string | null;
   price: number | null;
@@ -24,7 +25,7 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     clientId: '',
     agentId: d.agent_id,
     stage: d.stage as DealStage,
-    health: 'green',
+    health: d.health ?? 'green',
     priority: 'medium',
     property: {
       address: d.address ?? 'TBD',
