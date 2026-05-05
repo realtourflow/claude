@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +10,9 @@ import (
 	"syscall"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 
 	"realtourflow/internal/config"
 	"realtourflow/internal/db"
@@ -24,6 +28,10 @@ func main() {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
 	defer database.Close()
+
+	if err := runMigrations(database); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
 
 	r := chi.NewRouter()
 
@@ -50,4 +58,20 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("shutting down server")
+}
+
+func runMigrations(db *sql.DB) error {
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("create migration driver: %w", err)
+	}
+	m, err := migrate.NewWithDatabaseInstance("file://migrations", "postgres", driver)
+	if err != nil {
+		return fmt.Errorf("create migrator: %w", err)
+	}
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("run migrations: %w", err)
+	}
+	log.Println("migrations up to date")
+	return nil
 }
