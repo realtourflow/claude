@@ -45,6 +45,11 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/deals/{dealId}/documents", h.CreateDocument)
 		r.Get("/documents/{documentId}/download-url", h.GetDownloadURL)
 		r.Delete("/documents/{documentId}", h.DeleteDocument)
+
+		r.Get("/vendors", h.ListVendors)
+		r.Post("/vendors", h.CreateVendor)
+		r.Patch("/vendors/{vendorId}", h.UpdateVendor)
+		r.Delete("/vendors/{vendorId}", h.DeleteVendor)
 	})
 
 	return r

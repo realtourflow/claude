@@ -5,15 +5,14 @@ import {
   Phone, Mail, Globe, Users, UserCheck, FileText, Upload,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { useVendorStore } from '../../store/vendorStore';
 import { useAgentTCStore, MOCK_AGENT_ROSTER, TCInfo } from '../../store/agentTCStore';
 import { useAgentDocStore, DocType, DOC_TYPE_LABELS, AgentDocTemplate } from '../../store/agentDocStore';
 import {
-  PreferredVendor,
   VendorCategory,
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
 } from '../../data/mockVendors';
+import { useVendors, Vendor, VendorInput } from '../../hooks/useVendors';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
@@ -23,10 +22,9 @@ type Tab = 'profile' | 'tc' | 'vendors' | 'my_agents' | 'notifications' | 'integ
 
 // ─── Vendor Modal ─────────────────────────────────────────────────────────────
 
-type VendorFormData = Omit<PreferredVendor, 'id'>;
+type VendorFormData = VendorInput;
 
-const EMPTY_FORM = (agentId: string): VendorFormData => ({
-  agentId,
+const EMPTY_FORM = (): VendorFormData => ({
   category: 'home_inspector',
   company: '',
   contactName: '',
@@ -38,20 +36,16 @@ const EMPTY_FORM = (agentId: string): VendorFormData => ({
 });
 
 function VendorModal({
-  agentId,
   initial,
   onSave,
   onClose,
 }: {
-  agentId: string;
-  initial?: PreferredVendor;
+  initial?: Vendor;
   onSave: (data: VendorFormData) => void;
   onClose: () => void;
 }) {
   const [form, setForm] = useState<VendorFormData>(
-    initial
-      ? { ...initial }
-      : EMPTY_FORM(agentId)
+    initial ? { ...initial } : EMPTY_FORM()
   );
 
   function set<K extends keyof VendorFormData>(k: K, v: VendorFormData[K]) {
@@ -228,20 +222,18 @@ function VendorModal({
 
 function VendorsSection({ agentId }: { agentId: string }) {
   const { vendors, addVendor, updateVendor, deleteVendor, moveVendor, toggleFeatured } =
-    useVendorStore();
+    useVendors();
 
   const [modal, setModal] = useState<
-    { mode: 'add'; category: VendorCategory } | { mode: 'edit'; vendor: PreferredVendor } | null
+    { mode: 'add'; category: VendorCategory } | { mode: 'edit'; vendor: Vendor } | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  const myVendors = vendors.filter((v) => v.agentId === agentId);
-
-  function handleSave(data: VendorFormData) {
+  async function handleSave(data: VendorFormData) {
     if (modal?.mode === 'edit') {
-      updateVendor(modal.vendor.id, data);
-    } else {
-      addVendor(data);
+      await updateVendor(modal.vendor.id, data);
+    } else if (modal?.mode === 'add') {
+      await addVendor({ ...data, category: modal.category });
     }
     setModal(null);
   }
@@ -253,7 +245,7 @@ function VendorsSection({ agentId }: { agentId: string }) {
       </p>
 
       {VENDOR_CATEGORY_ORDER.map((category) => {
-        const catVendors = myVendors.filter((v) => v.category === category);
+        const catVendors = vendors.filter((v) => v.category === category);
 
         return (
           <div key={category} className="rounded-2xl bg-white shadow-sm overflow-hidden">
@@ -386,7 +378,6 @@ function VendorsSection({ agentId }: { agentId: string }) {
       {/* Modal */}
       {modal && (
         <VendorModal
-          agentId={agentId}
           initial={modal.mode === 'edit' ? modal.vendor : undefined}
           onSave={handleSave}
           onClose={() => setModal(null)}

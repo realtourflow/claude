@@ -11,6 +11,7 @@ import { Task } from '../../data/mockTasks';
 import { useTasks, patchTaskStatus, postTask } from '../../hooks/useTasks';
 import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, Document as ApiDocument } from '../../hooks/useDocuments';
 import { useMessages, postMessage, MessageChannel } from '../../hooks/useMessages';
+import { useVendors } from '../../hooks/useVendors';
 import {
   ArrowLeft,
   MapPin,
@@ -56,7 +57,6 @@ import { useShowingAvailabilityStore, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } fro
 import { useOfferStore, Offer } from '../../store/offerStore';
 import { useNetSheetStore, NetSheet, calcNetProceeds } from '../../store/netSheetStore';
 import {
-  MOCK_PREFERRED_VENDORS,
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
   VendorCategory,
@@ -2334,11 +2334,8 @@ function ContactRow({
 
 // ── Preferred vendor category accordion ──────────────────────────────────────
 
-function PreferredCategoryRow({ category, agentId }: { category: VendorCategory; agentId: string }) {
+function PreferredCategoryRow({ category, vendors }: { category: VendorCategory; vendors: ReturnType<typeof useVendors>['vendors'] }) {
   const [open, setOpen] = useState(false);
-  const vendors = MOCK_PREFERRED_VENDORS.filter(
-    (v) => v.agentId === agentId && v.category === category
-  );
   if (vendors.length === 0) return null;
 
   return (
@@ -2426,8 +2423,9 @@ function VendorsTab({ deal }: { deal: Deal }) {
     setShowModal(false);
   }
 
+  const { vendors: preferredVendors } = useVendors();
   const availableCategories = VENDOR_CATEGORY_ORDER.filter((cat) =>
-    MOCK_PREFERRED_VENDORS.some((v) => v.agentId === deal.agentId && v.category === cat)
+    preferredVendors.some((v) => v.category === cat)
   );
 
   return (
@@ -2620,7 +2618,7 @@ function VendorsTab({ deal }: { deal: Deal }) {
               Sarah's trusted vendor directory — shared with clients on their portal.
             </p>
             {availableCategories.map((cat) => (
-              <PreferredCategoryRow key={cat} category={cat} agentId={deal.agentId} />
+              <PreferredCategoryRow key={cat} category={cat} vendors={preferredVendors.filter((v) => v.category === cat)} />
             ))}
           </div>
         )}

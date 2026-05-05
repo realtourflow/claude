@@ -1,25 +1,14 @@
 import { useState } from 'react';
 import { Phone, Mail, Star, ChevronDown, ChevronRight, BookOpen } from 'lucide-react';
 import {
-  MOCK_PREFERRED_VENDORS,
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
   VendorCategory,
 } from '../data/mockVendors';
+import { useVendors, Vendor } from '../hooks/useVendors';
 
-// ─── Props ─────────────────────────────────────────────────────────────────────
-
-type Props = {
-  agentId: string;
-};
-
-// ─── Category row ──────────────────────────────────────────────────────────────
-
-function CategorySection({ category, agentId }: { category: VendorCategory; agentId: string }) {
+function CategorySection({ category, vendors }: { category: VendorCategory; vendors: Vendor[] }) {
   const [open, setOpen] = useState(false);
-  const vendors = MOCK_PREFERRED_VENDORS.filter(
-    (v) => v.agentId === agentId && v.category === category
-  );
   if (vendors.length === 0) return null;
 
   const featured = vendors.find((v) => v.isFeatured);
@@ -53,10 +42,7 @@ function CategorySection({ category, agentId }: { category: VendorCategory; agen
       {open && (
         <div className="px-4 pb-3 space-y-2.5">
           {vendors.map((vendor) => (
-            <div
-              key={vendor.id}
-              className="rounded-xl border border-gray-100 bg-white p-3.5"
-            >
+            <div key={vendor.id} className="rounded-xl border border-gray-100 bg-white p-3.5">
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -103,20 +89,18 @@ function CategorySection({ category, agentId }: { category: VendorCategory; agen
   );
 }
 
-// ─── Main component ────────────────────────────────────────────────────────────
-
-export default function VendorDirectory({ agentId }: Props) {
+export default function VendorDirectory({ agentId: _agentId }: { agentId: string }) {
   const [open, setOpen] = useState(false);
+  const { vendors, loading } = useVendors();
 
   const availableCategories = VENDOR_CATEGORY_ORDER.filter((cat) =>
-    MOCK_PREFERRED_VENDORS.some((v) => v.agentId === agentId && v.category === cat)
+    vendors.some((v) => v.category === cat)
   );
 
-  if (availableCategories.length === 0) return null;
+  if (!loading && availableCategories.length === 0) return null;
 
   return (
     <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-      {/* Header — toggle the whole section */}
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors text-left"
@@ -145,7 +129,11 @@ export default function VendorDirectory({ agentId }: Props) {
             Need a plumber, inspector, or mover? These are your agent's go-to contacts.
           </p>
           {availableCategories.map((cat) => (
-            <CategorySection key={cat} category={cat} agentId={agentId} />
+            <CategorySection
+              key={cat}
+              category={cat}
+              vendors={vendors.filter((v) => v.category === cat)}
+            />
           ))}
         </div>
       )}
