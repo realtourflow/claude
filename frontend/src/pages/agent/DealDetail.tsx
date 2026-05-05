@@ -7,7 +7,8 @@ import { usePermission } from '../../permissions/usePermission';
 import { PERMISSIONS } from '../../permissions/permissions';
 import { useTaskStore } from '../../store/taskStore';
 import { useNotificationStore } from '../../store/notificationStore';
-import { getTasksByDealId, Task } from '../../data/mockTasks';
+import { Task } from '../../data/mockTasks';
+import { useTasks, patchTaskStatus, postTask } from '../../hooks/useTasks';
 import { getMessagesByDealId } from '../../data/mockMessages';
 import {
   ArrowLeft,
@@ -1277,8 +1278,7 @@ function InternalNotesCard({ deal }: { deal: Deal }) {
   );
 }
 
-function OverviewTab({ deal }: { deal: Deal }) {
-  const tasks = getTasksByDealId(deal.id);
+function OverviewTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
   const clientContact = useClientContactStore((s) => s.getContact(deal.id));
 
@@ -1421,8 +1421,7 @@ const STATUS_SORT_ORDER: Record<string, number> = {
   overdue: 0, in_progress: 1, blocked: 2, pending: 3, completed: 4,
 };
 
-function TasksTab({ deal }: { deal: Deal }) {
-  const tasks = getTasksByDealId(deal.id);
+function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Task[]; onTasksChange: () => void }) {
   const { can } = usePermission();
   const canAssign = can(PERMISSIONS.TASK_ASSIGN_ANY);
 
@@ -1432,13 +1431,23 @@ function TasksTab({ deal }: { deal: Deal }) {
   const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
   const { reassign: storeReassign, effectiveAssignee } = useTaskStore();
 
-  function toggleComplete(id: string) {
+  async function toggleComplete(id: string) {
+    const willBeCompleted = !completedIds.has(id);
+    const newStatus = willBeCompleted ? 'completed' : 'pending';
     setCompletedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (willBeCompleted) next.add(id); else next.delete(id);
       return next;
     });
+    try {
+      await patchTaskStatus(id, newStatus);
+    } catch {
+      setCompletedIds((prev) => {
+        const next = new Set(prev);
+        if (willBeCompleted) next.delete(id); else next.add(id);
+        return next;
+      });
+    }
   }
 
   function reassign(taskId: string, assignee: Task['assignedTo']) {
@@ -2531,8 +2540,7 @@ const DEAL_STAGE_DAYS: Record<string, Partial<Record<DealStage, number>>> = {
   'deal-chen':     { intake: 4,  active_search: 19, offer_active: 6, under_contract: 14, pre_close: 11 },
 };
 
-function TimelineTab({ deal }: { deal: Deal }) {
-  const tasks = getTasksByDealId(deal.id);
+function TimelineTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
   const currentStageIndex = STAGE_ORDER.indexOf(deal.stage);
 
   return (
@@ -2971,8 +2979,8 @@ export default function DealDetail() {
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
 
   const { deal: apiDeal, loading: dealLoading, refresh: refreshDeal } = useDeal(dealId);
+  const { tasks: dealTasks, refresh: refreshTasks } = useTasks(dealId ?? '');
   const { stageByDeal, setStage } = useDealStageStore();
-  const { addTask } = useTaskStore();
   const addClientNotification = useNotificationStore((s) => s.addClientNotification);
 
   if (dealLoading) {
@@ -3068,20 +3076,19 @@ export default function DealDetail() {
         addClientNotification({ dealId: deal.id, title: msg.title, body: msg.body });
       }
       const autoTasks = STAGE_AUTO_TASKS[nextStage]?.(deal) ?? [];
-      autoTasks.forEach((taskDef, i) => {
-        addTask({
-          id: `auto-${nextStage}-${deal.id}-${i}-${Date.now()}`,
-          dealId: deal.id,
-          title: taskDef.title,
-          description: taskDef.description,
-          assignedTo: taskDef.assignedTo,
-          assignedToId: taskDef.assignedTo === 'agent' ? deal.agentId : undefined,
-          status: 'pending',
-          priority: taskDef.priority,
-          source: 'ai',
-          stageContext: nextStage,
-        });
-      });
+      await Promise.allSettled(
+        autoTasks.map((taskDef) =>
+          postTask(deal.id, {
+            title: taskDef.title,
+            description: taskDef.description,
+            priority: taskDef.priority,
+            source: 'ai',
+            stage_context: nextStage,
+            role: taskDef.assignedTo,
+          }),
+        ),
+      );
+      refreshTasks();
     }
     setShowAdvanceModal(false);
   }
@@ -3100,10 +3107,9 @@ export default function DealDetail() {
     }
   }
 
-  const tasks = getTasksByDealId(deal.id);
   const dealDocs = DEAL_DOCS[deal.id] ?? [];
   const tabCounts: Partial<Record<TabId, number>> = {
-    tasks: tasks.filter((t) => t.status !== 'completed').length,
+    tasks: dealTasks.filter((t) => t.status !== 'completed').length,
     messages: getMessagesByDealId(deal.id).length,
     documents: dealDocs.length,
   };
@@ -3176,11 +3182,11 @@ export default function DealDetail() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'overview' && <OverviewTab deal={localDeal} />}
-      {activeTab === 'tasks' && <TasksTab deal={localDeal} />}
+      {activeTab === 'overview' && <OverviewTab deal={localDeal} tasks={dealTasks} />}
+      {activeTab === 'tasks' && <TasksTab deal={localDeal} tasks={dealTasks} onTasksChange={refreshTasks} />}
       {activeTab === 'messages' && <MessagesTab deal={localDeal} />}
       {activeTab === 'documents' && <DocumentsTab deal={localDeal} />}
-      {activeTab === 'timeline' && <TimelineTab deal={localDeal} />}
+      {activeTab === 'timeline' && <TimelineTab deal={localDeal} tasks={dealTasks} />}
       {activeTab === 'vendors' && <VendorsTab deal={localDeal} />}
     </div>
   );

@@ -29,6 +29,10 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/deals", h.CreateDeal)
 		r.Get("/deals/{dealId}", h.GetDeal)
 		r.Patch("/deals/{dealId}/stage", h.AdvanceStage)
+
+		r.Get("/deals/{dealId}/tasks", h.ListTasks)
+		r.Post("/deals/{dealId}/tasks", h.CreateTask)
+		r.Patch("/tasks/{taskId}/status", h.UpdateTaskStatus)
 	})
 
 	return r

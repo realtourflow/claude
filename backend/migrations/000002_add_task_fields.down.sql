@@ -1,0 +1,5 @@
+ALTER TABLE tasks
+  DROP COLUMN IF EXISTS role,
+  DROP COLUMN IF EXISTS stage_context,
+  DROP COLUMN IF EXISTS source,
+  DROP COLUMN IF EXISTS priority;
