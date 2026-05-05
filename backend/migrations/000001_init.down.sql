@@ -1,0 +1,15 @@
+BEGIN;
+
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS documents;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS deal_stage_history;
+DROP TABLE IF EXISTS deal_participants;
+DROP TABLE IF EXISTS deals;
+DROP TABLE IF EXISTS users;
+DROP TYPE IF EXISTS task_status;
+DROP TYPE IF EXISTS deal_type;
+DROP TYPE IF EXISTS deal_stage;
+DROP TYPE IF EXISTS user_role;
+
+COMMIT;
