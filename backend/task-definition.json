@@ -18,15 +18,15 @@
       "secrets": [
         {
           "name": "DATABASE_URL",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/database-url"
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/database-url-DvT938"
         },
         {
           "name": "AUTH0_DOMAIN",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-domain"
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-domain-hHsuRD"
         },
         {
           "name": "AUTH0_AUDIENCE",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-audience"
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-audience-vsItjS"
         }
       ],
       "environment": [
