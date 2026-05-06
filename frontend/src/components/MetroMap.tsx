@@ -42,8 +42,8 @@ function buildTracks(deal: Deal, loanMode: 'loan' | 'cash', showFastPass: boolea
   // ── LOAN track (hidden in cash mode) ─────────────────────────────────────
   const loanNodes: TrackNode[] = [
     { id: 'loan_setup',    label: 'Loan Setup',      state: a?.loanSetup ? 'done' : 'active' },
-    { id: 'disclosures',   label: 'Disclosures',     state: a?.disclosuresSigned ? 'done' : a?.disclosuresSent ? 'active' : 'pending' },
-    { id: 'underwriting',  label: 'Underwriting',    state: a?.underwriting === 'approved' ? 'done' : a?.underwriting === 'in_progress' ? 'active' : 'pending' },
+    { id: 'disclosures',   label: 'Disclosures',     state: a?.disclosuresSignedSubmitted ? 'done' : a?.disclosuresOut ? 'active' : 'pending' },
+    { id: 'underwriting',  label: 'Underwriting',    state: a?.approvedWithConditions ? 'done' : 'pending' },
     { id: 'closing_discl', label: 'Closing Discl.',  state: 'pending' },
     { id: 'ctc',           label: 'Clear to Close',  state: a?.clearToClose ? 'done' : 'pending' },
   ];

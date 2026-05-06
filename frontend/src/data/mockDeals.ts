@@ -400,7 +400,6 @@ export const MOCK_DEALS: Deal[] = [
       daysToClose: 69,
     },
     flags: ['mountain_mortgage'],
-    status: 'active',
     loanMilestones: {
       source: 'arive',
       loanSetup: false,

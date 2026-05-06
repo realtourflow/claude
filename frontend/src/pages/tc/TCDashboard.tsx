@@ -875,9 +875,10 @@ const DEFAULT_CATEGORIES = ['Contract', 'Loan', 'Title', 'Closing'];
 
 function ChecklistCard({ deal }: { deal: Deal }) {
   const { itemsByDeal, toggle, assign, setDueDate, addItem, removeItem } = useChecklistStore();
-  const canCreate = usePermission(PERMISSIONS.TASK_CREATE);
-  const canAssign = usePermission(PERMISSIONS.TASK_ASSIGN_ANY);
-  const canEdit   = usePermission(PERMISSIONS.TASK_EDIT);
+  const { can } = usePermission();
+  const canCreate = can(PERMISSIONS.TASK_CREATE);
+  const canAssign = can(PERMISSIONS.TASK_ASSIGN_ANY);
+  const canEdit   = can(PERMISSIONS.TASK_EDIT);
 
   const [addingTo, setAddingTo]     = useState<string | null>(null);
   const [newLabel, setNewLabel]     = useState('');

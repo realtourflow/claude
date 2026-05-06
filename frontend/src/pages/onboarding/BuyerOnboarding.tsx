@@ -620,7 +620,7 @@ export default function BuyerOnboarding() {
   useEffect(() => {
     if (screen === TOTAL - 1 && !hasNotifiedRef.current) {
       hasNotifiedRef.current = true;
-      const buyerName = data.contactName || activeUser?.name ?? 'Your buyer';
+      const buyerName = data.contactName || activeUser?.name || 'Your buyer';
       const deal = MOCK_DEALS.find((d) => d.clientId === activeUser?.id);
       // Advance deal stage so the intake card clears immediately
       if (deal) {

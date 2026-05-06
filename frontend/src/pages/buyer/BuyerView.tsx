@@ -792,6 +792,10 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
       description: 'Your agent needs a copy of your pre-approval letter to proceed. Upload it when you have it.',
       status: 'pending',
       assignedTo: 'buyer',
+      assignedToId: '',
+      priority: 'medium',
+      source: 'manual',
+      stageContext: deal.stage,
       dueDate: undefined,
     });
   }
