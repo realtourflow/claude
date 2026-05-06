@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useAuthStore } from './store/authStore';
 import { GroupId } from './permissions/groups';
@@ -27,11 +28,17 @@ import SmoothExitSurvey from './pages/onboarding/SmoothExitSurvey';
 // Returns null while Auth0 and /users/sync are still initializing
 // so we never default-route a buyer or seller to /agent.
 function RootRedirect() {
-  const { isLoading: auth0Loading } = useAuth0();
+  const { isLoading: auth0Loading, isAuthenticated, loginWithRedirect } = useAuth0();
   const isLoaded = useAuthStore((s) => s.isLoaded);
   const activeUser = useAuthStore((s) => s.activeUser);
 
-  if (auth0Loading || !isLoaded) return null;
+  useEffect(() => {
+    if (!auth0Loading && !isAuthenticated) {
+      loginWithRedirect();
+    }
+  }, [auth0Loading, isAuthenticated, loginWithRedirect]);
+
+  if (auth0Loading || !isAuthenticated || !isLoaded) return null;
 
   const groupId = activeUser?.groupId as GroupId | undefined;
   if (groupId === 'admin') return <Navigate to="/admin" replace />;
