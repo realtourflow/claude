@@ -37,7 +37,7 @@
         },
         {
           "name": "ALLOWED_ORIGINS",
-          "value": "http://localhost:5173"
+          "value": "http://localhost:5173,https://claude-pi-lime.vercel.app"
         },
         {
           "name": "S3_BUCKET",
