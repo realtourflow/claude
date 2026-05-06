@@ -25,13 +25,16 @@ const ROLE_DISPLAY: Record<string, string> = {
 type AuthStore = {
   activeUser: AppUser | undefined;
   isLoaded: boolean;
+  syncError: string | null;
   setFromAuth0: (id: string, name: string, email: string, role: string, avatar?: string) => void;
   setActiveUser: (userId: string) => void;
+  setSyncError: (err: string) => void;
 };
 
 export const useAuthStore = create<AuthStore>((set) => ({
   activeUser: undefined,
   isLoaded: false,
+  syncError: null,
   setFromAuth0: (id, name, email, role, avatar) => {
     const groupId = ROLE_TO_GROUP[role] ?? 'agent';
     set({
@@ -49,6 +52,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
   setActiveUser: (userId: string) => {
     const user = MOCK_USERS.find((u) => u.id === userId);
-    if (user) set({ activeUser: user });
+    if (user) set({ activeUser: user, isLoaded: true });
   },
+  setSyncError: (err: string) => set({ syncError: err, isLoaded: true }),
 }));

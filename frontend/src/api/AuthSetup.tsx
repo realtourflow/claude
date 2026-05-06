@@ -13,6 +13,7 @@ type SyncUserResponse = {
 export function AuthSetup({ children }: { children: React.ReactNode }) {
   const { getAccessTokenSilently, user, isAuthenticated } = useAuth0();
   const setFromAuth0 = useAuthStore((state) => state.setFromAuth0);
+  const setSyncError = useAuthStore((state) => state.setSyncError);
 
   useEffect(() => {
     setTokenGetter(getAccessTokenSilently);
@@ -25,8 +26,11 @@ export function AuthSetup({ children }: { children: React.ReactNode }) {
       name: user.name ?? '',
     }).then((dbUser) => {
       setFromAuth0(dbUser.id, dbUser.name, dbUser.email, dbUser.role, user.picture);
-    }).catch(console.error);
-  }, [isAuthenticated, user, setFromAuth0]);
+    }).catch((err) => {
+      console.error('users/sync failed:', err);
+      setSyncError(String(err));
+    });
+  }, [isAuthenticated, user, setFromAuth0, setSyncError]);
 
   return <>{children}</>;
 }

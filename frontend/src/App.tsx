@@ -30,6 +30,7 @@ import SmoothExitSurvey from './pages/onboarding/SmoothExitSurvey';
 function RootRedirect() {
   const { isLoading: auth0Loading, isAuthenticated, loginWithRedirect, error: auth0Error } = useAuth0();
   const isLoaded = useAuthStore((s) => s.isLoaded);
+  const syncError = useAuthStore((s) => s.syncError);
   const activeUser = useAuthStore((s) => s.activeUser);
 
   useEffect(() => {
@@ -43,6 +44,16 @@ function RootRedirect() {
       <div style={{ padding: 32, fontFamily: 'monospace' }}>
         <h2 style={{ color: 'red' }}>Auth0 error</h2>
         <pre>{auth0Error.message}</pre>
+      </div>
+    );
+  }
+
+  if (syncError) {
+    return (
+      <div style={{ padding: 32, fontFamily: 'monospace' }}>
+        <h2 style={{ color: 'red' }}>Backend unreachable</h2>
+        <pre style={{ whiteSpace: 'pre-wrap' }}>{syncError}</pre>
+        <p>The API server is not responding. Check that the ECS service is running and wired to the load balancer.</p>
       </div>
     );
   }
