@@ -28,15 +28,24 @@ import SmoothExitSurvey from './pages/onboarding/SmoothExitSurvey';
 // Returns null while Auth0 and /users/sync are still initializing
 // so we never default-route a buyer or seller to /agent.
 function RootRedirect() {
-  const { isLoading: auth0Loading, isAuthenticated, loginWithRedirect } = useAuth0();
+  const { isLoading: auth0Loading, isAuthenticated, loginWithRedirect, error: auth0Error } = useAuth0();
   const isLoaded = useAuthStore((s) => s.isLoaded);
   const activeUser = useAuthStore((s) => s.activeUser);
 
   useEffect(() => {
-    if (!auth0Loading && !isAuthenticated) {
+    if (!auth0Loading && !isAuthenticated && !auth0Error) {
       loginWithRedirect();
     }
-  }, [auth0Loading, isAuthenticated, loginWithRedirect]);
+  }, [auth0Loading, isAuthenticated, auth0Error, loginWithRedirect]);
+
+  if (auth0Error) {
+    return (
+      <div style={{ padding: 32, fontFamily: 'monospace' }}>
+        <h2 style={{ color: 'red' }}>Auth0 error</h2>
+        <pre>{auth0Error.message}</pre>
+      </div>
+    );
+  }
 
   if (auth0Loading || !isAuthenticated || !isLoaded) return null;
 
