@@ -14,6 +14,11 @@ export type ApiDeal = {
   arive_linked: boolean;
   created_at: string;
   updated_at: string;
+  agent_name?: string;
+  agent_email?: string;
+  agent_phone?: string | null;
+  open_task_count?: number;
+  overdue_task_count?: number;
 };
 
 export function apiDealToFrontend(d: ApiDeal): Deal {
@@ -44,6 +49,11 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     flags: d.arive_linked ? ['mountain_mortgage'] : [],
     status: 'active',
     estimatedCommission: Math.round(price * 0.03),
+    agentName: d.agent_name,
+    agentEmail: d.agent_email,
+    agentPhone: d.agent_phone,
+    openTaskCount: d.open_task_count ?? 0,
+    overdueTaskCount: d.overdue_task_count ?? 0,
   };
 }
 

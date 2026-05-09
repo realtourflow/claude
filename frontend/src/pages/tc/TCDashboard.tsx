@@ -2,13 +2,11 @@ import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { create } from 'zustand';
 import { useAuthStore } from '../../store/authStore';
-import { MOCK_DEALS, Deal, LoanMilestones } from '../../data/mockDeals';
-import { MOCK_TASKS } from '../../data/mockTasks';
-import { useTaskStore } from '../../store/taskStore';
-import { useChecklistStore, ChecklistAssignee } from '../../store/checklistStore';
+import { Deal, LoanMilestones } from '../../data/mockDeals';
+import { useDeals } from '../../hooks/useDeals';
+import { useChecklist, ChecklistAssignee } from '../../hooks/useChecklist';
 import { usePermission } from '../../permissions/usePermission';
 import { PERMISSIONS } from '../../permissions/permissions';
-import { MOCK_USERS } from '../../data/mockUsers';
 import {
   AlertTriangle, CheckCircle2, Circle, Clock, FileText,
   CalendarClock, ClipboardList, Loader2, AlertCircle,
@@ -122,24 +120,17 @@ function daysUntil(dateStr: string): number {
 }
 
 function useMyDeals() {
-  const activeUser = useAuthStore((s) => s.activeUser);
-  return MOCK_DEALS.filter((d) => activeUser?.dealIds.includes(d.id));
+  const { deals } = useDeals();
+  return deals;
 }
 
 // ─── Deal card ────────────────────────────────────────────────────────────────
 
 function DealCard({ deal }: { deal: Deal }) {
-  const agent = MOCK_USERS.find((u) => u.id === deal.agentId);
-  const { effectiveAssignee } = useTaskStore();
   const contingencies = useContingencyStore((s) => s.items);
 
-  const myTasks = MOCK_TASKS.filter(
-    (t) =>
-      t.dealId === deal.id &&
-      (effectiveAssignee(t) === 'tc' || effectiveAssignee(t) === 'third_party'),
-  );
-  const openTasks    = myTasks.filter((t) => t.status !== 'completed').length;
-  const overdueTasks = myTasks.filter((t) => t.status === 'overdue').length;
+  const openTasks    = deal.openTaskCount ?? 0;
+  const overdueTasks = deal.overdueTaskCount ?? 0;
 
   const activeC  = contingencies.filter((c) => c.dealId === deal.id && c.status === 'active');
   const urgentC  = activeC.filter((c) => c.deadline && daysUntil(c.deadline) <= 5);
@@ -214,10 +205,12 @@ function DealCard({ deal }: { deal: Deal }) {
         )}
       </div>
 
-      {agent && (
+      {deal.agentName && (
         <div className="mt-3 flex items-center gap-2 pt-3 border-t border-gray-50">
-          <img src={agent.avatar} alt={agent.name} className="h-5 w-5 rounded-full" />
-          <span className="text-xs text-gray-400">Agent: {agent.name}</span>
+          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-brand-navy/10 text-[9px] font-bold text-brand-navy flex-shrink-0">
+            {deal.agentName.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
+          </div>
+          <span className="text-xs text-gray-400">Agent: {deal.agentName}</span>
         </div>
       )}
     </Link>
@@ -231,8 +224,7 @@ function MyTransactions() {
   const deals        = useMyDeals();
   const contingencies = useContingencyStore((s) => s.items);
 
-  const allTasks     = MOCK_TASKS.filter((t) => deals.some((d) => d.id === t.dealId));
-  const overdueTasks = allTasks.filter((t) => t.status === 'overdue');
+  const overdueTasks = { length: deals.reduce((sum, d) => sum + (d.overdueTaskCount ?? 0), 0) };
 
   const urgentC = contingencies.filter(
     (c) => c.status === 'active' && c.deadline && daysUntil(c.deadline) <= 5,
@@ -329,31 +321,11 @@ type DeadlineEntry = {
 
 function Deadlines() {
   const deals       = useMyDeals();
-  const { effectiveAssignee } = useTaskStore();
-  const { itemsByDeal }       = useChecklistStore();
   const contingencies         = useContingencyStore((s) => s.items);
 
-  const taskEntries: DeadlineEntry[] = MOCK_TASKS.filter(
-    (t) =>
-      deals.some((d) => d.id === t.dealId) &&
-      t.dueDate &&
-      t.status !== 'completed' &&
-      (effectiveAssignee(t) === 'tc' || effectiveAssignee(t) === 'third_party' || effectiveAssignee(t) === 'admin'),
-  ).map((t) => ({
-    id: t.id, dealId: t.dealId, title: t.title, dueDate: t.dueDate!,
-    assignedTo: effectiveAssignee(t), status: t.status, source: 'task' as const,
-  }));
+  const taskEntries: DeadlineEntry[] = [];
 
-  const checklistEntries: DeadlineEntry[] = deals.flatMap((deal) =>
-    (itemsByDeal[deal.id] ?? [])
-      .filter((item) => item.dueDate && !item.checked)
-      .map((item) => ({
-        id: item.id, dealId: deal.id, title: item.label, dueDate: item.dueDate!,
-        assignedTo: item.assignedTo,
-        status: daysUntil(item.dueDate!) < 0 ? 'overdue' as const : 'pending' as const,
-        source: 'checklist' as const,
-      })),
-  );
+  const checklistEntries: DeadlineEntry[] = [];
 
   const contingencyEntries: DeadlineEntry[] = contingencies.filter(
     (c) => c.status === 'active' && c.deadline && deals.some((d) => d.id === c.dealId),
@@ -874,7 +846,7 @@ const ASSIGNEE_PILL: Record<ChecklistAssignee, string> = {
 const DEFAULT_CATEGORIES = ['Contract', 'Loan', 'Title', 'Closing'];
 
 function ChecklistCard({ deal }: { deal: Deal }) {
-  const { itemsByDeal, toggle, assign, setDueDate, addItem, removeItem } = useChecklistStore();
+  const { items: dealItems, toggle, assign, setDueDate, addItem, removeItem } = useChecklist(deal.id);
   const { can } = usePermission();
   const canCreate = can(PERMISSIONS.TASK_CREATE);
   const canAssign = can(PERMISSIONS.TASK_ASSIGN_ANY);
@@ -884,7 +856,7 @@ function ChecklistCard({ deal }: { deal: Deal }) {
   const [newLabel, setNewLabel]     = useState('');
   const [newCategory, setNewCategory] = useState('Contract');
 
-  const items      = itemsByDeal[deal.id] ?? [];
+  const items      = dealItems;
   const total      = items.length;
   const done       = items.filter((i) => i.checked).length;
   const pct        = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -892,7 +864,7 @@ function ChecklistCard({ deal }: { deal: Deal }) {
 
   function handleAddItem() {
     if (!newLabel.trim()) return;
-    addItem(deal.id, newLabel.trim(), newCategory);
+    addItem(newLabel.trim(), newCategory);
     setNewLabel('');
     setAddingTo(null);
   }
@@ -930,7 +902,7 @@ function ChecklistCard({ deal }: { deal: Deal }) {
               <div className="space-y-1">
                 {catItems.map((item) => (
                   <div key={item.id} className={`group flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors ${item.checked ? 'opacity-60' : 'hover:bg-gray-50'}`}>
-                    <button onClick={() => toggle(deal.id, item.id)} className="flex-shrink-0 focus:outline-none">
+                    <button onClick={() => toggle(item.id)} className="flex-shrink-0 focus:outline-none">
                       {item.checked
                         ? <CheckCircle2 size={16} className="text-green-400" />
                         : <Circle size={16} className="text-gray-300 hover:text-gray-400" />}
@@ -941,7 +913,7 @@ function ChecklistCard({ deal }: { deal: Deal }) {
                     {canAssign && !item.checked ? (
                       <select
                         value={item.assignedTo}
-                        onChange={(e) => assign(deal.id, item.id, e.target.value as ChecklistAssignee)}
+                        onChange={(e) => assign(item.id, e.target.value as ChecklistAssignee)}
                         className={`rounded-full px-2 py-0.5 text-[11px] font-semibold border-0 outline-none cursor-pointer ${ASSIGNEE_PILL[item.assignedTo]}`}
                       >
                         {ASSIGNEE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -955,7 +927,7 @@ function ChecklistCard({ deal }: { deal: Deal }) {
                       <input
                         type="date"
                         value={item.dueDate ?? ''}
-                        onChange={(e) => setDueDate(deal.id, item.id, e.target.value || undefined)}
+                        onChange={(e) => setDueDate(item.id, e.target.value || undefined)}
                         className="rounded-lg border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-500 outline-none focus:border-brand-navy/30 w-32"
                       />
                     ) : item.dueDate && !item.checked ? (
@@ -963,7 +935,7 @@ function ChecklistCard({ deal }: { deal: Deal }) {
                     ) : null}
                     {item.isCustom && canCreate && (
                       <button
-                        onClick={() => removeItem(deal.id, item.id)}
+                        onClick={() => removeItem(item.id)}
                         className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all flex-shrink-0"
                       >
                         <X size={13} />
@@ -1074,7 +1046,6 @@ const CAL_TYPE: Record<CalEvent['type'], { dot: string; label: string }> = {
 
 function CalendarSection() {
   const deals       = useMyDeals();
-  const { effectiveAssignee } = useTaskStore();
   const contingencies = useContingencyStore((s) => s.items);
 
   const events: CalEvent[] = [];
@@ -1103,17 +1074,7 @@ function CalendarSection() {
     });
   });
 
-  MOCK_TASKS.filter(
-    (t) =>
-      deals.some((d) => d.id === t.dealId) &&
-      t.dueDate &&
-      t.status !== 'completed' &&
-      (effectiveAssignee(t) === 'tc' || effectiveAssignee(t) === 'third_party'),
-  ).forEach((task) => {
-    const deal = deals.find((d) => d.id === task.dealId);
-    if (!deal) return;
-    events.push({ id: `t-${task.id}`, date: task.dueDate!, title: task.title, sub: deal.clientName, type: 'task' });
-  });
+  // Task calendar events will be added when a bulk task API is available
 
   events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
@@ -1262,11 +1223,7 @@ function ContactsSection() {
   function buildContacts(deal: Deal): ContactEntry[] {
     const contacts: ContactEntry[] = [];
 
-    const client = MOCK_USERS.find((u) => u.id === deal.clientId);
-    if (client) contacts.push({ role: deal.type === 'buy' ? 'Buyer' : 'Seller', name: client.name, email: client.email });
-
-    const agent = MOCK_USERS.find((u) => u.id === deal.agentId);
-    if (agent) contacts.push({ role: 'Agent', name: agent.name, email: agent.email });
+    if (deal.agentName) contacts.push({ role: 'Agent', name: deal.agentName, email: deal.agentEmail, phone: deal.agentPhone ?? undefined });
 
     const lender = deal.vendors?.lender;
     if (lender) contacts.push({ role: 'Loan Officer', name: lender.contactName ?? 'Loan Officer', company: lender.company, phone: lender.phone, email: lender.email });

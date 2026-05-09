@@ -106,6 +106,13 @@ export type Deal = {
   notes?: string;
   fastPass?: FastPassEnrollment;
   smoothExit?: SmoothExitEnrollment;
+  /** Populated from real API — agent contact info attached to each deal */
+  agentName?: string;
+  agentEmail?: string;
+  agentPhone?: string | null;
+  /** Task counts populated from real API */
+  openTaskCount?: number;
+  overdueTaskCount?: number;
 };
 
 export const MOCK_DEALS: Deal[] = [

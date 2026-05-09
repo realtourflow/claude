@@ -125,6 +125,8 @@ VITE_AUTH0_AUDIENCE=https://api.realtourflow.com
 | 000003_add_message_channel | Adds channel column (client_thread / internal) to messages | ✅ Applied | ✅ Applied |
 | 000004_add_document_fields | Adds mime_type, file_size columns to documents | ✅ Applied | ✅ Applied |
 | 000005_add_vendors | Creates preferred_vendors table with sort_order and is_featured | ✅ Applied | ✅ Applied on next deploy |
+| 000006_add_tc_role | Adds 'tc' value to user_role enum | ✅ Applied | ✅ Applied on next deploy |
+| 000007_add_checklist_items | Creates checklist_items table with checklist_assignee enum | ✅ Applied | ✅ Applied on next deploy |
 
 ---
 
@@ -136,6 +138,7 @@ All routes are mounted at `/api`. Protected routes require `Authorization: Beare
 |---|---|---|---|---|
 | GET | /health | — | Health | Returns `{"status":"ok"}` |
 | POST | /users/sync | ✅ | SyncUser | Upserts user from JWT; requires role in Auth0 custom claim |
+| GET | /users | ✅ | ListUsers | Admin-only; returns all platform users ordered by role, name |
 | GET | /deals | ✅ | ListDeals | Returns agent's deals ordered by updated_at desc |
 | POST | /deals | ✅ | CreateDeal | Creates deal at intake stage |
 | GET | /deals/:dealId | ✅ | GetDeal | Ownership-checked |
@@ -154,6 +157,14 @@ All routes are mounted at `/api`. Protected routes require `Authorization: Beare
 | POST | /vendors | ✅ | CreateVendor | Auto-sets sort_order = max in category + 1 |
 | PATCH | /vendors/:vendorId | ✅ | UpdateVendor | Partial update — company, contact, phone, email, website, notes, is_featured, sort_order |
 | DELETE | /vendors/:vendorId | ✅ | DeleteVendor | Ownership-checked |
+| GET | /me/deals | ✅ | ListMyDeals | Returns deals where JWT user is a participant; includes agent name/email/phone |
+| GET | /deals/:dealId/participants | ✅ | ListParticipants | Agent or any participant may call |
+| POST | /deals/:dealId/participants | ✅ | AddParticipant | Agent-only; body: `{user_id, role}` |
+| DELETE | /deals/:dealId/participants/:userId | ✅ | RemoveParticipant | Agent-only |
+| GET | /deals/:dealId/checklist | ✅ | ListChecklist | TC/admin/agent/participant; auto-seeds 17 defaults on under_contract+ stages |
+| POST | /deals/:dealId/checklist | ✅ | CreateChecklistItem | Adds custom item |
+| PATCH | /deals/:dealId/checklist/:itemId | ✅ | UpdateChecklistItem | Updates checked, assigned_to, due_date |
+| DELETE | /deals/:dealId/checklist/:itemId | ✅ | DeleteChecklistItem | Removes item |
 
 ### Auth0 JWT custom claims
 
@@ -185,6 +196,8 @@ This tracks what's wired to the real database vs what still uses mock data.
 | Messages per deal | GET/POST /deals/:id/messages |
 | Documents per deal | GET /deals/:id/documents, POST /deals/:id/documents/upload-url, POST /deals/:id/documents, GET /documents/:id/download-url, DELETE /documents/:id |
 | Vendor directory | GET /vendors, POST /vendors, PATCH /vendors/:id, DELETE /vendors/:id |
+| Buyer/Seller portals — deal + tasks + messages | GET /me/deals, GET /deals/:id/tasks, GET/POST /deals/:id/messages |
+| TC Dashboard — deals, checklists, agent contacts | GET /deals (all deals for TC), GET/POST/PATCH/DELETE /deals/:id/checklist |
 
 ### Still on mock data ⚠️
 
@@ -194,13 +207,14 @@ This tracks what's wired to the real database vs what still uses mock data.
 | Messages tab | ~~wired to real API~~ | **Closed.** `GET/POST /deals/:id/messages?channel=` live. 10s polling. Send wired. |
 | Documents tab | ~~DEAL_DOCS mock~~ | **Closed.** S3 pre-signed upload/download/delete wired. `useDocuments` hook. |
 | Vendor directory | ~~vendorStore.ts~~ | **Closed.** `useVendors` hook. GET/POST/PATCH/DELETE /vendors live. SettingsPage, VendorDirectory, DealDetail all wired. |
+| Buyer/Seller portals | ~~BuyerView.tsx, SellerView.tsx~~ | **Closed.** `useMyDeals()` hook; deal + tasks + messages wired to real API. Agent contact info included. |
+| Admin Dashboard | ~~MOCK_DEALS, MOCK_TASKS, MOCK_USERS~~ | **Closed.** All sections use `useDeals()` (returns all deals for admin role). UserManagement uses `GET /users`. FastPass/SmoothExit/AriveStatus/PendingDisclosures show empty state (deferred features). |
 | Loan milestones | `data/mockDeals.ts` | ARIVE integration not yet built |
 | Properties / offers | `store/propertyStore.ts`, `store/offerStore.ts` | Full UI, writes nowhere |
 | Net sheet | `store/netSheetStore.ts` | Full UI, writes nowhere |
 | Deal health (green/yellow/red) | Hardcoded in mock deals | Should be computed server-side |
 | Notifications | `store/notificationStore.ts` | In-memory only |
-| Buyer / Seller portals | `BuyerView.tsx`, `SellerView.tsx` | Reads mock deals |
-| TC Dashboard | `TCDashboard.tsx` | Reads mock deals + tasks |
+| TC Dashboard | ~~TCDashboard.tsx~~ | **Closed.** Deals from real API (TC sees all); checklists from real DB (auto-seeded on under_contract); agent contacts from deal response. Contingencies/loan milestones/task-deadline calendar still in-memory. |
 | Admin Dashboard | `AdminDashboard.tsx` | Reads mock deals |
 | Onboarding flows | `store/intakeStore.ts`, `store/clientContactStore.ts` | Writes to in-memory stores only |
 | Fast Pass / Smooth Exit | `mockFastPass.ts`, `mockSmoothExit.ts` | Full UI, no payment/backend |

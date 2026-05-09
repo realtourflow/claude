@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
-import { MOCK_DEALS, Deal, DealStage } from '../../data/mockDeals';
-import { MOCK_TASKS, Task } from '../../data/mockTasks';
-import { MOCK_MESSAGES } from '../../data/mockMessages';
+import { Deal, DealStage } from '../../data/mockDeals';
+import { Task } from '../../data/mockTasks';
+import { useMyDeals } from '../../hooks/useMyDeals';
+import { useTasks } from '../../hooks/useTasks';
+import { useMessages, postMessage } from '../../hooks/useMessages';
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
@@ -17,7 +19,6 @@ import { usePropertyStore, TrackedProperty, PropertyStatus } from '../../store/p
 import { usePreApprovalStore } from '../../store/preApprovalStore';
 import { useTaskStore } from '../../store/taskStore';
 import { useAgentDocStore } from '../../store/agentDocStore';
-import { useDealStageStore } from '../../store/dealStageStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { FAST_PASS_UPSELLS, FastPassUpsellId } from '../../data/mockFastPass';
 
@@ -234,10 +235,24 @@ function TabBar({ active, onChange, taskCount, msgCount }: {
 // ─── Shared: Messages tab ─────────────────────────────────────────────────────
 
 function MessagesTab({ dealId }: { dealId: string }) {
-  const messages = MOCK_MESSAGES.filter((m) => m.dealId === dealId).slice(-3);
+  const { messages, loading, refresh } = useMessages(dealId, 'client_thread');
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function handleSend() {
+    if (!draft.trim() || sending) return;
+    setSending(true);
+    try {
+      await postMessage(dealId, 'client_thread', draft.trim());
+      setDraft('');
+      await refresh();
+    } catch {}
+    setSending(false);
+  }
+
   return (
     <div className="space-y-3">
-      {messages.length === 0 && (
+      {!loading && messages.length === 0 && (
         <div className="rounded-2xl bg-white p-8 text-center shadow-sm">
           <MessageSquare size={28} className="mx-auto mb-2 text-gray-200" />
           <p className="text-sm text-gray-400">No messages yet</p>
@@ -266,11 +281,18 @@ function MessagesTab({ dealId }: { dealId: string }) {
       <div className="pt-1 flex items-center gap-2">
         <input
           type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder="Message your agent…"
           className="flex-1 rounded-full border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
         />
-        <button className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-navy text-white hover:bg-brand-navy/80 transition-colors">
-          <ChevronRight size={16} />
+        <button
+          onClick={handleSend}
+          disabled={!draft.trim() || sending}
+          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-brand-navy text-white hover:bg-brand-navy/80 transition-colors disabled:opacity-50"
+        >
+          <Send size={15} />
         </button>
       </div>
     </div>
@@ -312,25 +334,34 @@ function DocumentsTab() {
 
 // ─── Shared: Agent card ───────────────────────────────────────────────────────
 
-function AgentCard({ compact = false }: { compact?: boolean }) {
+function AgentCard({ compact = false, agentName, agentEmail, agentPhone }: {
+  compact?: boolean;
+  agentName: string;
+  agentEmail: string;
+  agentPhone: string | null;
+}) {
+  const initials = agentName.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
   return (
     <div className="rounded-2xl bg-brand-navy p-5 text-white">
       <p className="mb-3 text-xs font-bold uppercase tracking-widest text-white/50">Your Agent</p>
       <div className="flex items-center gap-3 mb-4">
-        <img src="https://i.pravatar.cc/100?img=47" alt="Sarah Johnson"
-          className="h-12 w-12 rounded-full ring-2 ring-brand-gold/40" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-gold/20 ring-2 ring-brand-gold/40 text-brand-gold font-bold text-sm flex-shrink-0">
+          {initials}
+        </div>
         <div>
-          <p className="font-bold text-white">Sarah Johnson</p>
+          <p className="font-bold text-white">{agentName}</p>
           <p className="text-xs text-white/60">RealTour Flow Agent</p>
         </div>
       </div>
       {!compact && (
         <div className="space-y-2">
-          <a href="tel:+12055550100" className="flex items-center gap-2.5 rounded-lg bg-white/10 px-3 py-2 text-sm text-white/80 hover:bg-white/20 transition-colors">
-            <Phone size={14} /> (205) 555-0100
-          </a>
-          <a href="mailto:sarah@realtourflow.com" className="flex items-center gap-2.5 rounded-lg bg-white/10 px-3 py-2 text-sm text-white/80 hover:bg-white/20 transition-colors">
-            <Mail size={14} /> sarah@realtourflow.com
+          {agentPhone && (
+            <a href={`tel:${agentPhone}`} className="flex items-center gap-2.5 rounded-lg bg-white/10 px-3 py-2 text-sm text-white/80 hover:bg-white/20 transition-colors">
+              <Phone size={14} /> {agentPhone}
+            </a>
+          )}
+          <a href={`mailto:${agentEmail}`} className="flex items-center gap-2.5 rounded-lg bg-white/10 px-3 py-2 text-sm text-white/80 hover:bg-white/20 transition-colors">
+            <Mail size={14} /> {agentEmail}
           </a>
         </div>
       )}
@@ -1534,19 +1565,24 @@ export default function BuyerView() {
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
-  const { addedTasks } = useTaskStore();
-  const { stageByDeal } = useDealStageStore();
   const { getClientNotifications, dismissClientNotification } = useNotificationStore();
-  const rawDeal = MOCK_DEALS.find((d) => d.clientId === userId && d.type === 'buy');
-  const deal = rawDeal ? { ...rawDeal, stage: stageByDeal[rawDeal.id] ?? rawDeal.stage } : undefined;
-  const baseTasks = deal ? MOCK_TASKS.filter((t) => t.dealId === deal.id && t.assignedTo === 'buyer') : [];
-  const allTasks  = deal ? [...baseTasks, ...addedTasks.filter((t) => t.dealId === deal.id && t.assignedTo === 'buyer')] : [];
-  const openTasks = allTasks.filter((t) => t.status !== 'completed' && !completedIds.has(t.id));
+  const { deals, loading: dealsLoading } = useMyDeals();
+  const deal = deals.find((d) => d.type === 'buy');
+  const { tasks } = useTasks(deal?.id ?? '');
+  const buyerTasks = tasks.filter((t) => t.assignedTo === 'buyer');
+  const openTasks = buyerTasks.filter((t) => t.status !== 'completed' && !completedIds.has(t.id));
 
   function handleComplete(id: string) {
     setCompletedIds((prev) => new Set([...prev, id]));
   }
-  const messages  = deal ? MOCK_MESSAGES.filter((m) => m.dealId === deal.id) : [];
+
+  if (dealsLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <Loader2 size={24} className="text-brand-navy animate-spin" />
+      </div>
+    );
+  }
 
   if (!deal) {
     return (
@@ -1660,7 +1696,7 @@ export default function BuyerView() {
             active={activeTab}
             onChange={setActiveTab}
             taskCount={openTasks.length}
-            msgCount={messages.length}
+            msgCount={0}
           />
           {activeTab === 'tasks' && (
             <div className="space-y-2">
@@ -1699,7 +1735,7 @@ export default function BuyerView() {
       <VendorDirectory agentId={deal.agentId} />
 
       {/* Agent card */}
-      <AgentCard />
+      <AgentCard agentName={deal.agentName} agentEmail={deal.agentEmail} agentPhone={deal.agentPhone} />
     </div>
   );
 }

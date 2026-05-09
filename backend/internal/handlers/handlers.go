@@ -27,6 +27,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 	r.Group(func(r chi.Router) {
 		r.Use(auth)
 		r.Post("/users/sync", h.SyncUser)
+			r.Get("/users", h.ListUsers)
 
 		r.Get("/deals", h.ListDeals)
 		r.Post("/deals", h.CreateDeal)
@@ -50,6 +51,16 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/vendors", h.CreateVendor)
 		r.Patch("/vendors/{vendorId}", h.UpdateVendor)
 		r.Delete("/vendors/{vendorId}", h.DeleteVendor)
+
+		r.Get("/me/deals", h.ListMyDeals)
+		r.Get("/deals/{dealId}/participants", h.ListParticipants)
+		r.Post("/deals/{dealId}/participants", h.AddParticipant)
+		r.Delete("/deals/{dealId}/participants/{userId}", h.RemoveParticipant)
+
+		r.Get("/deals/{dealId}/checklist", h.ListChecklist)
+		r.Post("/deals/{dealId}/checklist", h.CreateChecklistItem)
+		r.Patch("/deals/{dealId}/checklist/{itemId}", h.UpdateChecklistItem)
+		r.Delete("/deals/{dealId}/checklist/{itemId}", h.DeleteChecklistItem)
 	})
 
 	return r

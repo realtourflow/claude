@@ -54,7 +54,17 @@ CASE
   ELSE 'green'
 END`
 
-// ListDeals returns all deals for the authenticated agent.
+type dealWithStats struct {
+	models.Deal
+	AgentName        string  `json:"agent_name"`
+	AgentEmail       string  `json:"agent_email"`
+	AgentPhone       *string `json:"agent_phone,omitempty"`
+	OpenTaskCount    int     `json:"open_task_count"`
+	OverdueTaskCount int     `json:"overdue_task_count"`
+}
+
+// ListDeals returns deals for the authenticated user.
+// TC and admin roles receive all deals; agents receive only their own.
 func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
 	if claims == nil {
@@ -68,25 +78,49 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, agent_id, type, stage, `+healthExpr+` AS health,
-		       title, address, price, arive_linked, created_at, updated_at
+	isTCOrAdmin := false
+	for _, role := range middleware.GetRoles(r) {
+		if role == "tc" || role == "admin" {
+			isTCOrAdmin = true
+			break
+		}
+	}
+
+	q := `
+		SELECT deals.id, deals.agent_id, deals.type, deals.stage, ` + healthExpr + ` AS health,
+		       deals.title, deals.address, deals.price, deals.arive_linked,
+		       deals.created_at, deals.updated_at,
+		       u.name, u.email, u.phone,
+		       (SELECT COUNT(*) FROM tasks t
+		        WHERE t.deal_id = deals.id AND t.status NOT IN ('completed','skipped'))::INT,
+		       (SELECT COUNT(*) FROM tasks t
+		        WHERE t.deal_id = deals.id AND t.status NOT IN ('completed','skipped')
+		          AND t.due_date IS NOT NULL AND t.due_date < CURRENT_DATE)::INT
 		FROM deals
-		WHERE agent_id = $1
-		ORDER BY updated_at DESC
-	`, userID)
+		JOIN users u ON u.id = deals.agent_id`
+
+	var args []interface{}
+	if !isTCOrAdmin {
+		q += ` WHERE deals.agent_id = $1`
+		args = append(args, userID)
+	}
+	q += ` ORDER BY deals.updated_at DESC`
+
+	rows, err := h.db.QueryContext(r.Context(), q, args...)
 	if err != nil {
 		http.Error(w, "failed to fetch deals", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
 
-	deals := make([]*models.Deal, 0)
+	deals := make([]*dealWithStats, 0)
 	for rows.Next() {
-		d := &models.Deal{}
+		d := &dealWithStats{}
 		if err := rows.Scan(
 			&d.ID, &d.AgentID, &d.Type, &d.Stage, &d.Health,
 			&d.Title, &d.Address, &d.Price, &d.AriveLinked, &d.CreatedAt, &d.UpdatedAt,
+			&d.AgentName, &d.AgentEmail, &d.AgentPhone,
+			&d.OpenTaskCount, &d.OverdueTaskCount,
 		); err != nil {
 			http.Error(w, "failed to scan deal", http.StatusInternalServerError)
 			return

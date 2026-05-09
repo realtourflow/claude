@@ -1,8 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
-import { useAuthStore } from '../../store/authStore';
-import { MOCK_DEALS, Deal } from '../../data/mockDeals';
-import { MOCK_TASKS } from '../../data/mockTasks';
-import { MOCK_USERS } from '../../data/mockUsers';
+import { useDeals } from '../../hooks/useDeals';
+import { useUsers, AppUser } from '../../hooks/useUsers';
+import { Deal } from '../../data/mockDeals';
 import {
   AlertTriangle,
   TrendingUp,
@@ -14,7 +13,6 @@ import {
   Users,
   Check,
   Mail,
-  Phone,
   ShieldCheck,
   UserX,
 } from 'lucide-react';
@@ -67,13 +65,17 @@ function fmt$(n: number) {
   return `$${n}`;
 }
 
+function initials(name: string) {
+  return name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+}
+
 // ─── Stat Card ─────────────────────────────────────────────────────────────────
 
 type StatProps = {
   label: string;
   value: string | number;
   icon: React.ReactNode;
-  accent?: string; // tailwind text color class
+  accent?: string;
 };
 
 function StatCard({ label, value, icon, accent = 'text-brand-navy' }: StatProps) {
@@ -93,27 +95,23 @@ function StatCard({ label, value, icon, accent = 'text-brand-navy' }: StatProps)
 // ─── Deal Row (compact) ────────────────────────────────────────────────────────
 
 function DealRow({ deal }: { deal: Deal }) {
-  const agent = MOCK_USERS.find((u) => u.id === deal.agentId);
-  const tasks = MOCK_TASKS.filter((t) => t.dealId === deal.id);
-  const openTasks = tasks.filter((t) => ['pending', 'in_progress', 'overdue'].includes(t.status));
-  const overdueTasks = tasks.filter((t) => t.status === 'overdue');
+  const overdueTasks = deal.overdueTaskCount ?? 0;
+  const openTasks = deal.openTaskCount ?? 0;
 
   return (
     <div className={`flex items-center gap-4 border-l-4 ${HEALTH_BORDER[deal.health]} bg-white px-5 py-3 rounded-r-xl shadow-sm`}>
-      {/* Health dot */}
       <div className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${HEALTH_DOT[deal.health]}`} />
 
-      {/* Client + property */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-brand-navy text-sm">{deal.clientName}</span>
           <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${deal.type === 'buy' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
             {deal.type}
           </span>
-          {overdueTasks.length > 0 && (
+          {overdueTasks > 0 && (
             <span className="flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
               <AlertTriangle size={9} />
-              {overdueTasks.length} overdue
+              {overdueTasks} overdue
             </span>
           )}
           {deal.flags.includes('fast_pass') && (
@@ -128,94 +126,84 @@ function DealRow({ deal }: { deal: Deal }) {
         </div>
       </div>
 
-      {/* Stage */}
       <div className="hidden sm:block text-xs text-gray-500 w-28 text-center">
         {STAGE_LABELS[deal.stage]}
       </div>
 
-      {/* Price */}
       <div className="text-sm font-semibold text-brand-navy w-20 text-right">
         {fmt$(deal.property.price)}
       </div>
 
-      {/* Agent */}
-      {agent && (
+      {deal.agentName && (
         <Link
-          to={`/admin/users`}
-          title={`View ${agent.name}'s profile`}
+          to="/admin/users"
+          title={`View ${deal.agentName}'s profile`}
           className="flex items-center gap-1.5 group"
         >
-          <img src={agent.avatar} alt={agent.name} className="h-6 w-6 rounded-full ring-2 ring-transparent group-hover:ring-brand-navy/30 transition-all" />
-          <span className="hidden lg:block text-xs text-gray-500 group-hover:text-brand-navy transition-colors">{agent.name.split(' ')[0]}</span>
+          <div className="h-6 w-6 rounded-full bg-brand-navy/10 flex items-center justify-center text-[10px] font-bold text-brand-navy ring-2 ring-transparent group-hover:ring-brand-navy/30 transition-all">
+            {initials(deal.agentName)}
+          </div>
+          <span className="hidden lg:block text-xs text-gray-500 group-hover:text-brand-navy transition-colors">
+            {deal.agentName.split(' ')[0]}
+          </span>
         </Link>
       )}
 
-      {/* Tasks */}
-      <div className="text-xs text-gray-400 w-12 text-right">{openTasks.length} tasks</div>
+      <div className="text-xs text-gray-400 w-12 text-right">{openTasks} tasks</div>
     </div>
   );
 }
 
-// ─── Pipeline Overview (main /admin) ──────────────────────────────────────────
+// ─── Pipeline Overview ─────────────────────────────────────────────────────────
 
-function PipelineOverview() {
-  const activeDeals = MOCK_DEALS.filter((d) => d.stage !== 'post_close');
+function PipelineOverview({ deals }: { deals: Deal[] }) {
+  const activeDeals = deals.filter((d) => d.stage !== 'post_close');
   const totalPipeline = activeDeals.reduce((s, d) => s + d.property.price, 0);
   const totalCommission = activeDeals.reduce((s, d) => s + d.estimatedCommission, 0);
-  const overdueTasks = MOCK_TASKS.filter((t) => t.status === 'overdue');
-  const pendingDisclosures = MOCK_DEALS.filter(
-    (d) => d.loanMilestones && d.loanMilestones.disclosuresOut && !d.loanMilestones.disclosuresSignedSubmitted
+  const overdueTaskCount = activeDeals.reduce((s, d) => s + (d.overdueTaskCount ?? 0), 0);
+  const pendingDisclosures = activeDeals.filter(
+    (d) => d.loanMilestones?.disclosuresOut && !d.loanMilestones?.disclosuresSignedSubmitted,
   );
   const fastPassDeals = activeDeals.filter((d) => d.flags.includes('fast_pass'));
   const redDeals = activeDeals.filter((d) => d.health === 'red');
   const closingSoon = activeDeals.filter((d) => {
     if (!d.timeline.closingDate) return false;
-    const days = Math.ceil(
-      (new Date(d.timeline.closingDate).getTime() - Date.now()) / 86_400_000
-    );
+    const days = Math.ceil((new Date(d.timeline.closingDate).getTime() - Date.now()) / 86_400_000);
     return days >= 0 && days <= 30;
   });
 
-  // Group active deals by stage
   const byStage = STAGE_ORDER.map((stage) => ({
     stage,
     deals: activeDeals.filter((d) => d.stage === stage),
   })).filter((g) => g.deals.length > 0);
 
-  // Agents + their deal counts
-  const agents = MOCK_USERS.filter((u) => u.groupId === 'agent');
+  // Derive agents from deals — no MOCK_USERS needed
+  const agentMap = new Map<string, { name: string; email: string; deals: Deal[] }>();
+  activeDeals.forEach((d) => {
+    if (!d.agentId) return;
+    if (!agentMap.has(d.agentId)) {
+      agentMap.set(d.agentId, { name: d.agentName ?? 'Unknown', email: d.agentEmail ?? '', deals: [] });
+    }
+    agentMap.get(d.agentId)!.deals.push(d);
+  });
+  const agentEntries = Array.from(agentMap.entries());
 
   return (
     <div className="space-y-7">
-      {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-brand-navy">Pipeline Overview</h1>
         <p className="text-sm text-gray-400 mt-0.5">System-wide view across all agents and deals</p>
       </div>
 
-      {/* Stats bar */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-        <StatCard
-          label="Total Pipeline Value"
-          value={fmt$(totalPipeline)}
-          icon={<TrendingUp size={18} />}
-        />
-        <StatCard
-          label="Active Deals"
-          value={activeDeals.length}
-          icon={<CheckSquare size={18} />}
-        />
-        <StatCard
-          label="Est. Commission"
-          value={fmt$(totalCommission)}
-          icon={<DollarSign size={18} />}
-          accent="text-green-600"
-        />
+        <StatCard label="Total Pipeline Value" value={fmt$(totalPipeline)} icon={<TrendingUp size={18} />} />
+        <StatCard label="Active Deals" value={activeDeals.length} icon={<CheckSquare size={18} />} />
+        <StatCard label="Est. Commission" value={fmt$(totalCommission)} icon={<DollarSign size={18} />} accent="text-green-600" />
         <StatCard
           label="Overdue Tasks"
-          value={overdueTasks.length}
+          value={overdueTaskCount}
           icon={<AlertTriangle size={18} />}
-          accent={overdueTasks.length > 0 ? 'text-red-600' : 'text-brand-navy'}
+          accent={overdueTaskCount > 0 ? 'text-red-600' : 'text-brand-navy'}
         />
         <StatCard
           label="Pending Disclosures"
@@ -229,21 +217,11 @@ function PipelineOverview() {
           icon={<CalendarClock size={18} />}
           accent={closingSoon.length > 0 ? 'text-brand-navy' : 'text-gray-400'}
         />
-        <StatCard
-          label="Active Fast Pass"
-          value={fastPassDeals.length}
-          icon={<Zap size={18} />}
-          accent="text-green-600"
-        />
-        <StatCard
-          label="Agents"
-          value={agents.length}
-          icon={<Users size={18} />}
-        />
+        <StatCard label="Active Fast Pass" value={fastPassDeals.length} icon={<Zap size={18} />} accent="text-green-600" />
+        <StatCard label="Agents" value={agentEntries.length} icon={<Users size={18} />} />
       </div>
 
-      {/* Deals Needing Attention */}
-      {(redDeals.length > 0 || overdueTasks.length > 0) && (
+      {(redDeals.length > 0 || overdueTaskCount > 0) && (
         <section>
           <div className="mb-3 flex items-center gap-2">
             <AlertTriangle size={15} className="text-red-500" />
@@ -251,63 +229,58 @@ function PipelineOverview() {
           </div>
           <div className="space-y-2">
             {redDeals.map((d) => <DealRow key={d.id} deal={d} />)}
-            {/* yellow deals with overdue tasks that aren't already shown */}
-            {MOCK_DEALS.filter(
-              (d) => d.health !== 'red' && d.stage !== 'post_close' &&
-              MOCK_TASKS.some((t) => t.dealId === d.id && t.status === 'overdue')
+            {deals.filter(
+              (d) => d.health !== 'red' && d.stage !== 'post_close' && (d.overdueTaskCount ?? 0) > 0,
             ).map((d) => <DealRow key={d.id} deal={d} />)}
           </div>
         </section>
       )}
 
-      {/* By Stage */}
       <section>
         <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-gray-400">Deals by Stage</h2>
         <div className="space-y-5">
-          {byStage.map(({ stage, deals }) => (
+          {byStage.map(({ stage, deals: stageDeals }) => (
             <div key={stage}>
               <div className="mb-2 flex items-center gap-2">
                 <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   {STAGE_LABELS[stage]}
                 </span>
                 <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">
-                  {deals.length}
+                  {stageDeals.length}
                 </span>
               </div>
               <div className="space-y-1.5">
-                {deals.map((d) => <DealRow key={d.id} deal={d} />)}
+                {stageDeals.map((d) => <DealRow key={d.id} deal={d} />)}
               </div>
             </div>
           ))}
         </div>
       </section>
 
-      {/* By Agent */}
       <section>
         <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-gray-400">By Agent</h2>
         <div className="space-y-2">
-          {agents.map((agent) => {
-            const agentDeals = MOCK_DEALS.filter(
-              (d) => d.agentId === agent.id && d.stage !== 'post_close'
-            );
+          {agentEntries.map(([agentId, { name, email, deals: agentDeals }]) => {
             const agentCommission = agentDeals.reduce((s, d) => s + d.estimatedCommission, 0);
-            const agentOverdue = MOCK_TASKS.filter(
-              (t) => t.assignedToId === agent.id && t.status === 'overdue'
-            );
+            const agentOverdue = agentDeals.reduce((s, d) => s + (d.overdueTaskCount ?? 0), 0);
             const healthCounts = {
               green: agentDeals.filter((d) => d.health === 'green').length,
               yellow: agentDeals.filter((d) => d.health === 'yellow').length,
               red: agentDeals.filter((d) => d.health === 'red').length,
             };
-
             return (
-              <Link key={agent.id} to="/admin/users" className="flex items-center gap-4 rounded-xl bg-white px-5 py-4 shadow-sm hover:shadow-md transition-shadow group">
-                <img src={agent.avatar} alt={agent.name} className="h-10 w-10 rounded-full ring-2 ring-brand-navy/10 group-hover:ring-brand-navy/30 transition-all" />
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-brand-navy text-sm">{agent.name}</div>
-                  <div className="text-xs text-gray-400">{agent.email}</div>
+              <Link
+                key={agentId}
+                to="/admin/users"
+                className="flex items-center gap-4 rounded-xl bg-white px-5 py-4 shadow-sm hover:shadow-md transition-shadow group"
+              >
+                <div className="h-10 w-10 rounded-full bg-brand-navy/10 flex items-center justify-center text-sm font-bold text-brand-navy ring-2 ring-brand-navy/10 group-hover:ring-brand-navy/30 transition-all flex-shrink-0">
+                  {initials(name)}
                 </div>
-                {/* Health dots */}
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-brand-navy text-sm">{name}</div>
+                  <div className="text-xs text-gray-400">{email}</div>
+                </div>
                 <div className="flex items-center gap-2.5">
                   {healthCounts.green > 0 && (
                     <span className="flex items-center gap-1 text-xs font-medium text-green-600">
@@ -332,10 +305,10 @@ function PipelineOverview() {
                   <div className="text-sm font-bold text-brand-navy">{fmt$(agentCommission)}</div>
                   <div className="text-xs text-gray-400">{agentDeals.length} active deals</div>
                 </div>
-                {agentOverdue.length > 0 && (
+                {agentOverdue > 0 && (
                   <div className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-600">
                     <AlertTriangle size={11} />
-                    {agentOverdue.length} overdue
+                    {agentOverdue} overdue
                   </div>
                 )}
               </Link>
@@ -349,12 +322,12 @@ function PipelineOverview() {
 
 // ─── All Deals ─────────────────────────────────────────────────────────────────
 
-function AllDeals() {
+function AllDeals({ deals }: { deals: Deal[] }) {
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-brand-navy">All Deals</h1>
-        <p className="text-sm text-gray-400 mt-0.5">{MOCK_DEALS.length} deals total</p>
+        <p className="text-sm text-gray-400 mt-0.5">{deals.length} deals total</p>
       </div>
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         <table className="w-full text-sm">
@@ -371,43 +344,44 @@ function AllDeals() {
             </tr>
           </thead>
           <tbody>
-            {MOCK_DEALS.map((deal) => {
-              const agent = MOCK_USERS.find((u) => u.id === deal.agentId);
-              return (
-                <tr key={deal.id} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
-                  <td className="px-5 py-3 font-medium text-brand-navy">{deal.clientName}</td>
-                  <td className="px-5 py-3 text-gray-600">
-                    {deal.property.address}
-                    <span className="ml-1 text-gray-400 text-xs">{deal.property.city}</span>
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase ${deal.type === 'buy' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                      {deal.type}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-gray-600">{STAGE_LABELS[deal.stage]}</td>
-                  <td className="px-5 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${HEALTH_BADGE[deal.health]}`}>
-                      {deal.health}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
-                    {agent && (
-                      <Link to="/admin/users" className="flex items-center gap-1.5 group w-fit">
-                        <img src={agent.avatar} alt={agent.name} className="h-5 w-5 rounded-full ring-2 ring-transparent group-hover:ring-brand-navy/30 transition-all" />
-                        <span className="text-gray-600 text-xs group-hover:text-brand-navy transition-colors">{agent.name}</span>
-                      </Link>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-gray-500 text-xs">
-                    {deal.timeline.closingDate ?? '—'}
-                  </td>
-                  <td className="px-5 py-3 text-right font-medium text-brand-navy">
-                    ${deal.estimatedCommission.toLocaleString()}
-                  </td>
-                </tr>
-              );
-            })}
+            {deals.map((deal) => (
+              <tr key={deal.id} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
+                <td className="px-5 py-3 font-medium text-brand-navy">{deal.clientName}</td>
+                <td className="px-5 py-3 text-gray-600">
+                  {deal.property.address}
+                  {deal.property.city && <span className="ml-1 text-gray-400 text-xs">{deal.property.city}</span>}
+                </td>
+                <td className="px-5 py-3">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase ${deal.type === 'buy' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                    {deal.type}
+                  </span>
+                </td>
+                <td className="px-5 py-3 text-gray-600">{STAGE_LABELS[deal.stage]}</td>
+                <td className="px-5 py-3">
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${HEALTH_BADGE[deal.health]}`}>
+                    {deal.health}
+                  </span>
+                </td>
+                <td className="px-5 py-3">
+                  {deal.agentName && (
+                    <Link to="/admin/users" className="flex items-center gap-1.5 group w-fit">
+                      <div className="h-5 w-5 rounded-full bg-brand-navy/10 flex items-center justify-center text-[9px] font-bold text-brand-navy ring-2 ring-transparent group-hover:ring-brand-navy/30 transition-all">
+                        {initials(deal.agentName)}
+                      </div>
+                      <span className="text-gray-600 text-xs group-hover:text-brand-navy transition-colors">
+                        {deal.agentName}
+                      </span>
+                    </Link>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-gray-500 text-xs">
+                  {deal.timeline.closingDate ?? '—'}
+                </td>
+                <td className="px-5 py-3 text-right font-medium text-brand-navy">
+                  ${deal.estimatedCommission.toLocaleString()}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -417,9 +391,9 @@ function AllDeals() {
 
 // ─── Pending Disclosures ───────────────────────────────────────────────────────
 
-function PendingDisclosures() {
-  const pending = MOCK_DEALS.filter(
-    (d) => d.loanMilestones?.disclosuresOut && !d.loanMilestones?.disclosuresSignedSubmitted
+function PendingDisclosures({ deals }: { deals: Deal[] }) {
+  const pending = deals.filter(
+    (d) => d.loanMilestones?.disclosuresOut && !d.loanMilestones?.disclosuresSignedSubmitted,
   );
 
   return (
@@ -458,8 +432,8 @@ function PendingDisclosures() {
 
 // ─── Pre-Approval Queue ────────────────────────────────────────────────────────
 
-function PreApprovalQueue() {
-  const mmDeals = MOCK_DEALS.filter((d) => d.flags.includes('mountain_mortgage'));
+function PreApprovalQueue({ deals }: { deals: Deal[] }) {
+  const mmDeals = deals.filter((d) => d.flags.includes('mountain_mortgage'));
 
   return (
     <div className="space-y-5">
@@ -473,28 +447,24 @@ function PreApprovalQueue() {
         </div>
       ) : (
         <div className="space-y-2">
-          {mmDeals.map((d) => {
-            const tasks = MOCK_TASKS.filter((t) => t.dealId === d.id && t.assignedTo === 'buyer');
-            const openTask = tasks.find((t) => t.status === 'in_progress' || t.status === 'pending');
-            return (
-              <div key={d.id} className="flex items-center gap-4 rounded-xl bg-white px-5 py-4 shadow-sm border-l-4 border-l-blue-400">
-                <CheckSquare size={18} className="text-blue-500 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-brand-navy text-sm">{d.clientName}</div>
-                  <div className="text-xs text-gray-400 truncate">
-                    {openTask ? openTask.title : 'No open tasks'}
-                  </div>
-                </div>
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
-                  {STAGE_LABELS[d.stage]}
-                </span>
-                <div className="text-right">
-                  <div className="text-sm font-bold text-brand-navy">{fmt$(d.property.price)}</div>
-                  <div className="text-xs text-gray-400">target price</div>
+          {mmDeals.map((d) => (
+            <div key={d.id} className="flex items-center gap-4 rounded-xl bg-white px-5 py-4 shadow-sm border-l-4 border-l-blue-400">
+              <CheckSquare size={18} className="text-blue-500 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-brand-navy text-sm">{d.clientName}</div>
+                <div className="text-xs text-gray-400 truncate">
+                  {(d.openTaskCount ?? 0) > 0 ? `${d.openTaskCount} open task${d.openTaskCount !== 1 ? 's' : ''}` : 'No open tasks'}
                 </div>
               </div>
-            );
-          })}
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                {STAGE_LABELS[d.stage]}
+              </span>
+              <div className="text-right">
+                <div className="text-sm font-bold text-brand-navy">{fmt$(d.property.price)}</div>
+                <div className="text-xs text-gray-400">target price</div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -503,10 +473,9 @@ function PreApprovalQueue() {
 
 // ─── Stuck Deals ──────────────────────────────────────────────────────────────
 
-function StuckDeals() {
-  // Deals that have been in current stage > 14 days
-  const stuck = MOCK_DEALS.filter(
-    (d) => d.stage !== 'post_close' && d.timeline.daysInStage >= 14
+function StuckDeals({ deals }: { deals: Deal[] }) {
+  const stuck = deals.filter(
+    (d) => d.stage !== 'post_close' && d.timeline.daysInStage >= 14,
   );
 
   return (
@@ -545,12 +514,11 @@ function StuckDeals() {
 
 // ─── Fees Collected ────────────────────────────────────────────────────────────
 
-function FeesCollected() {
-  const closedDeals = MOCK_DEALS.filter((d) => d.stage === 'post_close');
+function FeesCollected({ deals }: { deals: Deal[] }) {
+  const closedDeals = deals.filter((d) => d.stage === 'post_close');
   const totalCollected = closedDeals.reduce((s, d) => s + d.estimatedCommission, 0);
-  const totalPending = MOCK_DEALS
-    .filter((d) => d.stage !== 'post_close')
-    .reduce((s, d) => s + d.estimatedCommission, 0);
+  const activeDeals = deals.filter((d) => d.stage !== 'post_close');
+  const totalPending = activeDeals.reduce((s, d) => s + d.estimatedCommission, 0);
 
   return (
     <div className="space-y-5">
@@ -567,7 +535,7 @@ function FeesCollected() {
         <div className="rounded-xl bg-white px-5 py-5 shadow-sm">
           <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Pipeline (Pending)</div>
           <div className="text-2xl font-bold text-brand-navy">{fmt$(totalPending)}</div>
-          <div className="text-xs text-gray-400 mt-1">{MOCK_DEALS.filter((d) => d.stage !== 'post_close').length} active deals</div>
+          <div className="text-xs text-gray-400 mt-1">{activeDeals.length} active deals</div>
         </div>
       </div>
 
@@ -587,7 +555,7 @@ function FeesCollected() {
             </tr>
           </thead>
           <tbody>
-            {MOCK_DEALS.map((d) => (
+            {deals.map((d) => (
               <tr key={d.id} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
                 <td className="px-5 py-3 font-medium text-brand-navy">{d.clientName}</td>
                 <td className="px-5 py-3 text-gray-500 text-xs">{STAGE_LABELS[d.stage]}</td>
@@ -636,27 +604,21 @@ const STATUS_STYLES: Record<string, { badge: string; border: string; label: stri
   },
 };
 
-function ActiveFastPass() {
-  const fpDeals = MOCK_DEALS.filter(
-    (d) => d.flags.includes('fast_pass') && d.stage !== 'post_close'
-  );
+function ActiveFastPass({ deals }: { deals: Deal[] }) {
+  const fpDeals = deals.filter((d) => d.flags.includes('fast_pass') && d.stage !== 'post_close');
   const pendingPayment = fpDeals.filter((d) => d.fastPass?.status === 'pending_payment');
   const active = fpDeals.filter((d) => d.fastPass?.status === 'active');
   const noEnrollment = fpDeals.filter((d) => !d.fastPass);
 
-  function FPDealCard({ d }: { d: (typeof MOCK_DEALS)[0] }) {
+  function FPDealCard({ d }: { d: Deal }) {
     const fp = d.fastPass;
     const style = fp ? STATUS_STYLES[fp.status] : STATUS_STYLES.active;
-    const fpTasks = MOCK_TASKS.filter((t) => t.dealId === d.id);
-    const completed = fpTasks.filter((t) => t.status === 'completed').length;
-    const pct = fpTasks.length > 0 ? Math.round((completed / fpTasks.length) * 100) : 0;
     const upsellItems = fp
       ? FAST_PASS_UPSELLS.filter((u) => fp.selectedUpsells.includes(u.id))
       : [];
 
     return (
       <div className={`rounded-xl bg-white shadow-sm border-l-4 ${style.border} overflow-hidden`}>
-        {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4">
           <Zap size={18} className="text-green-500 flex-shrink-0" />
           <div className="flex-1 min-w-0">
@@ -689,7 +651,6 @@ function ActiveFastPass() {
           )}
         </div>
 
-        {/* Upsells */}
         {upsellItems.length > 0 && (
           <div className="border-t border-gray-50 px-5 py-3">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
@@ -697,10 +658,7 @@ function ActiveFastPass() {
             </div>
             <div className="flex flex-wrap gap-1.5">
               {upsellItems.map((u) => (
-                <span
-                  key={u.id}
-                  className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700"
-                >
+                <span key={u.id} className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
                   <Check size={9} strokeWidth={3} />
                   {u.name}
                 </span>
@@ -709,7 +667,6 @@ function ActiveFastPass() {
           </div>
         )}
 
-        {/* Survey snapshot */}
         {fp?.surveyAnswers && (
           <div className="border-t border-gray-50 px-5 py-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
             <div>
@@ -724,9 +681,7 @@ function ActiveFastPass() {
             </div>
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-300">Situation</div>
-              <div className="text-xs text-gray-600 capitalize">
-                {fp.surveyAnswers.currentSituation}
-              </div>
+              <div className="text-xs text-gray-600 capitalize">{fp.surveyAnswers.currentSituation}</div>
             </div>
             {fp.surveyAnswers.utilities.length > 0 && (
               <div className="col-span-2">
@@ -740,20 +695,6 @@ function ActiveFastPass() {
                 <div className="text-xs text-gray-600 italic">{fp.surveyAnswers.notes}</div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* Task progress */}
-        {fpTasks.length > 0 && (
-          <div className="border-t border-gray-50 px-5 py-3">
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-1.5 rounded-full bg-gray-100">
-                <div className="h-1.5 rounded-full bg-green-400" style={{ width: `${pct}%` }} />
-              </div>
-              <span className="text-xs text-gray-400 font-medium flex-shrink-0">
-                {completed}/{fpTasks.length} tasks
-              </span>
-            </div>
           </div>
         )}
       </div>
@@ -818,12 +759,12 @@ function ActiveFastPass() {
 
 // ─── Smooth Exit ──────────────────────────────────────────────────────────────
 
-function SmoothExitQueue() {
-  const seDeals = MOCK_DEALS.filter((d) => d.smoothExit && d.stage !== 'post_close');
+function SmoothExitQueue({ deals }: { deals: Deal[] }) {
+  const seDeals = deals.filter((d) => d.smoothExit && d.stage !== 'post_close');
   const pending = seDeals.filter((d) => d.smoothExit?.status === 'pending');
   const active = seDeals.filter((d) => d.smoothExit?.status === 'active');
 
-  function SECard({ d }: { d: (typeof MOCK_DEALS)[0] }) {
+  function SECard({ d }: { d: Deal }) {
     const se = d.smoothExit!;
     const qualifies = se.nextStep ? nextStepQualifiesForBridge(se.nextStep) : false;
 
@@ -921,7 +862,7 @@ function SmoothExitQueue() {
 
 // ─── ARIVE Status ──────────────────────────────────────────────────────────────
 
-const ARIVE_CHECKS: { key: keyof NonNullable<Deal["loanMilestones"]>; label: string }[] = [
+const ARIVE_CHECKS: { key: keyof NonNullable<Deal['loanMilestones']>; label: string }[] = [
   { key: 'loanSetup',                  label: 'Loan Setup' },
   { key: 'disclosuresOut',             label: 'Disclosures Out' },
   { key: 'disclosuresSignedSubmitted', label: 'Signed & Submitted' },
@@ -930,8 +871,8 @@ const ARIVE_CHECKS: { key: keyof NonNullable<Deal["loanMilestones"]>; label: str
   { key: 'clearToClose',               label: 'Clear to Close' },
 ];
 
-function AriveStatus() {
-  const dealsWithArive = MOCK_DEALS.filter((d) => d.loanMilestones != null);
+function AriveStatus({ deals }: { deals: Deal[] }) {
+  const dealsWithArive = deals.filter((d) => d.loanMilestones != null);
 
   return (
     <div className="space-y-5">
@@ -962,7 +903,6 @@ function AriveStatus() {
                   <span className="text-xs text-gray-400">{STAGE_LABELS[d.stage]}</span>
                   <span className="text-xs font-semibold text-brand-navy">{pct}%</span>
                 </div>
-                {/* Checklist */}
                 <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                   {ARIVE_CHECKS.map(({ key, label }) => {
                     const val = a[key];
@@ -978,7 +918,6 @@ function AriveStatus() {
                     );
                   })}
                 </div>
-                {/* Appraisal + Funded */}
                 <div className="flex gap-3 mt-2">
                   <div className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium ${a.appraisal === 'complete' ? 'bg-green-50 text-green-700' : a.appraisal === 'scheduled' ? 'bg-amber-50 text-amber-600' : a.appraisal === 'ordered' ? 'bg-blue-50 text-blue-600' : 'bg-gray-50 text-gray-400'}`}>
                     <span className={`h-1.5 w-1.5 rounded-full ${a.appraisal === 'complete' ? 'bg-green-400' : a.appraisal === 'scheduled' ? 'bg-amber-400' : a.appraisal === 'ordered' ? 'bg-blue-400' : 'bg-gray-300'}`} />
@@ -1002,14 +941,17 @@ function AriveStatus() {
 // ─── User Management ──────────────────────────────────────────────────────────
 
 const ROLE_STYLES: Record<string, { badge: string; label: string }> = {
-  agent:  { badge: 'bg-blue-100 text-blue-700',   label: 'Agent' },
-  tc:     { badge: 'bg-amber-100 text-amber-700', label: 'TC' },
-  buyer:  { badge: 'bg-green-100 text-green-700', label: 'Buyer' },
-  seller: { badge: 'bg-purple-100 text-purple-700', label: 'Seller' },
-  admin:  { badge: 'bg-red-100 text-red-700',     label: 'Admin' },
+  agent:           { badge: 'bg-blue-100 text-blue-700',    label: 'Agent' },
+  tc:              { badge: 'bg-amber-100 text-amber-700',  label: 'TC' },
+  buyer:           { badge: 'bg-green-100 text-green-700',  label: 'Buyer' },
+  seller:          { badge: 'bg-purple-100 text-purple-700', label: 'Seller' },
+  admin:           { badge: 'bg-red-100 text-red-700',      label: 'Admin' },
+  lending_partner: { badge: 'bg-blue-100 text-blue-700',    label: 'Lending Partner' },
 };
 
 function UserManagement() {
+  const { users, loading } = useUsers();
+
   const groups = [
     { id: 'agent',  label: 'Agents' },
     { id: 'tc',     label: 'Transaction Coordinators' },
@@ -1019,51 +961,44 @@ function UserManagement() {
 
   const stats = groups.map((g) => ({
     ...g,
-    count: MOCK_USERS.filter((u) => u.groupId === g.id).length,
+    count: users.filter((u) => u.role === g.id).length,
   }));
 
-  function UserRow({ user }: { user: typeof MOCK_USERS[0] }) {
-    const dealCount = MOCK_DEALS.filter(
-      (d) => d.clientId === user.id || d.agentId === user.id
-    ).length;
-    const style = ROLE_STYLES[user.groupId] ?? ROLE_STYLES.agent;
+  function UserRow({ user }: { user: AppUser }) {
+    const style = ROLE_STYLES[user.role] ?? ROLE_STYLES.agent;
+    const userInitials = initials(user.name);
 
     return (
       <tr className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
-        {/* Avatar + name */}
         <td className="px-5 py-3">
           <div className="flex items-center gap-3">
-            <img src={user.avatar} alt={user.name} className="h-8 w-8 rounded-full flex-shrink-0" />
+            <div className="h-8 w-8 rounded-full bg-brand-navy/10 flex items-center justify-center text-xs font-bold text-brand-navy flex-shrink-0">
+              {userInitials}
+            </div>
             <div>
               <div className="font-semibold text-brand-navy text-sm">{user.name}</div>
-              <div className="text-xs text-gray-400">{user.id}</div>
+              <div className="text-xs text-gray-400">{user.id.slice(0, 8)}…</div>
             </div>
           </div>
         </td>
-        {/* Email */}
         <td className="px-5 py-3">
           <a href={`mailto:${user.email}`} className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-navy transition-colors">
             <Mail size={11} /> {user.email}
           </a>
         </td>
-        {/* Role */}
         <td className="px-5 py-3">
           <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${style.badge}`}>
             {style.label}
           </span>
         </td>
-        {/* Deals */}
         <td className="px-5 py-3 text-center">
-          <span className="text-sm font-semibold text-brand-navy">{dealCount}</span>
-          <span className="text-xs text-gray-400 ml-1">deal{dealCount !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-gray-400">—</span>
         </td>
-        {/* Status */}
         <td className="px-5 py-3">
           <span className="flex items-center gap-1 text-xs font-medium text-green-600">
             <ShieldCheck size={13} /> Active
           </span>
         </td>
-        {/* Actions */}
         <td className="px-5 py-3 text-right">
           <div className="flex items-center justify-end gap-2">
             <button className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
@@ -1078,40 +1013,43 @@ function UserManagement() {
     );
   }
 
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold text-brand-navy">User Management</h1>
+        <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Loading users…</div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-7">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-brand-navy">User Management</h1>
         <p className="text-sm text-gray-400 mt-0.5">All platform users across every role</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {stats.map(({ label, count, id }) => {
-          const style = ROLE_STYLES[id];
-          return (
-            <div key={id} className="rounded-xl bg-white px-5 py-4 shadow-sm">
-              <div className={`text-2xl font-bold mb-0.5 ${
-                id === 'agent' ? 'text-blue-600' :
-                id === 'tc' ? 'text-amber-600' :
-                id === 'buyer' ? 'text-green-600' : 'text-purple-600'
-              }`}>{count}</div>
-              <div className="text-xs text-gray-400 font-medium">{label}</div>
-            </div>
-          );
-        })}
+        {stats.map(({ label, count, id }) => (
+          <div key={id} className="rounded-xl bg-white px-5 py-4 shadow-sm">
+            <div className={`text-2xl font-bold mb-0.5 ${
+              id === 'agent' ? 'text-blue-600' :
+              id === 'tc' ? 'text-amber-600' :
+              id === 'buyer' ? 'text-green-600' : 'text-purple-600'
+            }`}>{count}</div>
+            <div className="text-xs text-gray-400 font-medium">{label}</div>
+          </div>
+        ))}
       </div>
 
-      {/* User table — grouped by role */}
       {groups.map(({ id, label }) => {
-        const users = MOCK_USERS.filter((u) => u.groupId === id);
-        if (users.length === 0) return null;
+        const roleUsers = users.filter((u) => u.role === id);
+        if (roleUsers.length === 0) return null;
         return (
           <section key={id}>
             <div className="mb-3 flex items-center gap-2">
               <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400">{label}</h2>
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{users.length}</span>
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{roleUsers.length}</span>
             </div>
             <div className="rounded-xl bg-white shadow-sm overflow-hidden">
               <table className="w-full text-sm">
@@ -1126,7 +1064,7 @@ function UserManagement() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u) => <UserRow key={u.id} user={u} />)}
+                  {roleUsers.map((u) => <UserRow key={u.id} user={u} />)}
                 </tbody>
               </table>
             </div>
@@ -1134,7 +1072,6 @@ function UserManagement() {
         );
       })}
 
-      {/* Invite button */}
       <div className="rounded-xl border-2 border-dashed border-gray-200 px-5 py-6 text-center">
         <Users size={20} className="mx-auto mb-2 text-gray-300" />
         <p className="text-sm font-medium text-gray-500 mb-3">Need to add a new agent or TC?</p>
@@ -1163,35 +1100,31 @@ function ComingSoon({ title }: { title: string }) {
 
 export default function AdminDashboard() {
   const { section } = useParams<{ section?: string }>();
+  const { deals, loading } = useDeals();
+
+  if (section === 'users') return <UserManagement />;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center p-12 text-gray-400 text-sm">
+        Loading…
+      </div>
+    );
+  }
 
   switch (section) {
-    case 'deals':
-      return <AllDeals />;
-    case 'disclosures':
-      return <PendingDisclosures />;
-    case 'preapproval':
-      return <PreApprovalQueue />;
-    case 'stuck':
-      return <StuckDeals />;
-    case 'fees':
-      return <FeesCollected />;
-    case 'outstanding':
-      return <ComingSoon title="Outstanding Items" />;
-    case 'fastpass':
-      return <ActiveFastPass />;
-    case 'smoothexit':
-      return <SmoothExitQueue />;
-    case 'arive':
-      return <AriveStatus />;
-    case 'users':
-      return <UserManagement />;
-    case 'metro':
-      return <ComingSoon title="Metro View" />;
-    case 'promotions':
-      return <ComingSoon title="Promotions" />;
-    case 'config':
-      return <ComingSoon title="System Config" />;
-    default:
-      return <PipelineOverview />;
+    case 'deals':       return <AllDeals deals={deals} />;
+    case 'disclosures': return <PendingDisclosures deals={deals} />;
+    case 'preapproval': return <PreApprovalQueue deals={deals} />;
+    case 'stuck':       return <StuckDeals deals={deals} />;
+    case 'fees':        return <FeesCollected deals={deals} />;
+    case 'outstanding': return <ComingSoon title="Outstanding Items" />;
+    case 'fastpass':    return <ActiveFastPass deals={deals} />;
+    case 'smoothexit':  return <SmoothExitQueue deals={deals} />;
+    case 'arive':       return <AriveStatus deals={deals} />;
+    case 'metro':       return <ComingSoon title="Metro View" />;
+    case 'promotions':  return <ComingSoon title="Promotions" />;
+    case 'config':      return <ComingSoon title="System Config" />;
+    default:            return <PipelineOverview deals={deals} />;
   }
 }
