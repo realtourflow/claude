@@ -47,53 +47,6 @@ jobs:
           container-name: ${{ env.CONTAINER_NAME }}
           image: ${{ steps.build-image.outputs.image }}
 
-      - name: Fix target group health check path
-        run: |
-          TG_ARN=$(aws elbv2 describe-target-groups \
-            --names realtourflow-api-tg \
-            --query 'TargetGroups[0].TargetGroupArn' \
-            --output text)
-          echo "Target group ARN: $TG_ARN"
-          aws elbv2 modify-target-group \
-            --target-group-arn "$TG_ARN" \
-            --health-check-path /api/health \
-            --health-check-interval-seconds 30 \
-            --healthy-threshold-count 2 \
-            --unhealthy-threshold-count 3 \
-            --matcher HttpCode=200
-          echo "Health check path set to /api/health"
-
-      - name: Ensure ECS service exists with load balancer
-        run: |
-          STATUS=$(aws ecs describe-services \
-            --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE \
-            --query 'services[0].status' \
-            --output text 2>/dev/null || echo "NONE")
-
-          if [ "$STATUS" = "ACTIVE" ]; then
-            echo "Service $ECS_SERVICE is ACTIVE — skipping creation"
-          else
-            echo "Service missing or inactive — creating $ECS_SERVICE with ALB..."
-
-            TG_ARN=$(aws elbv2 describe-target-groups \
-              --names realtourflow-api-tg \
-              --query 'TargetGroups[0].TargetGroupArn' \
-              --output text)
-
-            aws ecs create-service \
-              --cluster $ECS_CLUSTER \
-              --service-name $ECS_SERVICE \
-              --task-definition realtourflow-api \
-              --desired-count 1 \
-              --launch-type FARGATE \
-              --network-configuration "awsvpcConfiguration={subnets=[subnet-02f8968c5ca21ea26,subnet-06ed2249f5119f057,subnet-0c24e444d546199e3,subnet-09eede0b84bf501cc,subnet-0da3c422cb867d5fb,subnet-04be7c574c90c891e],securityGroups=[sg-0fdd265d2f92c2e2c],assignPublicIp=ENABLED}" \
-              --load-balancers "targetGroupArn=$TG_ARN,containerName=$CONTAINER_NAME,containerPort=8080" \
-              --health-check-grace-period-seconds 120
-
-            echo "Service $ECS_SERVICE created"
-          fi
-
       - name: Deploy to ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
