@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   User, Store, Bell, Plug, Star, Pencil, Trash2,
   ChevronUp, ChevronDown, Plus, X, Check, ExternalLink,
@@ -13,6 +13,7 @@ import {
   VENDOR_CATEGORY_ORDER,
 } from '../../data/mockVendors';
 import { useVendors, Vendor, VendorInput } from '../../hooks/useVendors';
+import { useSettings } from '../../hooks/useSettings';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
@@ -397,18 +398,43 @@ function VendorsSection({ agentId }: { agentId: string }) {
 
 function ProfileSection() {
   const { activeUser } = useAuthStore();
+  const { settings, loading: settingsLoading, saveSettings, saveProfile } = useSettings();
   const [form, setForm] = useState({
     name: activeUser?.name ?? '',
     phone: '',
-    title: activeUser?.role ?? '',
+    title: '',
     licenseNumber: '',
     bio: '',
   });
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  function handleSave() {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  useEffect(() => {
+    if (!settingsLoading) {
+      setForm((f) => ({
+        ...f,
+        phone: (settings.phone as string) ?? '',
+        title: (settings.title as string) ?? '',
+        licenseNumber: (settings.licenseNumber as string) ?? '',
+        bio: (settings.bio as string) ?? '',
+      }));
+    }
+  }, [settingsLoading, settings]);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await Promise.all([
+        saveProfile(form.name, form.phone),
+        saveSettings({ title: form.title, licenseNumber: form.licenseNumber, bio: form.bio }),
+      ]);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // Error handling — could add toast here
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -471,14 +497,17 @@ function ProfileSection() {
 
       <button
         onClick={handleSave}
+        disabled={saving}
         className={[
           'flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition-all',
           saved
             ? 'bg-green-500 text-white'
+            : saving
+            ? 'bg-brand-navy/60 text-white cursor-not-allowed'
             : 'bg-brand-navy text-white hover:bg-brand-navy/90 active:scale-[0.98]',
         ].join(' ')}
       >
-        {saved ? <><Check size={15} /> Saved</> : 'Save profile'}
+        {saved ? <><Check size={15} /> Saved</> : saving ? 'Saving…' : 'Save profile'}
       </button>
     </div>
   );
@@ -512,17 +541,32 @@ const NOTIFICATION_ITEMS = [
   },
 ];
 
+const NOTIFICATION_DEFAULTS: Record<string, boolean> = {
+  deal_stage: true,
+  new_task: true,
+  overdue_task: true,
+  fastpass_enroll: true,
+  disclosure_reminder: true,
+  new_message: false,
+  email: true,
+  push: false,
+};
+
 function NotificationsSection() {
-  const [enabled, setEnabled] = useState<Record<string, boolean>>({
-    deal_stage: true,
-    new_task: true,
-    overdue_task: true,
-    fastpass_enroll: true,
-    disclosure_reminder: true,
-    new_message: false,
-    email: true,
-    push: false,
-  });
+  const { settings, loading, saveSettings } = useSettings();
+  const [enabled, setEnabled] = useState<Record<string, boolean>>(NOTIFICATION_DEFAULTS);
+
+  useEffect(() => {
+    if (!loading && settings.notifications) {
+      setEnabled({ ...NOTIFICATION_DEFAULTS, ...(settings.notifications as Record<string, boolean>) });
+    }
+  }, [loading, settings.notifications]);
+
+  function toggle(id: string) {
+    const updated = { ...enabled, [id]: !enabled[id] };
+    setEnabled(updated);
+    saveSettings({ notifications: updated });
+  }
 
   return (
     <div className="space-y-5 max-w-lg">
@@ -537,7 +581,7 @@ function NotificationsSection() {
                   <div className="text-xs text-gray-400 mt-0.5">{sub}</div>
                 </div>
                 <button
-                  onClick={() => setEnabled((s) => ({ ...s, [id]: !s[id] }))}
+                  onClick={() => toggle(id)}
                   className={[
                     'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors',
                     enabled[id] ? 'bg-brand-navy' : 'bg-gray-200',

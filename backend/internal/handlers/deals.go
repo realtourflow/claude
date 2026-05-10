@@ -197,12 +197,12 @@ func (h *Handler) GetDeal(w http.ResponseWriter, r *http.Request) {
 	deal := &models.Deal{}
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT id, agent_id, type, stage, `+healthExpr+` AS health,
-		       title, address, price, arive_linked, created_at, updated_at
+		       title, address, price, arive_linked, notes, created_at, updated_at
 		FROM deals
 		WHERE id = $1 AND agent_id = $2
 	`, dealID, userID).Scan(
 		&deal.ID, &deal.AgentID, &deal.Type, &deal.Stage, &deal.Health,
-		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked, &deal.Notes, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		http.Error(w, "deal not found", http.StatusNotFound)
@@ -285,12 +285,12 @@ func (h *Handler) AdvanceStage(w http.ResponseWriter, r *http.Request) {
 	deal := &models.Deal{}
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT id, agent_id, type, stage, `+healthExpr+` AS health,
-		       title, address, price, arive_linked, created_at, updated_at
+		       title, address, price, arive_linked, notes, created_at, updated_at
 		FROM deals
 		WHERE id = $1
 	`, dealID).Scan(
 		&deal.ID, &deal.AgentID, &deal.Type, &deal.Stage, &deal.Health,
-		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked, &deal.Notes, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err != nil {
 		http.Error(w, "failed to fetch updated deal", http.StatusInternalServerError)
@@ -298,4 +298,60 @@ func (h *Handler) AdvanceStage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, http.StatusOK, deal)
+}
+
+// UpdateDealNotes — PATCH /deals/:dealId/notes — saves internal notes on a deal.
+func (h *Handler) UpdateDealNotes(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	dealID := chi.URLParam(r, "dealId")
+	userID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+
+	allowed := false
+	for _, role := range middleware.GetRoles(r) {
+		if role == "agent" || role == "tc" || role == "admin" {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	// Agents must own the deal
+	for _, role := range middleware.GetRoles(r) {
+		if role == "agent" {
+			var ownerID string
+			if err := h.db.QueryRowContext(r.Context(), `SELECT agent_id FROM deals WHERE id = $1`, dealID).Scan(&ownerID); err != nil || ownerID != userID {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			break
+		}
+	}
+
+	var req struct {
+		Notes string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	_, err = h.db.ExecContext(r.Context(), `UPDATE deals SET notes = $1, updated_at = NOW() WHERE id = $2`, req.Notes, dealID)
+	if err != nil {
+		http.Error(w, "failed to update notes", http.StatusInternalServerError)
+		return
+	}
+
+	respond(w, http.StatusOK, map[string]bool{"ok": true})
 }

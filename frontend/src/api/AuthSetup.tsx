@@ -26,6 +26,13 @@ export function AuthSetup({ children }: { children: React.ReactNode }) {
       name: user.name ?? '',
     }).then((dbUser) => {
       setFromAuth0(dbUser.id, dbUser.name, dbUser.email, dbUser.role, user.picture);
+      const pendingToken = localStorage.getItem('pendingInvite');
+      const pendingEmail = localStorage.getItem('pendingInviteEmail');
+      if (pendingToken && pendingEmail) {
+        localStorage.removeItem('pendingInvite');
+        localStorage.removeItem('pendingInviteEmail');
+        api.post(`/invites/${pendingToken}/claim`, { email: pendingEmail, name: dbUser.name }).catch(() => {});
+      }
     }).catch((err) => {
       console.error('users/sync failed:', err);
       setSyncError(String(err));

@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { create } from 'zustand';
 import { useAuthStore } from '../../store/authStore';
 import { Deal, LoanMilestones } from '../../data/mockDeals';
 import { useDeals } from '../../hooks/useDeals';
+import { useContingencies, ContingencyStatus, ContingencyType, Contingency } from '../../hooks/useContingencies';
 import { useChecklist, ChecklistAssignee } from '../../hooks/useChecklist';
 import { usePermission } from '../../permissions/usePermission';
 import { PERMISSIONS } from '../../permissions/permissions';
@@ -14,43 +14,6 @@ import {
   Shield, ShieldCheck, ShieldOff, Phone, Copy, Zap,
   CalendarDays, User, FileCheck, Eye, FileX, Upload, ChevronDown,
 } from 'lucide-react';
-
-// ─── Contingency store (inline — persists across TC nav) ─────────────────────
-
-type ContingencyStatus = 'active' | 'waived' | 'removed';
-type ContingencyType   = 'inspection' | 'financing' | 'appraisal' | 'hoa' | 'custom';
-
-type Contingency = {
-  id: string;
-  dealId: string;
-  type: ContingencyType;
-  label: string;
-  status: ContingencyStatus;
-  deadline?: string;
-  notes?: string;
-};
-
-const INIT_CONTINGENCIES: Contingency[] = [
-  { id: 'cs1', dealId: 'deal-smith',    type: 'inspection', label: 'Inspection', status: 'active',  deadline: '2026-04-25' },
-  { id: 'cs2', dealId: 'deal-smith',    type: 'financing',  label: 'Financing',  status: 'active',  deadline: '2026-05-05' },
-  { id: 'cs3', dealId: 'deal-smith',    type: 'appraisal',  label: 'Appraisal',  status: 'active',  deadline: '2026-05-01' },
-  { id: 'cw1', dealId: 'deal-williams', type: 'inspection', label: 'Inspection', status: 'waived' },
-  { id: 'cw2', dealId: 'deal-williams', type: 'financing',  label: 'Financing',  status: 'active',  deadline: '2026-04-28' },
-  { id: 'cw3', dealId: 'deal-williams', type: 'appraisal',  label: 'Appraisal',  status: 'removed' },
-];
-
-type ContingencyStore = {
-  items: Contingency[];
-  update: (id: string, status: ContingencyStatus) => void;
-};
-
-const useContingencyStore = create<ContingencyStore>((set) => ({
-  items: INIT_CONTINGENCIES,
-  update: (id, status) =>
-    set((state) => ({
-      items: state.items.map((c) => (c.id === id ? { ...c, status } : c)),
-    })),
-}));
 
 // ─── Documents mock data ──────────────────────────────────────────────────────
 
@@ -127,13 +90,11 @@ function useMyDeals() {
 // ─── Deal card ────────────────────────────────────────────────────────────────
 
 function DealCard({ deal }: { deal: Deal }) {
-  const contingencies = useContingencyStore((s) => s.items);
-
   const openTasks    = deal.openTaskCount ?? 0;
   const overdueTasks = deal.overdueTaskCount ?? 0;
 
-  const activeC  = contingencies.filter((c) => c.dealId === deal.id && c.status === 'active');
-  const urgentC  = activeC.filter((c) => c.deadline && daysUntil(c.deadline) <= 5);
+  const activeC: Contingency[] = [];
+  const urgentC: Contingency[] = [];
 
   const closing     = deal.timeline.closingDate;
   const closingDays = closing ? daysUntil(closing) : null;
@@ -222,13 +183,10 @@ function DealCard({ deal }: { deal: Deal }) {
 function MyTransactions() {
   const activeUser   = useAuthStore((s) => s.activeUser);
   const deals        = useMyDeals();
-  const contingencies = useContingencyStore((s) => s.items);
 
   const overdueTasks = { length: deals.reduce((sum, d) => sum + (d.overdueTaskCount ?? 0), 0) };
 
-  const urgentC = contingencies.filter(
-    (c) => c.status === 'active' && c.deadline && daysUntil(c.deadline) <= 5,
-  );
+  const urgentC: Contingency[] = [];
   const closingThisMonth = deals.filter((d) => {
     if (!d.timeline.closingDate) return false;
     const days = daysUntil(d.timeline.closingDate);
@@ -278,24 +236,6 @@ function MyTransactions() {
         </div>
       )}
 
-      {/* Urgent contingency alert */}
-      {urgentC.length > 0 && (
-        <div className="flex items-start gap-3 rounded-xl bg-amber-50 border border-amber-100 px-4 py-3.5">
-          <Shield size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-amber-700">
-              {urgentC.length} contingenc{urgentC.length !== 1 ? 'ies' : 'y'} expiring within 5 days
-            </p>
-            <p className="text-xs text-amber-500 mt-0.5">
-              {urgentC.map((c) => {
-                const deal = MOCK_DEALS.find((d) => d.id === c.dealId);
-                return `${deal?.clientName}: ${c.label} (${daysUntil(c.deadline!)}d)`;
-              }).join(' · ')}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Deal cards */}
       <section>
         <h2 className="mb-3 text-xs font-bold uppercase tracking-wider text-gray-400">Active Files</h2>
@@ -321,22 +261,12 @@ type DeadlineEntry = {
 
 function Deadlines() {
   const deals       = useMyDeals();
-  const contingencies         = useContingencyStore((s) => s.items);
 
   const taskEntries: DeadlineEntry[] = [];
 
   const checklistEntries: DeadlineEntry[] = [];
 
-  const contingencyEntries: DeadlineEntry[] = contingencies.filter(
-    (c) => c.status === 'active' && c.deadline && deals.some((d) => d.id === c.dealId),
-  ).map((c) => ({
-    id: c.id, dealId: c.dealId,
-    title: `${c.label} Contingency Deadline`,
-    dueDate: c.deadline!,
-    assignedTo: 'tc',
-    status: daysUntil(c.deadline!) < 0 ? 'overdue' as const : 'pending' as const,
-    source: 'contingency' as const,
-  }));
+  const contingencyEntries: DeadlineEntry[] = [];
 
   const all = [...taskEntries, ...checklistEntries, ...contingencyEntries]
     .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
@@ -455,9 +385,103 @@ const CONTINGENCY_STATUS: Record<ContingencyStatus, { badge: string; label: stri
   removed: { badge: 'bg-gray-100 text-gray-500',   label: 'Removed', Icon: ShieldOff   },
 };
 
+function DealContingenciesCard({ deal }: { deal: Deal }) {
+  const { items, updateStatus, loading } = useContingencies(deal.id);
+
+  const activeCount = items.filter((c) => c.status === 'active').length;
+  const urgentCount = items.filter((c) => c.status === 'active' && c.deadline && daysUntil(c.deadline) <= 5).length;
+
+  return (
+    <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+      {/* Deal header */}
+      <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-gray-50">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-brand-navy">{deal.clientName}</span>
+            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${deal.type === 'buy' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+              {deal.type}
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">{deal.property.address} · {STAGE_LABELS[deal.stage]}</p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {urgentCount > 0 && (
+            <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-600">
+              {urgentCount} urgent
+            </span>
+          )}
+          <span className="text-xs text-gray-400">{activeCount} active</span>
+        </div>
+      </div>
+
+      {/* Contingency rows */}
+      {loading ? (
+        <div className="px-5 py-4 text-xs text-gray-300">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="px-5 py-4 text-xs text-gray-300 italic">No contingencies for this deal</div>
+      ) : (
+        <div className="divide-y divide-gray-50">
+          {items.map((c) => {
+            const s          = CONTINGENCY_STATUS[c.status];
+            const StatusIcon = s.Icon;
+            const TypeIcon   = CONTINGENCY_TYPE_ICON[c.type];
+            const days       = c.deadline ? daysUntil(c.deadline) : null;
+            const isUrgent   = days !== null && days <= 5 && c.status === 'active';
+            const isPast     = days !== null && days < 0  && c.status === 'active';
+
+            return (
+              <div key={c.id} className={`flex items-center gap-4 px-5 py-3.5 ${isUrgent ? 'bg-amber-50/50' : ''}`}>
+                <TypeIcon size={15} className="text-gray-300 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-sm font-semibold ${c.status === 'active' ? 'text-brand-navy' : 'text-gray-400'}`}>
+                      {c.label}
+                    </span>
+                    <span className={`flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${s.badge}`}>
+                      <StatusIcon size={9} className="inline" /> {s.label}
+                    </span>
+                  </div>
+                  {c.deadline && c.status === 'active' && (
+                    <div className={`text-xs mt-0.5 ${isPast ? 'text-red-600 font-semibold' : isUrgent ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                      {isPast
+                        ? `Expired ${Math.abs(days!)}d ago — ${c.deadline}`
+                        : days === 0
+                        ? `Expires today — ${c.deadline}`
+                        : `Expires in ${days}d — ${c.deadline}`}
+                    </div>
+                  )}
+                  {c.status !== 'active' && c.deadline && (
+                    <div className="text-xs text-gray-300 mt-0.5">Deadline was {c.deadline}</div>
+                  )}
+                </div>
+
+                {c.status === 'active' && (
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={() => updateStatus(c.id, 'waived')}
+                      className="rounded-lg border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
+                    >
+                      Mark Waived
+                    </button>
+                    <button
+                      onClick={() => updateStatus(c.id, 'removed')}
+                      className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ContingenciesSection() {
   const deals = useMyDeals();
-  const { items, update } = useContingencyStore();
 
   return (
     <div className="space-y-6">
@@ -467,94 +491,7 @@ function ContingenciesSection() {
           Track active contingency periods. Mark waived or removed once resolved.
         </p>
       </div>
-
-      {deals.map((deal) => {
-        const dealC      = items.filter((c) => c.dealId === deal.id);
-        const activeCount  = dealC.filter((c) => c.status === 'active').length;
-        const urgentCount  = dealC.filter((c) => c.status === 'active' && c.deadline && daysUntil(c.deadline) <= 5).length;
-
-        return (
-          <div key={deal.id} className="rounded-xl bg-white shadow-sm overflow-hidden">
-            {/* Deal header */}
-            <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-gray-50">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-brand-navy">{deal.clientName}</span>
-                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${deal.type === 'buy' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                    {deal.type}
-                  </span>
-                </div>
-                <p className="text-xs text-gray-400 mt-0.5">{deal.property.address} · {STAGE_LABELS[deal.stage]}</p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {urgentCount > 0 && (
-                  <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-600">
-                    {urgentCount} urgent
-                  </span>
-                )}
-                <span className="text-xs text-gray-400">{activeCount} active</span>
-              </div>
-            </div>
-
-            {/* Contingency rows */}
-            <div className="divide-y divide-gray-50">
-              {dealC.map((c) => {
-                const s       = CONTINGENCY_STATUS[c.status];
-                const StatusIcon = s.Icon;
-                const TypeIcon   = CONTINGENCY_TYPE_ICON[c.type];
-                const days    = c.deadline ? daysUntil(c.deadline) : null;
-                const isUrgent = days !== null && days <= 5 && c.status === 'active';
-                const isPast   = days !== null && days < 0  && c.status === 'active';
-
-                return (
-                  <div key={c.id} className={`flex items-center gap-4 px-5 py-3.5 ${isUrgent ? 'bg-amber-50/50' : ''}`}>
-                    <TypeIcon size={15} className="text-gray-300 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-sm font-semibold ${c.status === 'active' ? 'text-brand-navy' : 'text-gray-400'}`}>
-                          {c.label}
-                        </span>
-                        <span className={`flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${s.badge}`}>
-                          <StatusIcon size={9} className="inline" /> {s.label}
-                        </span>
-                      </div>
-                      {c.deadline && c.status === 'active' && (
-                        <div className={`text-xs mt-0.5 ${isPast ? 'text-red-600 font-semibold' : isUrgent ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
-                          {isPast
-                            ? `Expired ${Math.abs(days!)}d ago — ${c.deadline}`
-                            : days === 0
-                            ? `Expires today — ${c.deadline}`
-                            : `Expires in ${days}d — ${c.deadline}`}
-                        </div>
-                      )}
-                      {c.status !== 'active' && c.deadline && (
-                        <div className="text-xs text-gray-300 mt-0.5">Deadline was {c.deadline}</div>
-                      )}
-                    </div>
-
-                    {c.status === 'active' && (
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button
-                          onClick={() => update(c.id, 'waived')}
-                          className="rounded-lg border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
-                        >
-                          Mark Waived
-                        </button>
-                        <button
-                          onClick={() => update(c.id, 'removed')}
-                          className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+      {deals.map((deal) => <DealContingenciesCard key={deal.id} deal={deal} />)}
     </div>
   );
 }
@@ -1045,8 +982,7 @@ const CAL_TYPE: Record<CalEvent['type'], { dot: string; label: string }> = {
 };
 
 function CalendarSection() {
-  const deals       = useMyDeals();
-  const contingencies = useContingencyStore((s) => s.items);
+  const deals = useMyDeals();
 
   const events: CalEvent[] = [];
 
@@ -1062,19 +998,7 @@ function CalendarSection() {
     }
   });
 
-  contingencies.filter((c) => c.status === 'active' && c.deadline).forEach((c) => {
-    const deal = deals.find((d) => d.id === c.dealId);
-    if (!deal) return;
-    events.push({
-      id: `c-${c.id}`,
-      date: c.deadline!,
-      title: `${c.label} Contingency Deadline`,
-      sub: deal.clientName,
-      type: 'contingency',
-    });
-  });
-
-  // Task calendar events will be added when a bulk task API is available
+  // Contingency deadline events will be added once a bulk contingency endpoint is available
 
   events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 

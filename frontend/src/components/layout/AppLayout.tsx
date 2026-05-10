@@ -28,56 +28,11 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import InviteModal from '../InviteModal';
-
-// ─── Notifications ────────────────────────────────────────────────────────────
-
-type Notification = {
-  id: string;
-  title: string;
-  body: string;
-  time: string;
-  read: boolean;
-  href?: string;
-};
-
-const MOCK_NOTIFICATIONS: Notification[] = [
-  {
-    id: 'n1',
-    title: 'Disclosure unsigned',
-    body: 'Mike Smith hasn\'t signed the ARIVE disclosures — 2 days overdue.',
-    time: '2h ago',
-    read: false,
-    href: '/agent/deals/deal-smith',
-  },
-  {
-    id: 'n2',
-    title: 'New message',
-    body: 'Garcia family sent a message about their showing schedule.',
-    time: '4h ago',
-    read: false,
-    href: '/agent/deals/deal-garcia',
-  },
-  {
-    id: 'n3',
-    title: 'Fast Pass enrolled',
-    body: 'Mike Smith just enrolled in Fast Pass. Review the upsell selections.',
-    time: '1d ago',
-    read: true,
-    href: '/agent/deals/deal-smith',
-  },
-  {
-    id: 'n4',
-    title: 'Deal stuck',
-    body: 'Williams deal has been in Pre-Close for 18 days with no activity.',
-    time: '2d ago',
-    read: true,
-    href: '/agent/deals/deal-williams',
-  },
-];
+import { useNotifications } from '../../hooks/useNotifications';
 
 function NotificationBell() {
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>(MOCK_NOTIFICATIONS);
+  const { notifications, markRead, markAllRead } = useNotifications();
   const ref = useRef<HTMLDivElement>(null);
 
   const unread = notifications.filter((n) => !n.read).length;
@@ -91,14 +46,6 @@ function NotificationBell() {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
-
-  function markAllRead() {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }
-
-  function markRead(id: string) {
-    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
-  }
 
   return (
     <div ref={ref} className="relative">
@@ -144,8 +91,8 @@ function NotificationBell() {
                     )}
                     <div className={n.read ? 'ml-4' : ''}>
                       <p className={`text-xs font-semibold ${n.read ? 'text-gray-600' : 'text-brand-navy'}`}>{n.title}</p>
-                      <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{n.body}</p>
-                      <p className="text-[10px] text-gray-300 mt-1">{n.time}</p>
+                      {n.body && <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{n.body}</p>}
+                      <p className="text-[10px] text-gray-300 mt-1">{n.createdAt}</p>
                     </div>
                   </div>
                 </Link>

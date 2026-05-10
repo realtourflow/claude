@@ -12,6 +12,7 @@ export type ApiDeal = {
   address: string | null;
   price: number | null;
   arive_linked: boolean;
+  notes?: string | null;
   created_at: string;
   updated_at: string;
   agent_name?: string;
@@ -52,6 +53,7 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     agentName: d.agent_name,
     agentEmail: d.agent_email,
     agentPhone: d.agent_phone,
+    notes: d.notes ?? undefined,
     openTaskCount: d.open_task_count ?? 0,
     overdueTaskCount: d.overdue_task_count ?? 0,
   };

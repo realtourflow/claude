@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Deal, DealStage, LoanMilestones } from '../../data/mockDeals';
 import { useDeal, patchStage } from '../../hooks/useDeals';
+import { api } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import { usePermission } from '../../permissions/usePermission';
 import { PERMISSIONS } from '../../permissions/permissions';
@@ -1207,11 +1208,20 @@ function InternalNotesCard({ deal }: { deal: Deal }) {
   const [editing, setEditing] = useState(false);
   const [notes, setNotes] = useState(deal.notes ?? '');
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  function handleSave() {
-    setEditing(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await api.patch(`/deals/${deal.id}/notes`, { notes });
+      setEditing(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // Keep editing open on failure
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -1258,9 +1268,10 @@ function InternalNotesCard({ deal }: { deal: Deal }) {
               </button>
               <button
                 onClick={handleSave}
-                className="flex-1 rounded-xl bg-brand-navy py-2 text-sm font-bold text-white hover:bg-brand-navy/90 transition-colors"
+                disabled={saving}
+                className="flex-1 rounded-xl bg-brand-navy py-2 text-sm font-bold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-60"
               >
-                Save Notes
+                {saving ? 'Saving…' : 'Save Notes'}
               </button>
             </div>
           </div>

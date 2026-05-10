@@ -24,15 +24,20 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 
 	r.Get("/health", h.Health)
 
+	// Public — no auth required
+	r.Get("/invites/role", h.GetInviteRole)
+	r.Get("/invites/{token}", h.GetInvite)
+
 	r.Group(func(r chi.Router) {
 		r.Use(auth)
 		r.Post("/users/sync", h.SyncUser)
-			r.Get("/users", h.ListUsers)
+		r.Get("/users", h.ListUsers)
 
 		r.Get("/deals", h.ListDeals)
 		r.Post("/deals", h.CreateDeal)
 		r.Get("/deals/{dealId}", h.GetDeal)
 		r.Patch("/deals/{dealId}/stage", h.AdvanceStage)
+		r.Patch("/deals/{dealId}/notes", h.UpdateDealNotes)
 
 		r.Get("/deals/{dealId}/tasks", h.ListTasks)
 		r.Post("/deals/{dealId}/tasks", h.CreateTask)
@@ -53,6 +58,10 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Delete("/vendors/{vendorId}", h.DeleteVendor)
 
 		r.Get("/me/deals", h.ListMyDeals)
+		r.Get("/me/settings", h.GetSettings)
+		r.Put("/me/settings", h.PutSettings)
+		r.Patch("/me/profile", h.PatchProfile)
+
 		r.Get("/deals/{dealId}/participants", h.ListParticipants)
 		r.Post("/deals/{dealId}/participants", h.AddParticipant)
 		r.Delete("/deals/{dealId}/participants/{userId}", h.RemoveParticipant)
@@ -61,6 +70,18 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/deals/{dealId}/checklist", h.CreateChecklistItem)
 		r.Patch("/deals/{dealId}/checklist/{itemId}", h.UpdateChecklistItem)
 		r.Delete("/deals/{dealId}/checklist/{itemId}", h.DeleteChecklistItem)
+
+		r.Get("/deals/{dealId}/contingencies", h.ListContingencies)
+		r.Post("/deals/{dealId}/contingencies", h.CreateContingency)
+		r.Patch("/deals/{dealId}/contingencies/{contingencyId}", h.UpdateContingency)
+		r.Delete("/deals/{dealId}/contingencies/{contingencyId}", h.DeleteContingency)
+
+		r.Post("/deals/{dealId}/invite", h.CreateInvite)
+		r.Post("/invites/{token}/claim", h.ClaimInvite)
+
+		r.Get("/notifications", h.ListNotifications)
+		r.Patch("/notifications/{notifId}/read", h.MarkNotificationRead)
+		r.Post("/notifications/read-all", h.MarkAllNotificationsRead)
 	})
 
 	return r
@@ -73,5 +94,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 func respond(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(data)
+	if data != nil {
+		json.NewEncoder(w).Encode(data)
+	}
 }
