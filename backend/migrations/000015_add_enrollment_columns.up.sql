@@ -1,0 +1,3 @@
+ALTER TABLE deals
+  ADD COLUMN IF NOT EXISTS fast_pass  JSONB,
+  ADD COLUMN IF NOT EXISTS smooth_exit JSONB;

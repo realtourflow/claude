@@ -98,6 +98,9 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/deals/{dealId}/fee/checkout", h.FeeCheckout)
 		r.Post("/deals/{dealId}/fee/waive", h.WaiveFee)
 
+		r.Post("/deals/{dealId}/fastpass", h.EnrollFastPass)
+		r.Post("/deals/{dealId}/smoothexit", h.EnrollSmoothExit)
+
 		r.Get("/notifications", h.ListNotifications)
 		r.Patch("/notifications/{notifId}/read", h.MarkNotificationRead)
 		r.Post("/notifications/read-all", h.MarkAllNotificationsRead)

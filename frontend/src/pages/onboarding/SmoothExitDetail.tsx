@@ -51,6 +51,7 @@ export default function SmoothExitDetail() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
+  const dealId = searchParams.get('dealId');
   const [selectedUpsells, setSelectedUpsells] = useState<SmoothExitUpsellId[]>([]);
   const [expanded, setExpanded] = useState<SmoothExitUpsellId | null>(null);
   const [expandedBenefit, setExpandedBenefit] = useState<string | null>(null);
@@ -319,7 +320,7 @@ export default function SmoothExitDetail() {
                 fromOnboarding
                   ? '/smooth-exit/survey?fromOnboarding=true'
                   : '/smooth-exit/survey',
-                { state: { selectedUpsells, upsellTotal } }
+                { state: { selectedUpsells, upsellTotal, dealId } }
               )
             }
             className="flex items-center gap-2 rounded-xl bg-purple-700 px-6 py-3.5 text-sm font-bold text-white hover:bg-purple-800 transition-all active:scale-[0.98]"

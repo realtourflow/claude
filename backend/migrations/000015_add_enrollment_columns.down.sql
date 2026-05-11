@@ -1,0 +1,3 @@
+ALTER TABLE deals
+  DROP COLUMN IF EXISTS fast_pass,
+  DROP COLUMN IF EXISTS smooth_exit;

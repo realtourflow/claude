@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
-import { AriveTracker, AriveKeyDates, Deal, DealStage, LoanMilestones } from '../data/mockDeals';
+import { AriveTracker, AriveKeyDates, Deal, DealStage, LoanMilestones, FastPassEnrollment, SmoothExitEnrollment } from '../data/mockDeals';
 
 export type ApiDeal = {
   id: string;
@@ -20,6 +20,8 @@ export type ApiDeal = {
   fee_status?: string;
   fee_amount_cents?: number;
   fee_paid_at?: string | null;
+  fast_pass?: FastPassApiData | null;
+  smooth_exit?: SmoothExitApiData | null;
   created_at: string;
   updated_at: string;
   agent_name?: string;
@@ -28,6 +30,44 @@ export type ApiDeal = {
   open_task_count?: number;
   overdue_task_count?: number;
 };
+
+type FastPassApiData = {
+  status: string;
+  payment_option: string;
+  selected_upsells?: string[];
+  total_cents?: number;
+  enrolled_at?: string;
+};
+
+type SmoothExitApiData = {
+  status: string;
+  payment_option: string;
+  estimated_sale_price?: number;
+  fee_cents?: number;
+  enrolled_at?: string;
+};
+
+function fastPassFromApi(d: FastPassApiData): FastPassEnrollment {
+  return {
+    enrolledAt: d.enrolled_at ?? new Date().toISOString(),
+    status: (d.status as FastPassEnrollment['status']) ?? 'active',
+    paymentOption: (d.payment_option as FastPassEnrollment['paymentOption']) ?? 'now',
+    selectedUpsells: (d.selected_upsells ?? []) as FastPassEnrollment['selectedUpsells'],
+    totalPaid: Math.round((d.total_cents ?? 0) / 100),
+  };
+}
+
+function smoothExitFromApi(d: SmoothExitApiData): SmoothExitEnrollment {
+  const salePrice = d.estimated_sale_price ?? 0;
+  return {
+    enrolledAt: d.enrolled_at ?? new Date().toISOString(),
+    status: (d.status as SmoothExitEnrollment['status']) ?? 'active',
+    paymentOption: (d.payment_option as SmoothExitEnrollment['paymentOption']) ?? 'from_proceeds',
+    estimatedSalePrice: salePrice,
+    fee: Math.round((d.fee_cents ?? salePrice * 0.01)),
+    buyingNext: false,
+  };
+}
 
 function ariveMilestonesFromTrackers(
   trackers: AriveTracker[],
@@ -121,6 +161,8 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     feeStatus: (d.fee_status as Deal['feeStatus']) ?? 'unpaid',
     feeAmountCents: d.fee_amount_cents ?? 7500,
     feePaidAt: d.fee_paid_at ?? null,
+    fastPass: d.fast_pass ? fastPassFromApi(d.fast_pass) : undefined,
+    smoothExit: d.smooth_exit ? smoothExitFromApi(d.smooth_exit) : undefined,
   };
 }
 

@@ -91,6 +91,7 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 		       deals.title, deals.address, deals.price, deals.arive_linked,
 		       deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
 		       deals.fee_status, deals.fee_amount_cents, deals.fee_paid_at,
+		       deals.fast_pass, deals.smooth_exit,
 		       deals.created_at, deals.updated_at,
 		       u.name, u.email, u.phone,
 		       (SELECT COUNT(*) FROM tasks t
@@ -123,6 +124,7 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 			&d.Title, &d.Address, &d.Price, &d.AriveLinked,
 			&d.AriveMilestones, &d.AriveKeyDates, &d.AriveLoanStatus,
 			&d.FeeStatus, &d.FeeAmountCents, &d.FeePaidAt,
+			&d.FastPass, &d.SmoothExit,
 			&d.CreatedAt, &d.UpdatedAt,
 			&d.AgentName, &d.AgentEmail, &d.AgentPhone,
 			&d.OpenTaskCount, &d.OverdueTaskCount,
@@ -204,14 +206,18 @@ func (h *Handler) GetDeal(w http.ResponseWriter, r *http.Request) {
 		SELECT id, agent_id, type, stage, `+healthExpr+` AS health,
 		       title, address, price, arive_linked,
 		       arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
-		       notes, fee_status, fee_amount_cents, fee_paid_at, created_at, updated_at
+		       notes, fee_status, fee_amount_cents, fee_paid_at,
+		       fast_pass, smooth_exit,
+		       created_at, updated_at
 		FROM deals
 		WHERE id = $1 AND agent_id = $2
 	`, dealID, userID).Scan(
 		&deal.ID, &deal.AgentID, &deal.Type, &deal.Stage, &deal.Health,
 		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked,
 		&deal.AriveLoanID, &deal.AriveMilestones, &deal.AriveKeyDates, &deal.AriveLoanStatus, &deal.AriveSyncedAt,
-		&deal.Notes, &deal.FeeStatus, &deal.FeeAmountCents, &deal.FeePaidAt, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.Notes, &deal.FeeStatus, &deal.FeeAmountCents, &deal.FeePaidAt,
+		&deal.FastPass, &deal.SmoothExit,
+		&deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		http.Error(w, "deal not found", http.StatusNotFound)

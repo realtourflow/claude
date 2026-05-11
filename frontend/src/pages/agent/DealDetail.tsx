@@ -47,6 +47,7 @@ import {
   Link as LinkIcon,
   Lock,
   DollarSign,
+  LogOut,
 } from 'lucide-react';
 import MetroMap from '../../components/MetroMap';
 import { MOCK_USERS } from '../../data/mockUsers';
@@ -1327,6 +1328,124 @@ function InternalNotesCard({ deal }: { deal: Deal }) {
   );
 }
 
+function FastPassCard({ deal }: { deal: Deal }) {
+  const navigate = useNavigate();
+  const fp = deal.fastPass;
+
+  const STATUS_STYLES: Record<string, string> = {
+    active: 'bg-green-100 text-green-700',
+    pending_payment: 'bg-amber-100 text-amber-700',
+    complete: 'bg-gray-100 text-gray-500',
+  };
+
+  if (fp) {
+    return (
+      <div className="rounded-xl bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100">
+              <Zap size={16} className="text-green-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-brand-navy">Fast Pass</h3>
+              <p className="text-[11px] text-gray-400">
+                Enrolled {new Date(fp.enrolledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold capitalize ${STATUS_STYLES[fp.status] ?? 'bg-gray-100 text-gray-500'}`}>
+              {fp.status === 'pending_payment' ? 'Pending payment' : fp.status}
+            </span>
+            <span className="text-xs text-gray-400">${fp.totalPaid.toLocaleString()}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-dashed border-green-200 bg-green-50/40 p-5">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-green-100">
+          <Zap size={18} className="text-green-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-bold text-brand-navy">Fast Pass</h3>
+          <p className="mt-0.5 text-xs text-gray-500 leading-relaxed">
+            White-glove concierge from pre-approval to move-in. 10-day close track + Mountain Mortgage 2% refi credit.
+          </p>
+        </div>
+      </div>
+      <button
+        onClick={() => navigate(`/fast-pass?dealId=${deal.id}`)}
+        className="mt-3 w-full rounded-lg bg-green-500 py-2.5 text-sm font-bold text-white hover:bg-green-600 transition-colors"
+      >
+        Enroll in Fast Pass
+      </button>
+    </div>
+  );
+}
+
+function SmoothExitCard({ deal }: { deal: Deal }) {
+  const navigate = useNavigate();
+  const se = deal.smoothExit;
+
+  const STATUS_STYLES: Record<string, string> = {
+    active: 'bg-purple-100 text-purple-700',
+    pending: 'bg-amber-100 text-amber-700',
+    complete: 'bg-gray-100 text-gray-500',
+  };
+
+  if (se) {
+    return (
+      <div className="rounded-xl bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-100">
+              <LogOut size={16} className="text-purple-600" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-brand-navy">Smooth Exit</h3>
+              <p className="text-[11px] text-gray-400">
+                Enrolled {new Date(se.enrolledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold capitalize ${STATUS_STYLES[se.status] ?? 'bg-gray-100 text-gray-500'}`}>
+              {se.status}
+            </span>
+            <span className="text-xs text-gray-400">${se.fee.toLocaleString()} · 1%</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-dashed border-purple-200 bg-purple-50/40 p-5">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-purple-100">
+          <LogOut size={18} className="text-purple-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-sm font-bold text-brand-navy">Smooth Exit</h3>
+          <p className="mt-0.5 text-xs text-gray-500 leading-relaxed">
+            Seller concierge: move-out coordination, repair bid management, disclosure tracking, and title support. 1% of sale price at closing.
+          </p>
+        </div>
+      </div>
+      <button
+        onClick={() => navigate(`/smooth-exit?dealId=${deal.id}`)}
+        className="mt-3 w-full rounded-lg bg-purple-600 py-2.5 text-sm font-bold text-white hover:bg-purple-700 transition-colors"
+      >
+        Enroll in Smooth Exit
+      </button>
+    </div>
+  );
+}
+
 function OverviewTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
   const clientContact = useClientContactStore((s) => s.getContact(deal.id));
@@ -1457,6 +1576,12 @@ function OverviewTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
           )}
         </>
       )}
+
+      {/* Fast Pass — buy deals only */}
+      {deal.type === 'buy' && <FastPassCard deal={deal} />}
+
+      {/* Smooth Exit — sell deals only */}
+      {deal.type === 'sell' && <SmoothExitCard deal={deal} />}
 
       {/* Internal Notes */}
       <InternalNotesCard deal={deal} />

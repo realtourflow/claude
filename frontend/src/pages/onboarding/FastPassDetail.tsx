@@ -52,6 +52,7 @@ export default function FastPassDetail() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
+  const dealId = searchParams.get('dealId');
   const [selectedUpsells, setSelectedUpsells] = useState<FastPassUpsellId[]>([]);
   const [expanded, setExpanded] = useState<FastPassUpsellId | null>(null);
   const [expandedBenefit, setExpandedBenefit] = useState<string | null>(null);
@@ -331,7 +332,7 @@ export default function FastPassDetail() {
                 fromOnboarding
                   ? '/fast-pass/survey?fromOnboarding=true'
                   : '/fast-pass/survey',
-                { state: { selectedUpsells, total } }
+                { state: { selectedUpsells, total, dealId } }
               )
             }
             className="flex items-center gap-2 rounded-xl bg-brand-navy px-6 py-3.5 text-sm font-bold text-white hover:bg-brand-navy/90 transition-all active:scale-[0.98]"

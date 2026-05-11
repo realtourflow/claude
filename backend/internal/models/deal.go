@@ -48,6 +48,8 @@ type Deal struct {
 	FeeStatus        string           `json:"fee_status"`
 	FeeAmountCents   int              `json:"fee_amount_cents"`
 	FeePaidAt        *time.Time       `json:"fee_paid_at,omitempty"`
+	FastPass         *json.RawMessage `json:"fast_pass,omitempty"`
+	SmoothExit       *json.RawMessage `json:"smooth_exit,omitempty"`
 	CreatedAt        time.Time        `json:"created_at"`
 	UpdatedAt        time.Time        `json:"updated_at"`
 }

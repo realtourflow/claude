@@ -9,6 +9,7 @@ import {
   calcFastPassTotal,
   FAST_PASS_BASE_PRICE,
 } from '../../data/mockFastPass';
+import { api } from '../../api/client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,7 @@ const EMPTY: SurveyData = {
 type LocationState = {
   selectedUpsells?: FastPassUpsellId[];
   total?: number;
+  dealId?: string | null;
 };
 
 const UTILITY_OPTIONS = [
@@ -450,11 +452,13 @@ function ConfirmationScreen({
   data,
   selectedUpsells,
   total,
+  submitting,
   onSubmit,
 }: {
   data: SurveyData;
   selectedUpsells: FastPassUpsellId[];
   total: number;
+  submitting?: boolean;
   onSubmit: (paymentOption: FastPassPaymentOption) => void;
 }) {
   const [paymentOption, setPaymentOption] = useState<FastPassPaymentOption | null>(null);
@@ -575,16 +579,16 @@ function ConfirmationScreen({
         </div>
 
         <button
-          onClick={() => paymentOption && onSubmit(paymentOption)}
-          disabled={!paymentOption}
+          onClick={() => paymentOption && !submitting && onSubmit(paymentOption)}
+          disabled={!paymentOption || submitting}
           className={[
             'flex w-full items-center justify-center gap-2 rounded-xl py-4 text-base font-bold transition-all',
-            paymentOption
+            paymentOption && !submitting
               ? 'bg-green-500 text-white hover:bg-green-600 active:scale-[0.98]'
               : 'cursor-not-allowed bg-gray-100 text-gray-300',
           ].join(' ')}
         >
-          Submit Request <ChevronRight size={18} />
+          {submitting ? 'Processing…' : 'Submit Request'} <ChevronRight size={18} />
         </button>
       </div>
     </div>
@@ -657,10 +661,12 @@ export default function FastPassSurvey() {
 
   const selectedUpsells: FastPassUpsellId[] = state?.selectedUpsells ?? [];
   const total = state?.total ?? calcFastPassTotal(selectedUpsells);
+  const dealId = state?.dealId ?? null;
 
   const [screen, setScreen] = useState(0);
   const [data, setData] = useState<SurveyData>(EMPTY);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [chosenPayment, setChosenPayment] = useState<FastPassPaymentOption>('now');
 
   const progress = Math.min(((screen + 1) / TOTAL_SCREENS) * 100, 100);
@@ -729,8 +735,35 @@ export default function FastPassSurvey() {
             data={data}
             selectedUpsells={selectedUpsells}
             total={total}
-            onSubmit={(option) => {
+            submitting={submitting}
+            onSubmit={async (option) => {
               setChosenPayment(option);
+              if (dealId) {
+                setSubmitting(true);
+                try {
+                  const atClosingTotal = Math.round(total * 1.15);
+                  const totalCents = option === 'at_closing'
+                    ? atClosingTotal * 100
+                    : total * 100;
+                  const res = await api.post<{ checkout_url?: string; ok?: boolean }>(
+                    `/deals/${dealId}/fastpass`,
+                    {
+                      payment_option: option,
+                      selected_upsells: selectedUpsells,
+                      total_cents: totalCents,
+                      survey_answers: data,
+                    },
+                  );
+                  if (res.checkout_url) {
+                    window.location.href = res.checkout_url;
+                    return;
+                  }
+                } catch {
+                  // fall through to show submitted screen
+                } finally {
+                  setSubmitting(false);
+                }
+              }
               if (fromOnboarding) {
                 navigate('/onboard/buyer?resume=true');
               } else {

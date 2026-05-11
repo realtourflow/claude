@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, CheckCircle2, Check } from 'lucide-react';
 import {
   SmoothExitNextStep,
@@ -8,6 +8,7 @@ import {
   nextStepQualifiesForBridge,
   calcSmoothExitFee,
 } from '../../data/mockSmoothExit';
+import { api } from '../../api/client';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -325,8 +326,9 @@ const PAYMENT_OPTIONS: { value: SmoothExitPaymentOption; title: string; badge: s
   },
 ];
 
-function ConfirmScreen({ data, onSubmit }: {
+function ConfirmScreen({ data, submitting, onSubmit }: {
   data: SurveyData;
+  submitting?: boolean;
   onSubmit: (paymentOption: SmoothExitPaymentOption) => void;
 }) {
   const [paymentOption, setPaymentOption] = useState<SmoothExitPaymentOption | null>(null);
@@ -424,16 +426,16 @@ function ConfirmScreen({ data, onSubmit }: {
         </div>
 
         <button
-          onClick={() => paymentOption && onSubmit(paymentOption)}
-          disabled={!paymentOption}
+          onClick={() => paymentOption && !submitting && onSubmit(paymentOption)}
+          disabled={!paymentOption || submitting}
           className={[
             'flex w-full items-center justify-center gap-2 rounded-xl py-4 text-base font-bold transition-all',
-            paymentOption
+            paymentOption && !submitting
               ? 'bg-purple-700 text-white hover:bg-purple-800 active:scale-[0.98]'
               : 'cursor-not-allowed bg-gray-100 text-gray-300',
           ].join(' ')}
         >
-          Submit Request <ChevronRight size={18} />
+          {submitting ? 'Processing…' : 'Submit Request'} <ChevronRight size={18} />
         </button>
       </div>
     </div>
@@ -480,11 +482,15 @@ function SubmittedScreen({ data, paymentOption, fromOnboarding }: { data: Survey
 
 export default function SmoothExitSurvey() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
+  const locationState = location.state as { dealId?: string | null } | null;
+  const dealId = locationState?.dealId ?? null;
   const [screen, setScreen] = useState(0);
   const [data, setData] = useState<SurveyData>(EMPTY);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [chosenPayment, setChosenPayment] = useState<SmoothExitPaymentOption>('from_proceeds');
 
   const progress = Math.min(((screen + 1) / TOTAL_SCREENS) * 100, 100);
@@ -539,7 +545,27 @@ export default function SmoothExitSurvey() {
         return (
           <ConfirmScreen
             data={data}
-            onSubmit={(opt) => { setChosenPayment(opt); setSubmitted(true); }}
+            submitting={submitting}
+            onSubmit={async (opt) => {
+              setChosenPayment(opt);
+              if (dealId) {
+                setSubmitting(true);
+                try {
+                  const price = parseFloat(data.estimatedSalePrice) || 0;
+                  await api.post(`/deals/${dealId}/smoothexit`, {
+                    payment_option: opt,
+                    estimated_sale_price: Math.round(price),
+                    fee_cents: Math.round(price * 0.01 * 100),
+                    survey_answers: data,
+                  });
+                } catch {
+                  // fall through to show submitted screen
+                } finally {
+                  setSubmitting(false);
+                }
+              }
+              setSubmitted(true);
+            }}
           />
         );
       default:
