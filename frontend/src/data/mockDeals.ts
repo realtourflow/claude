@@ -53,10 +53,17 @@ export type DealVendors = {
   insurance?: Vendor;
 };
 
+export type AriveTracker = {
+  name: string;
+  currentTrackerStatus: { status: string };
+};
+
+export type AriveKeyDates = Record<string, string | null>;
+
 export type LoanMilestones = {
   /** 'arive' = read-only, synced from Mountain Mortgage. 'manual' = editable by TC/agent. */
   source: 'arive' | 'manual';
-  // Ordered milestones
+  // Ordered milestones (manual or derived from ARIVE)
   loanSetup: boolean;
   disclosuresOut: boolean;
   disclosuresSignedSubmitted: boolean;
@@ -67,6 +74,10 @@ export type LoanMilestones = {
   appraisal: 'pending' | 'ordered' | 'scheduled' | 'complete' | null;
   // Funded = loan disbursed, triggers celebration
   funded: boolean;
+  // ARIVE raw tracker data (present when source === 'arive')
+  ariveTrackers?: AriveTracker[];
+  ariveLoanStatus?: string;
+  ariveKeyDates?: AriveKeyDates;
 };
 
 export type Deal = {

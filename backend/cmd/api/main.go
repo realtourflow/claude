@@ -18,6 +18,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
 	appconfig "realtourflow/internal/config"
+	"realtourflow/internal/arive"
 	"realtourflow/internal/db"
 	"realtourflow/internal/handlers"
 	"realtourflow/internal/middleware"
@@ -44,13 +45,24 @@ func main() {
 	}
 	s3Client := s3.NewFromConfig(awsCfg)
 
+	ariveClient := arive.New(cfg.AriveAPIURL, cfg.AriveAPIKey, cfg.AriveAPIToken)
+	if ariveClient.Enabled() && cfg.AriveWebhookURL != "" {
+		go func() {
+			if err := ariveClient.RegisterWebhooks(context.Background(), cfg.AriveWebhookURL); err != nil {
+				log.Printf("warn: arive webhook registration failed: %v", err)
+			} else {
+				log.Println("arive webhooks registered")
+			}
+		}()
+	}
+
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
-	h := handlers.New(database, s3Client, cfg.S3Bucket)
+	h := handlers.New(database, s3Client, cfg.S3Bucket, ariveClient)
 	r.Mount("/api", h.Routes(middleware.Auth0(cfg.Auth0Domain, cfg.Auth0Audience)))
 
 	srv := &http.Server{

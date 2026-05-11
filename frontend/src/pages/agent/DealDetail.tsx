@@ -923,6 +923,43 @@ function LoanMilestonesCard({ deal }: { deal: Deal }) {
           </div>
         </div>
 
+        {/* ARIVE raw tracker grid — only when synced from ARIVE */}
+        {isArive && milestones.ariveTrackers && milestones.ariveTrackers.length > 0 && (
+          <div className="mt-3 border-t border-gray-50 pt-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-2">ARIVE Trackers</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {milestones.ariveTrackers.map((t) => {
+                const s = t.currentTrackerStatus?.status?.toLowerCase() ?? '';
+                const isTrackerDone = s === 'completed';
+                const isTrackerActive = s !== '' && s !== 'not_started' && !isTrackerDone;
+                return (
+                  <div
+                    key={t.name}
+                    className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-[11px] ${
+                      isTrackerDone ? 'bg-green-50' : isTrackerActive ? 'bg-blue-50' : 'bg-gray-50'
+                    }`}
+                  >
+                    <span className={`font-medium ${isTrackerDone ? 'text-green-700' : isTrackerActive ? 'text-blue-700' : 'text-gray-400'}`}>
+                      {t.name.replace(/_/g, ' ')}
+                    </span>
+                    <span className={`text-[9px] font-bold uppercase ${isTrackerDone ? 'text-green-600' : isTrackerActive ? 'text-blue-500' : 'text-gray-300'}`}>
+                      {t.currentTrackerStatus?.status?.replace(/_/g, ' ') || '—'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {milestones.ariveLoanStatus && (
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-[10px] text-gray-400">Loan Status:</span>
+                <span className="text-[10px] font-bold text-brand-navy uppercase tracking-wide">
+                  {milestones.ariveLoanStatus.replace(/_/g, ' ')}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Mark as Funded — manual mode only, shown when CTC is done */}
         {!isArive && milestones.clearToClose && !milestones.funded && (
           <button

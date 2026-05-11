@@ -7,16 +7,18 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-chi/chi/v5"
+	"realtourflow/internal/arive"
 )
 
 type Handler struct {
-	db       *sql.DB
-	s3Client *s3.Client
-	s3Bucket string
+	db          *sql.DB
+	s3Client    *s3.Client
+	s3Bucket    string
+	ariveClient *arive.Client
 }
 
-func New(db *sql.DB, s3Client *s3.Client, s3Bucket string) *Handler {
-	return &Handler{db: db, s3Client: s3Client, s3Bucket: s3Bucket}
+func New(db *sql.DB, s3Client *s3.Client, s3Bucket string, ariveClient *arive.Client) *Handler {
+	return &Handler{db: db, s3Client: s3Client, s3Bucket: s3Bucket, ariveClient: ariveClient}
 }
 
 func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
@@ -27,6 +29,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 	// Public — no auth required
 	r.Get("/invites/role", h.GetInviteRole)
 	r.Get("/invites/{token}", h.GetInvite)
+	r.Post("/arive/webhook", h.AriveWebhook)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth)
@@ -78,6 +81,9 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 
 		r.Post("/deals/{dealId}/invite", h.CreateInvite)
 		r.Post("/invites/{token}/claim", h.ClaimInvite)
+
+		r.Patch("/deals/{dealId}/arive", h.LinkAriveLoan)
+		r.Post("/deals/{dealId}/arive/sync", h.SyncAriveLoan)
 
 		r.Get("/notifications", h.ListNotifications)
 		r.Patch("/notifications/{notifId}/read", h.MarkNotificationRead)

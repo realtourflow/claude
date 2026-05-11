@@ -730,7 +730,39 @@ function MilestonesCard({ deal }: { deal: Deal }) {
             <CheckCircle2 size={11} /> Funded
           </span>
         )}
+        {isArive && milestones.ariveLoanStatus && (
+          <span className="ml-auto text-[10px] font-bold text-brand-navy uppercase tracking-wide">
+            {milestones.ariveLoanStatus.replace(/_/g, ' ')}
+          </span>
+        )}
       </div>
+
+      {/* ARIVE raw tracker grid */}
+      {isArive && milestones.ariveTrackers && milestones.ariveTrackers.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-50">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-gray-300 mb-2">ARIVE Trackers</p>
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+            {milestones.ariveTrackers.map((t) => {
+              const s = t.currentTrackerStatus?.status?.toLowerCase() ?? '';
+              const done = s === 'completed';
+              const active = s !== '' && s !== 'not_started' && !done;
+              return (
+                <div
+                  key={t.name}
+                  className={`rounded-lg px-2 py-1.5 text-center ${done ? 'bg-green-50' : active ? 'bg-blue-50' : 'bg-gray-50'}`}
+                >
+                  <div className={`text-[10px] font-semibold ${done ? 'text-green-700' : active ? 'text-blue-600' : 'text-gray-400'}`}>
+                    {t.name.replace(/_/g, ' ')}
+                  </div>
+                  <div className={`text-[9px] ${done ? 'text-green-500' : active ? 'text-blue-400' : 'text-gray-300'}`}>
+                    {t.currentTrackerStatus?.status?.replace(/_/g, ' ') || '—'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
-import { Deal, DealStage } from '../data/mockDeals';
+import { AriveTracker, AriveKeyDates, Deal, DealStage, LoanMilestones } from '../data/mockDeals';
 
 export type ApiDeal = {
   id: string;
@@ -12,6 +12,10 @@ export type ApiDeal = {
   address: string | null;
   price: number | null;
   arive_linked: boolean;
+  arive_loan_id?: string | null;
+  arive_milestones?: AriveTracker[] | null;
+  arive_key_dates?: AriveKeyDates | null;
+  arive_loan_status?: string | null;
   notes?: string | null;
   created_at: string;
   updated_at: string;
@@ -22,8 +26,61 @@ export type ApiDeal = {
   overdue_task_count?: number;
 };
 
+function ariveMilestonesFromTrackers(
+  trackers: AriveTracker[],
+  loanStatus: string | null | undefined,
+  keyDates: AriveKeyDates | null | undefined,
+): LoanMilestones {
+  const get = (name: string) =>
+    trackers.find((t) => t.name === name)?.currentTrackerStatus?.status ?? '';
+
+  const isComplete = (name: string) => get(name).toLowerCase() === 'completed';
+  const isStarted = (name: string) => {
+    const s = get(name).toLowerCase();
+    return s !== '' && s !== 'not_started';
+  };
+
+  const appraisalStatus = get('APPRAISAL').toLowerCase();
+  let appraisal: LoanMilestones['appraisal'] = null;
+  if (isComplete('APPRAISAL')) appraisal = 'complete';
+  else if (appraisalStatus === 'scheduled') appraisal = 'scheduled';
+  else if (appraisalStatus === 'ordered' || isStarted('APPRAISAL')) appraisal = 'ordered';
+  else if (appraisalStatus !== '') appraisal = 'pending';
+
+  const status = loanStatus?.toLowerCase() ?? '';
+
+  return {
+    source: 'arive',
+    loanSetup: true,
+    disclosuresOut: isStarted('CD'),
+    disclosuresSignedSubmitted: isComplete('CD'),
+    approvedWithConditions: status.includes('approved') || status.includes('conditional'),
+    resubmittal: status.includes('resubmit') || status.includes('suspended'),
+    clearToClose: status.includes('clear') || isComplete('SIGNED_DOCS_WITH_LENDER'),
+    appraisal,
+    funded: isComplete('FUNDING_WIRE'),
+    ariveTrackers: trackers,
+    ariveLoanStatus: loanStatus ?? undefined,
+    ariveKeyDates: keyDates ?? undefined,
+  };
+}
+
 export function apiDealToFrontend(d: ApiDeal): Deal {
   const price = d.price ?? 0;
+
+  let loanMilestones: LoanMilestones | undefined;
+  if (d.arive_linked && d.arive_milestones && d.arive_milestones.length > 0) {
+    loanMilestones = ariveMilestonesFromTrackers(
+      d.arive_milestones,
+      d.arive_loan_status,
+      d.arive_key_dates,
+    );
+  }
+
+  const closingDate = d.arive_key_dates?.estimatedFundingDate
+    ?? d.arive_key_dates?.closingContingency
+    ?? undefined;
+
   return {
     id: d.id,
     type: d.type,
@@ -42,6 +99,7 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     },
     timeline: {
       createdAt: d.created_at,
+      closingDate: closingDate ?? undefined,
       daysInStage: Math.max(
         0,
         Math.floor((Date.now() - new Date(d.updated_at).getTime()) / 86_400_000),
@@ -54,6 +112,7 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     agentEmail: d.agent_email,
     agentPhone: d.agent_phone,
     notes: d.notes ?? undefined,
+    loanMilestones,
     openTaskCount: d.open_task_count ?? 0,
     overdueTaskCount: d.overdue_task_count ?? 0,
   };

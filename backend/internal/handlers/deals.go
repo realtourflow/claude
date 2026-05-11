@@ -89,6 +89,7 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 	q := `
 		SELECT deals.id, deals.agent_id, deals.type, deals.stage, ` + healthExpr + ` AS health,
 		       deals.title, deals.address, deals.price, deals.arive_linked,
+		       deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
 		       deals.created_at, deals.updated_at,
 		       u.name, u.email, u.phone,
 		       (SELECT COUNT(*) FROM tasks t
@@ -118,7 +119,9 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 		d := &dealWithStats{}
 		if err := rows.Scan(
 			&d.ID, &d.AgentID, &d.Type, &d.Stage, &d.Health,
-			&d.Title, &d.Address, &d.Price, &d.AriveLinked, &d.CreatedAt, &d.UpdatedAt,
+			&d.Title, &d.Address, &d.Price, &d.AriveLinked,
+			&d.AriveMilestones, &d.AriveKeyDates, &d.AriveLoanStatus,
+			&d.CreatedAt, &d.UpdatedAt,
 			&d.AgentName, &d.AgentEmail, &d.AgentPhone,
 			&d.OpenTaskCount, &d.OverdueTaskCount,
 		); err != nil {
@@ -197,12 +200,16 @@ func (h *Handler) GetDeal(w http.ResponseWriter, r *http.Request) {
 	deal := &models.Deal{}
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT id, agent_id, type, stage, `+healthExpr+` AS health,
-		       title, address, price, arive_linked, notes, created_at, updated_at
+		       title, address, price, arive_linked,
+		       arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
+		       notes, created_at, updated_at
 		FROM deals
 		WHERE id = $1 AND agent_id = $2
 	`, dealID, userID).Scan(
 		&deal.ID, &deal.AgentID, &deal.Type, &deal.Stage, &deal.Health,
-		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked, &deal.Notes, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked,
+		&deal.AriveLoanID, &deal.AriveMilestones, &deal.AriveKeyDates, &deal.AriveLoanStatus, &deal.AriveSyncedAt,
+		&deal.Notes, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		http.Error(w, "deal not found", http.StatusNotFound)
