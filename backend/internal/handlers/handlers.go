@@ -11,14 +11,23 @@ import (
 )
 
 type Handler struct {
-	db          *sql.DB
-	s3Client    *s3.Client
-	s3Bucket    string
-	ariveClient *arive.Client
+	db                  *sql.DB
+	s3Client            *s3.Client
+	s3Bucket            string
+	ariveClient         *arive.Client
+	stripeKey           string
+	stripeWebhookSecret string
 }
 
-func New(db *sql.DB, s3Client *s3.Client, s3Bucket string, ariveClient *arive.Client) *Handler {
-	return &Handler{db: db, s3Client: s3Client, s3Bucket: s3Bucket, ariveClient: ariveClient}
+func New(db *sql.DB, s3Client *s3.Client, s3Bucket string, ariveClient *arive.Client, stripeKey, stripeWebhookSecret string) *Handler {
+	return &Handler{
+		db:                  db,
+		s3Client:            s3Client,
+		s3Bucket:            s3Bucket,
+		ariveClient:         ariveClient,
+		stripeKey:           stripeKey,
+		stripeWebhookSecret: stripeWebhookSecret,
+	}
 }
 
 func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
@@ -30,6 +39,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 	r.Get("/invites/role", h.GetInviteRole)
 	r.Get("/invites/{token}", h.GetInvite)
 	r.Post("/arive/webhook", h.AriveWebhook)
+	r.Post("/stripe/webhook", h.StripeWebhook)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth)
@@ -84,6 +94,9 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 
 		r.Patch("/deals/{dealId}/arive", h.LinkAriveLoan)
 		r.Post("/deals/{dealId}/arive/sync", h.SyncAriveLoan)
+
+		r.Post("/deals/{dealId}/fee/checkout", h.FeeCheckout)
+		r.Post("/deals/{dealId}/fee/waive", h.WaiveFee)
 
 		r.Get("/notifications", h.ListNotifications)
 		r.Patch("/notifications/{notifId}/read", h.MarkNotificationRead)

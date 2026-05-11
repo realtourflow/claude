@@ -17,6 +17,9 @@ export type ApiDeal = {
   arive_key_dates?: AriveKeyDates | null;
   arive_loan_status?: string | null;
   notes?: string | null;
+  fee_status?: string;
+  fee_amount_cents?: number;
+  fee_paid_at?: string | null;
   created_at: string;
   updated_at: string;
   agent_name?: string;
@@ -115,6 +118,9 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     loanMilestones,
     openTaskCount: d.open_task_count ?? 0,
     overdueTaskCount: d.overdue_task_count ?? 0,
+    feeStatus: (d.fee_status as Deal['feeStatus']) ?? 'unpaid',
+    feeAmountCents: d.fee_amount_cents ?? 7500,
+    feePaidAt: d.fee_paid_at ?? null,
   };
 }
 

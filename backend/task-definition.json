@@ -28,6 +28,26 @@
         {
           "name": "AUTH0_AUDIENCE",
           "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-audience-vsItjS"
+        },
+        {
+          "name": "ARIVE_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/arive-api-key-GTV8nN"
+        },
+        {
+          "name": "ARIVE_CLIENT_ID",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/arive-client-id-AJsqJi"
+        },
+        {
+          "name": "ARIVE_CLIENT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/arive-client-secret-zxOssj"
+        },
+        {
+          "name": "STRIPE_SECRET_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/stripe-secret-key-QpGN00"
+        },
+        {
+          "name": "STRIPE_WEBHOOK_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/stripe-webhook-secret-IsHu6R"
         }
       ],
       "environment": [
@@ -46,6 +66,18 @@
         {
           "name": "AWS_REGION",
           "value": "us-east-1"
+        },
+        {
+          "name": "ARIVE_API_URL",
+          "value": "https://2720886.myarive.com"
+        },
+        {
+          "name": "ARIVE_WEBHOOK_URL",
+          "value": "https://api.realtourflow.com/api/arive/webhook"
+        },
+        {
+          "name": "STRIPE_PUBLISHABLE_KEY",
+          "value": "pk_live_51Q9pr1LWgVKrzBhA3jklNlfoB6M8F4JFxGVx2REOZuNMm32z0VAEYf3Of0LGRbWxelN8sPdZgTnYvq710GPCtMgk00xsojl9F2"
         }
       ],
       "logConfiguration": {

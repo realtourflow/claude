@@ -13,11 +13,13 @@ type Config struct {
 	Auth0Audience  string
 	S3Bucket       string
 	AWSRegion      string
-	AriveAPIURL      string
-	AriveAPIKey      string
-	AriveClientID    string
+	AriveAPIURL       string
+	AriveAPIKey       string
+	AriveClientID     string
 	AriveClientSecret string
-	AriveWebhookURL  string
+	AriveWebhookURL   string
+	StripeSecretKey    string
+	StripeWebhookSecret string
 }
 
 func Load() *Config {
@@ -29,11 +31,13 @@ func Load() *Config {
 		Auth0Audience:   getEnv("AUTH0_AUDIENCE", ""),
 		S3Bucket:        getEnv("S3_BUCKET", "realtourflow-documents"),
 		AWSRegion:       getEnv("AWS_REGION", "us-east-1"),
-		AriveAPIURL:       getEnv("ARIVE_API_URL", "https://2720886.myarive.com"),
-		AriveAPIKey:       getEnv("ARIVE_API_KEY", ""),
-		AriveClientID:     getEnv("ARIVE_CLIENT_ID", ""),
-		AriveClientSecret: getEnv("ARIVE_CLIENT_SECRET", ""),
-		AriveWebhookURL:   getEnv("ARIVE_WEBHOOK_URL", ""),
+		AriveAPIURL:         getEnv("ARIVE_API_URL", "https://2720886.myarive.com"),
+		AriveAPIKey:         getEnv("ARIVE_API_KEY", ""),
+		AriveClientID:       getEnv("ARIVE_CLIENT_ID", ""),
+		AriveClientSecret:   getEnv("ARIVE_CLIENT_SECRET", ""),
+		AriveWebhookURL:     getEnv("ARIVE_WEBHOOK_URL", ""),
+		StripeSecretKey:     getEnv("STRIPE_SECRET_KEY", ""),
+		StripeWebhookSecret: getEnv("STRIPE_WEBHOOK_SECRET", ""),
 	}
 }
 

@@ -514,71 +514,89 @@ function StuckDeals({ deals }: { deals: Deal[] }) {
 
 // ─── Fees Collected ────────────────────────────────────────────────────────────
 
+const FEE_BADGE: Record<string, string> = {
+  paid:    'bg-green-100 text-green-700',
+  waived:  'bg-gray-100 text-gray-400',
+  pending: 'bg-amber-100 text-amber-700',
+  unpaid:  'bg-red-50 text-red-600',
+};
+
 function FeesCollected({ deals }: { deals: Deal[] }) {
-  const closedDeals = deals.filter((d) => d.stage === 'post_close');
-  const totalCollected = closedDeals.reduce((s, d) => s + d.estimatedCommission, 0);
-  const activeDeals = deals.filter((d) => d.stage !== 'post_close');
-  const totalPending = activeDeals.reduce((s, d) => s + d.estimatedCommission, 0);
+  const postCloseDeals = deals.filter((d) => d.stage === 'post_close');
+  const paidDeals      = postCloseDeals.filter((d) => d.feeStatus === 'paid');
+  const unpaidDeals    = postCloseDeals.filter((d) => d.feeStatus === 'unpaid' || d.feeStatus === 'pending');
+
+  const totalCollected = paidDeals.reduce((s, d) => s + (d.feeAmountCents ?? 7500), 0);
+  const totalOutstanding = unpaidDeals.reduce((s, d) => s + (d.feeAmountCents ?? 7500), 0);
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-brand-navy">Fees Collected</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Commission tracking across all deals</p>
+        <p className="text-sm text-gray-400 mt-0.5">$75 closing fee per completed deal</p>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <div className="rounded-xl bg-white px-5 py-5 shadow-sm">
-          <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Collected (Closed)</div>
-          <div className="text-2xl font-bold text-green-600">{fmt$(totalCollected)}</div>
-          <div className="text-xs text-gray-400 mt-1">{closedDeals.length} closed deals</div>
+          <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Collected</div>
+          <div className="text-2xl font-bold text-green-600">${(totalCollected / 100).toFixed(2)}</div>
+          <div className="text-xs text-gray-400 mt-1">{paidDeals.length} deals paid</div>
         </div>
         <div className="rounded-xl bg-white px-5 py-5 shadow-sm">
-          <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Pipeline (Pending)</div>
-          <div className="text-2xl font-bold text-brand-navy">{fmt$(totalPending)}</div>
-          <div className="text-xs text-gray-400 mt-1">{activeDeals.length} active deals</div>
+          <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Outstanding</div>
+          <div className="text-2xl font-bold text-red-500">${(totalOutstanding / 100).toFixed(2)}</div>
+          <div className="text-xs text-gray-400 mt-1">{unpaidDeals.length} deals unpaid</div>
+        </div>
+        <div className="rounded-xl bg-white px-5 py-5 shadow-sm">
+          <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Post-Close Total</div>
+          <div className="text-2xl font-bold text-brand-navy">{postCloseDeals.length}</div>
+          <div className="text-xs text-gray-400 mt-1">completed deals</div>
         </div>
       </div>
 
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         <div className="border-b px-5 py-3">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">All Deals — Commission Breakdown</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Post-Close Deals — Closing Fee Status</h2>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-400">
-              <th className="px-5 py-3">Client</th>
-              <th className="px-5 py-3">Stage</th>
-              <th className="px-5 py-3">Type</th>
-              <th className="px-5 py-3 text-right">Property Value</th>
-              <th className="px-5 py-3 text-right">Est. Commission</th>
-              <th className="px-5 py-3 text-right">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {deals.map((d) => (
-              <tr key={d.id} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
-                <td className="px-5 py-3 font-medium text-brand-navy">{d.clientName}</td>
-                <td className="px-5 py-3 text-gray-500 text-xs">{STAGE_LABELS[d.stage]}</td>
-                <td className="px-5 py-3">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase ${d.type === 'buy' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
-                    {d.type}
-                  </span>
-                </td>
-                <td className="px-5 py-3 text-right font-medium text-gray-700">
-                  ${d.property.price.toLocaleString()}
-                </td>
-                <td className="px-5 py-3 text-right font-semibold text-brand-navy">
-                  ${d.estimatedCommission.toLocaleString()}
-                </td>
-                <td className="px-5 py-3 text-right">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${d.stage === 'post_close' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {d.stage === 'post_close' ? 'Collected' : 'Pending'}
-                  </span>
-                </td>
+        {postCloseDeals.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm text-gray-400">No post-close deals yet</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-400">
+                <th className="px-5 py-3">Client</th>
+                <th className="px-5 py-3">Agent</th>
+                <th className="px-5 py-3">Type</th>
+                <th className="px-5 py-3 text-right">Fee</th>
+                <th className="px-5 py-3 text-right">Paid On</th>
+                <th className="px-5 py-3 text-right">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {postCloseDeals.map((d) => (
+                <tr key={d.id} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
+                  <td className="px-5 py-3 font-medium text-brand-navy">{d.clientName}</td>
+                  <td className="px-5 py-3 text-gray-500 text-xs">{d.agentName ?? '—'}</td>
+                  <td className="px-5 py-3">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase ${d.type === 'buy' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                      {d.type}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-right font-semibold text-brand-navy">
+                    ${((d.feeAmountCents ?? 7500) / 100).toFixed(2)}
+                  </td>
+                  <td className="px-5 py-3 text-right text-xs text-gray-400">
+                    {d.feePaidAt ? new Date(d.feePaidAt).toLocaleDateString() : '—'}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${FEE_BADGE[d.feeStatus ?? 'unpaid']}`}>
+                      {d.feeStatus ?? 'unpaid'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

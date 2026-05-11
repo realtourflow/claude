@@ -1460,6 +1460,64 @@ function OverviewTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
 
       {/* Internal Notes */}
       <InternalNotesCard deal={deal} />
+
+      {/* Closing Fee — shown at post_close */}
+      {deal.stage === 'post_close' && <ClosingFeeCard deal={deal} />}
+    </div>
+  );
+}
+
+// ─── Closing Fee Card ────────────────────────────────────────────────────────
+
+function ClosingFeeCard({ deal }: { deal: Deal }) {
+  const [loading, setLoading] = useState(false);
+  const feeStatus = deal.feeStatus ?? 'unpaid';
+  const amount = ((deal.feeAmountCents ?? 7500) / 100).toFixed(2);
+
+  async function handlePay() {
+    setLoading(true);
+    try {
+      const res = await api.post<{ checkout_url: string }>(`/deals/${deal.id}/fee/checkout`, {});
+      window.location.href = res.checkout_url;
+    } catch {
+      setLoading(false);
+    }
+  }
+
+  const STATUS_STYLES: Record<string, string> = {
+    paid:    'bg-green-100 text-green-700',
+    waived:  'bg-gray-100 text-gray-500',
+    pending: 'bg-amber-100 text-amber-700',
+    unpaid:  'bg-red-50 text-red-600',
+  };
+
+  return (
+    <div className="rounded-xl bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Closing Fee</h3>
+          <p className="mt-1 text-2xl font-bold text-brand-navy">${amount}</p>
+          {feeStatus === 'paid' && deal.feePaidAt && (
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              Paid {new Date(deal.feePaidAt).toLocaleDateString()}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <span className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${STATUS_STYLES[feeStatus] ?? STATUS_STYLES.unpaid}`}>
+            {feeStatus}
+          </span>
+          {(feeStatus === 'unpaid' || feeStatus === 'pending') && (
+            <button
+              onClick={handlePay}
+              disabled={loading}
+              className="rounded-lg bg-brand-gold px-4 py-2 text-sm font-bold text-brand-navy hover:bg-brand-gold-dark transition-colors disabled:opacity-60"
+            >
+              {loading ? 'Redirecting…' : 'Pay Now'}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

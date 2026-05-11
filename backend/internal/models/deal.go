@@ -45,6 +45,9 @@ type Deal struct {
 	AriveLoanStatus  *string          `json:"arive_loan_status,omitempty"`
 	AriveSyncedAt    *time.Time       `json:"arive_synced_at,omitempty"`
 	Notes            *string          `json:"notes,omitempty"`
+	FeeStatus        string           `json:"fee_status"`
+	FeeAmountCents   int              `json:"fee_amount_cents"`
+	FeePaidAt        *time.Time       `json:"fee_paid_at,omitempty"`
 	CreatedAt        time.Time        `json:"created_at"`
 	UpdatedAt        time.Time        `json:"updated_at"`
 }

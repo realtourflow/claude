@@ -124,6 +124,10 @@ export type Deal = {
   /** Task counts populated from real API */
   openTaskCount?: number;
   overdueTaskCount?: number;
+  /** Closing fee — populated from real API */
+  feeStatus?: 'unpaid' | 'pending' | 'paid' | 'waived';
+  feeAmountCents?: number;
+  feePaidAt?: string | null;
 };
 
 export const MOCK_DEALS: Deal[] = [
