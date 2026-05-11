@@ -45,7 +45,7 @@ func main() {
 	}
 	s3Client := s3.NewFromConfig(awsCfg)
 
-	ariveClient := arive.New(cfg.AriveAPIURL, cfg.AriveAPIKey, cfg.AriveAPIToken)
+	ariveClient := arive.New(cfg.AriveAPIURL, cfg.AriveAPIKey, cfg.AriveClientID, cfg.AriveClientSecret)
 	if ariveClient.Enabled() && cfg.AriveWebhookURL != "" {
 		go func() {
 			if err := ariveClient.RegisterWebhooks(context.Background(), cfg.AriveWebhookURL); err != nil {

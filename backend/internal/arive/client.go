@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -28,17 +30,17 @@ type LoanStatus struct {
 
 // Loan holds the ARIVE loan fields we care about.
 type Loan struct {
-	ID               string          `json:"id"`
-	CrmReferenceID   string          `json:"crmReferenceId"`
-	CurrentLoanStatus LoanStatus     `json:"currentLoanStatus"`
-	LoanTrackers     []LoanTracker   `json:"loanTrackers"`
-	KeyDates         json.RawMessage `json:"keyDates"`
+	ID                string          `json:"id"`
+	CrmReferenceID    string          `json:"crmReferenceId"`
+	CurrentLoanStatus LoanStatus      `json:"currentLoanStatus"`
+	LoanTrackers      []LoanTracker   `json:"loanTrackers"`
+	KeyDates          json.RawMessage `json:"keyDates"`
 }
 
 // WebhookPayload is the body ARIVE sends to our webhook endpoint.
 type WebhookPayload struct {
 	LoanID string `json:"loanId"`
-	ID     string `json:"id"`   // alternate key ARIVE may use
+	ID     string `json:"id"`
 	Event  string `json:"event"`
 }
 
@@ -49,26 +51,93 @@ func (p *WebhookPayload) ResolvedLoanID() string {
 	return p.ID
 }
 
-// Client calls the ARIVE API.
+// Client calls the ARIVE API using OAuth2 client_credentials.
 type Client struct {
-	apiURL     string
-	apiKey     string
-	apiToken   string
-	httpClient *http.Client
+	apiURL       string
+	apiKey       string
+	clientID     string
+	clientSecret string
+	httpClient   *http.Client
+
+	mu          sync.Mutex
+	accessToken string
+	tokenExpiry time.Time
 }
 
-func New(apiURL, apiKey, apiToken string) *Client {
+func New(apiURL, apiKey, clientID, clientSecret string) *Client {
 	return &Client{
-		apiURL:   apiURL,
-		apiKey:   apiKey,
-		apiToken: apiToken,
-		httpClient: &http.Client{Timeout: 15 * time.Second},
+		apiURL:       apiURL,
+		apiKey:       apiKey,
+		clientID:     clientID,
+		clientSecret: clientSecret,
+		httpClient:   &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
 // Enabled returns false when no API credentials are configured.
 func (c *Client) Enabled() bool {
-	return c.apiURL != "" && c.apiKey != ""
+	return c.apiURL != "" && c.apiKey != "" && c.clientID != ""
+}
+
+// token returns a valid Bearer token, fetching a new one if needed.
+func (c *Client) token(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.accessToken != "" && time.Now().Before(c.tokenExpiry) {
+		return c.accessToken, nil
+	}
+
+	payload := map[string]string{
+		"ClientId":     c.clientID,
+		"ClientSecret": c.clientSecret,
+	}
+	b, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/api/auth/token", bytes.NewReader(b))
+	if err != nil {
+		return "", fmt.Errorf("build token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-KEY", c.apiKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch arive token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("arive token: status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Token       string `json:"token"`
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("decode token response: %w", err)
+	}
+
+	tok := result.Token
+	if tok == "" {
+		tok = result.AccessToken
+	}
+	if tok == "" {
+		return "", fmt.Errorf("arive token response contained no token field")
+	}
+
+	expiry := 3500 * time.Second
+	if result.ExpiresIn > 0 {
+		expiry = time.Duration(result.ExpiresIn-60) * time.Second
+	}
+
+	c.accessToken = tok
+	c.tokenExpiry = time.Now().Add(expiry)
+	log.Println("arive: access token refreshed")
+	return tok, nil
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -88,9 +157,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-KEY", c.apiKey)
-	if c.apiToken != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiToken)
+
+	tok, err := c.token(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get token: %w", err)
 	}
+	req.Header.Set("Authorization", "Bearer "+tok)
 
 	return c.httpClient.Do(req)
 }
