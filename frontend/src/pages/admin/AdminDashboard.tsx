@@ -1,6 +1,8 @@
 import { useParams, Link } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { useDeals } from '../../hooks/useDeals';
 import { useUsers, AppUser } from '../../hooks/useUsers';
+import { useSystemConfig, usePromoCodes, SystemConfig, CreatePromoCodeInput } from '../../hooks/useAdmin';
 import { Deal } from '../../data/mockDeals';
 import {
   AlertTriangle,
@@ -15,6 +17,11 @@ import {
   Mail,
   ShieldCheck,
   UserX,
+  Settings,
+  Tag,
+  Plus,
+  Trash2,
+  Save,
 } from 'lucide-react';
 import { FAST_PASS_UPSELLS } from '../../data/mockFastPass';
 import { NEXT_STEP_LABELS, nextStepQualifiesForBridge } from '../../data/mockSmoothExit';
@@ -1117,6 +1124,476 @@ function UserManagement() {
   );
 }
 
+// ─── System Config ────────────────────────────────────────────────────────────
+
+const STAGE_THRESHOLD_LABELS: Record<string, string> = {
+  intake: 'Intake',
+  active_search: 'Active Search',
+  offer_active: 'Offer Active',
+  under_contract: 'Under Contract',
+  pre_close: 'Pre-Close',
+  closing: 'Closing',
+  post_close: 'Post-Close',
+};
+
+const STAGE_THRESHOLD_KEYS = [
+  'intake', 'active_search', 'offer_active', 'under_contract', 'pre_close', 'closing', 'post_close',
+] as const;
+
+const DEFAULT_CONFIG: SystemConfig = {
+  stage_thresholds: { intake: 5, active_search: 30, offer_active: 10, under_contract: 35, pre_close: 10, closing: 5, post_close: 21 },
+  closing_fee_amount: 500,
+  fast_pass_base_price: 1500,
+  smooth_exit_pct: 1.0,
+};
+
+function AdminSystemConfig() {
+  const { config, updatedAt, loading, saving, saveConfig } = useSystemConfig();
+  const [form, setForm] = useState<SystemConfig>(DEFAULT_CONFIG);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (config) setForm(config);
+  }, [config]);
+
+  function setThreshold(stage: string, val: string) {
+    const n = parseInt(val, 10);
+    if (isNaN(n) || n < 0) return;
+    setForm((prev) => ({
+      ...prev,
+      stage_thresholds: { ...prev.stage_thresholds, [stage]: n },
+    }));
+  }
+
+  async function handleSave() {
+    await saveConfig(form);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold text-brand-navy">System Config</h1>
+        <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Loading…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-7">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-navy">System Config</h1>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Global platform settings — stage thresholds and fee configuration
+          </p>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {updatedAt && (
+            <span className="text-xs text-gray-400">
+              Last saved {new Date(updatedAt).toLocaleDateString()}
+            </span>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy/80 transition-colors disabled:opacity-50"
+          >
+            <Save size={14} />
+            {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <div className="border-b px-5 py-3 flex items-center gap-2">
+          <Settings size={14} className="text-gray-400" />
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Stage Thresholds (days before deal is considered stuck)
+          </h2>
+        </div>
+        <div className="grid grid-cols-2 gap-px bg-gray-100 sm:grid-cols-4">
+          {STAGE_THRESHOLD_KEYS.map((stage) => (
+            <div key={stage} className="bg-white px-5 py-4">
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+                {STAGE_THRESHOLD_LABELS[stage]}
+              </label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min="1"
+                  value={form.stage_thresholds[stage]}
+                  onChange={(e) => setThreshold(stage, e.target.value)}
+                  className="w-20 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-brand-navy focus:border-brand-navy focus:outline-none"
+                />
+                <span className="text-xs text-gray-400">days</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <div className="border-b px-5 py-3 flex items-center gap-2">
+          <DollarSign size={14} className="text-gray-400" />
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Fee Configuration
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 gap-px bg-gray-100 sm:grid-cols-3">
+          <div className="bg-white px-5 py-4">
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              Closing Fee Amount
+            </label>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm text-gray-400">$</span>
+              <input
+                type="number"
+                min="0"
+                value={form.closing_fee_amount}
+                onChange={(e) => setForm((prev) => ({ ...prev, closing_fee_amount: parseFloat(e.target.value) || 0 }))}
+                className="w-28 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-brand-navy focus:border-brand-navy focus:outline-none"
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">Charged at post-close per deal</p>
+          </div>
+
+          <div className="bg-white px-5 py-4">
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              Fast Pass Base Price
+            </label>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm text-gray-400">$</span>
+              <input
+                type="number"
+                min="0"
+                value={form.fast_pass_base_price}
+                onChange={(e) => setForm((prev) => ({ ...prev, fast_pass_base_price: parseFloat(e.target.value) || 0 }))}
+                className="w-28 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-brand-navy focus:border-brand-navy focus:outline-none"
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">Base price before upsell add-ons</p>
+          </div>
+
+          <div className="bg-white px-5 py-4">
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">
+              Smooth Exit Fee
+            </label>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={form.smooth_exit_pct}
+                onChange={(e) => setForm((prev) => ({ ...prev, smooth_exit_pct: parseFloat(e.target.value) || 0 }))}
+                className="w-20 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-semibold text-brand-navy focus:border-brand-navy focus:outline-none"
+              />
+              <span className="text-sm text-gray-400">% of sale price</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">Applied as % of closing sale price</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Promotions ────────────────────────────────────────────────────────────────
+
+const APPLIES_TO_STAGES = [
+  { value: 'intake',          label: 'Intake' },
+  { value: 'active_search',   label: 'Active Search' },
+  { value: 'offer_active',    label: 'Offer Active' },
+  { value: 'under_contract',  label: 'Under Contract' },
+  { value: 'pre_close',       label: 'Pre-Close' },
+  { value: 'closing',         label: 'Closing' },
+  { value: 'post_close',      label: 'Post-Close' },
+  { value: 'fast_pass',       label: 'Fast Pass' },
+  { value: 'smooth_exit',     label: 'Smooth Exit' },
+];
+
+function Promotions() {
+  const { codes, loading, createCode, deleteCode } = usePromoCodes();
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({
+    code: '',
+    discountType: 'pct' as 'pct' | 'fixed',
+    discountValue: '',
+    appliesTo: [] as string[],
+    maxUses: '',
+    expiresAt: '',
+  });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  function toggleAppliesTo(val: string) {
+    setForm((prev) => ({
+      ...prev,
+      appliesTo: prev.appliesTo.includes(val)
+        ? prev.appliesTo.filter((s) => s !== val)
+        : [...prev.appliesTo, val],
+    }));
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const input: CreatePromoCodeInput = {
+        code: form.code.toUpperCase().trim(),
+        discountType: form.discountType,
+        discountValue: parseFloat(form.discountValue) || 0,
+        appliesTo: form.appliesTo,
+        maxUses: form.maxUses ? parseInt(form.maxUses, 10) : null,
+        expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
+      };
+      await createCode(input);
+      setShowCreate(false);
+      setForm({ code: '', discountType: 'pct', discountValue: '', appliesTo: [], maxUses: '', expiresAt: '' });
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create promo code');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold text-brand-navy">Promotions</h1>
+        <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Loading…</div>
+      </div>
+    );
+  }
+
+  const activeCodes = codes.filter((c) => !c.expiresAt || new Date(c.expiresAt) > new Date());
+
+  return (
+    <div className="space-y-7">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-navy">Promotions</h1>
+          <p className="text-sm text-gray-400 mt-0.5">Manage discount codes for Fast Pass, Smooth Exit, and closing fees</p>
+        </div>
+        <button
+          onClick={() => setShowCreate((v) => !v)}
+          className="flex items-center gap-1.5 rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy/80 transition-colors flex-shrink-0"
+        >
+          <Plus size={14} />
+          New Code
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div className="rounded-xl bg-white px-5 py-4 shadow-sm">
+          <div className="text-2xl font-bold text-brand-navy">{codes.length}</div>
+          <div className="text-xs text-gray-400 font-medium">Total Codes</div>
+        </div>
+        <div className="rounded-xl bg-white px-5 py-4 shadow-sm">
+          <div className="text-2xl font-bold text-green-600">{activeCodes.length}</div>
+          <div className="text-xs text-gray-400 font-medium">Active Codes</div>
+        </div>
+        <div className="rounded-xl bg-white px-5 py-4 shadow-sm">
+          <div className="text-2xl font-bold text-brand-navy">
+            {codes.reduce((s, c) => s + c.usesCount, 0)}
+          </div>
+          <div className="text-xs text-gray-400 font-medium">Total Uses</div>
+        </div>
+      </div>
+
+      {showCreate && (
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <div className="border-b px-5 py-3 flex items-center gap-2">
+            <Tag size={14} className="text-gray-400" />
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Create Promo Code</h2>
+          </div>
+          <form onSubmit={handleCreate} className="px-5 py-5 space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Code</label>
+                <input
+                  required
+                  value={form.code}
+                  onChange={(e) => setForm((p) => ({ ...p, code: e.target.value.toUpperCase() }))}
+                  placeholder="SUMMER25"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm font-mono font-semibold uppercase focus:border-brand-navy focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Type</label>
+                <select
+                  value={form.discountType}
+                  onChange={(e) => setForm((p) => ({ ...p, discountType: e.target.value as 'pct' | 'fixed' }))}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-navy focus:outline-none"
+                >
+                  <option value="pct">Percentage (%)</option>
+                  <option value="fixed">Fixed ($)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Value</label>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-gray-400">{form.discountType === 'fixed' ? '$' : ''}</span>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    step={form.discountType === 'pct' ? '1' : '0.01'}
+                    value={form.discountValue}
+                    onChange={(e) => setForm((p) => ({ ...p, discountValue: e.target.value }))}
+                    placeholder={form.discountType === 'pct' ? '10' : '100'}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-navy focus:outline-none"
+                  />
+                  <span className="text-sm text-gray-400">{form.discountType === 'pct' ? '%' : ''}</span>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Max Uses (optional)</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={form.maxUses}
+                  onChange={(e) => setForm((p) => ({ ...p, maxUses: e.target.value }))}
+                  placeholder="Unlimited"
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-navy focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">Expires (optional)</label>
+                <input
+                  type="date"
+                  value={form.expiresAt}
+                  onChange={(e) => setForm((p) => ({ ...p, expiresAt: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-navy focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-2">Applies To (leave empty for all)</label>
+              <div className="flex flex-wrap gap-2">
+                {APPLIES_TO_STAGES.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => toggleAppliesTo(value)}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                      form.appliesTo.includes(value)
+                        ? 'bg-brand-navy text-white'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {createError && (
+              <p className="text-xs text-red-500">{createError}</p>
+            )}
+
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="submit"
+                disabled={creating}
+                className="rounded-lg bg-brand-navy px-5 py-2 text-sm font-semibold text-white hover:bg-brand-navy/80 transition-colors disabled:opacity-50"
+              >
+                {creating ? 'Creating…' : 'Create Code'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowCreate(false); setCreateError(null); }}
+                className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {codes.length === 0 ? (
+        <div className="rounded-xl bg-white px-5 py-10 text-center text-gray-400 shadow-sm">
+          No promo codes yet. Create one to get started.
+        </div>
+      ) : (
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-400">
+                <th className="px-5 py-3">Code</th>
+                <th className="px-5 py-3">Discount</th>
+                <th className="px-5 py-3">Applies To</th>
+                <th className="px-5 py-3 text-center">Uses</th>
+                <th className="px-5 py-3">Expires</th>
+                <th className="px-5 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {codes.map((c) => {
+                const expired = c.expiresAt && new Date(c.expiresAt) <= new Date();
+                const exhausted = c.maxUses !== null && c.usesCount >= c.maxUses;
+                const inactive = expired || exhausted;
+                return (
+                  <tr key={c.id} className={`border-b last:border-0 ${inactive ? 'opacity-50' : 'hover:bg-gray-50/50'} transition-colors`}>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-brand-navy">{c.code}</span>
+                        {inactive && (
+                          <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-400 uppercase">
+                            {expired ? 'expired' : 'exhausted'}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 font-semibold text-green-600">
+                      {c.discountType === 'pct' ? `${c.discountValue}%` : `$${c.discountValue}`}
+                    </td>
+                    <td className="px-5 py-3">
+                      {c.appliesTo.length === 0 ? (
+                        <span className="text-xs text-gray-400 italic">All</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {c.appliesTo.map((s) => (
+                            <span key={s} className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600">
+                              {s.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-center">
+                      <span className="text-sm font-semibold text-brand-navy">{c.usesCount}</span>
+                      {c.maxUses !== null && (
+                        <span className="text-xs text-gray-400"> / {c.maxUses}</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-xs text-gray-500">
+                      {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <button
+                        onClick={() => deleteCode(c.id)}
+                        className="flex items-center gap-1 ml-auto rounded-lg border border-red-100 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
+                      >
+                        <Trash2 size={11} /> Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Coming Soon placeholder ───────────────────────────────────────────────────
 
 function ComingSoon({ title }: { title: string }) {
@@ -1157,8 +1634,8 @@ export default function AdminDashboard() {
     case 'smoothexit':  return <SmoothExitQueue deals={deals} />;
     case 'arive':       return <AriveStatus deals={deals} />;
     case 'metro':       return <ComingSoon title="Metro View" />;
-    case 'promotions':  return <ComingSoon title="Promotions" />;
-    case 'config':      return <ComingSoon title="System Config" />;
+    case 'promotions':  return <Promotions />;
+    case 'config':      return <AdminSystemConfig />;
     default:            return <PipelineOverview deals={deals} />;
   }
 }

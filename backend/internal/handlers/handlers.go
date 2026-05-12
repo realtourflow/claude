@@ -141,6 +141,12 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Get("/notifications", h.ListNotifications)
 		r.Patch("/notifications/{notifId}/read", h.MarkNotificationRead)
 		r.Post("/notifications/read-all", h.MarkAllNotificationsRead)
+
+		r.Get("/admin/config", h.GetSystemConfig)
+		r.Put("/admin/config", h.PutSystemConfig)
+		r.Get("/admin/promo-codes", h.ListPromoCodes)
+		r.Post("/admin/promo-codes", h.CreatePromoCode)
+		r.Delete("/admin/promo-codes/{codeId}", h.DeletePromoCode)
 	})
 
 	return r
