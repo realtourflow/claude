@@ -1,0 +1,2 @@
+ALTER TABLE users DROP COLUMN IF EXISTS tc_contact;
+ALTER TABLE users DROP COLUMN IF EXISTS tc_user_id;

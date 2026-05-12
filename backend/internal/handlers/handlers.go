@@ -77,6 +77,10 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Get("/me/settings", h.GetSettings)
 		r.Put("/me/settings", h.PutSettings)
 		r.Patch("/me/profile", h.PatchProfile)
+		r.Get("/me/tc", h.GetMyTC)
+		r.Put("/me/tc", h.PutMyTC)
+		r.Delete("/me/tc", h.DeleteMyTC)
+		r.Get("/me/agents", h.ListMyAgents)
 
 		r.Get("/deals/{dealId}/participants", h.ListParticipants)
 		r.Post("/deals/{dealId}/participants", h.AddParticipant)

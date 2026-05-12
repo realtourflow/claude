@@ -5,7 +5,7 @@ import {
   Phone, Mail, Globe, Users, UserCheck, FileText, Upload,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { useAgentTCStore, MOCK_AGENT_ROSTER, TCInfo } from '../../store/agentTCStore';
+import { useTC, useMyAgents } from '../../hooks/useTC';
 import { useAgentDocStore, DocType, DOC_TYPE_LABELS, AgentDocTemplate } from '../../store/agentDocStore';
 import {
   VendorCategory,
@@ -712,28 +712,33 @@ function IntegrationsSection() {
 
 // ─── Transaction Coordinator Section (agents only) ───────────────────────────
 
-function TransactionCoordinatorSection({ agentId }: { agentId: string }) {
-  const { agentTCMap, setTC, clearTC } = useAgentTCStore();
-  const existing = agentTCMap[agentId] ?? null;
+function TransactionCoordinatorSection({ agentId: _agentId }: { agentId: string }) {
+  const { tc: existing, saveTC, removeTC } = useTC();
 
-  const [form, setForm] = useState<TCInfo>({
-    name:   existing?.name  ?? '',
-    email:  existing?.email ?? '',
-    phone:  existing?.phone ?? '',
-  });
+  const [form, setForm] = useState({ name: '', email: '', phone: '' });
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+
+  useEffect(() => {
+    if (existing) setForm({ name: existing.name, email: existing.email, phone: existing.phone });
+  }, [existing]);
 
   const canSave = form.name.trim().length > 0 && form.email.trim().length > 0;
 
-  function handleSave() {
-    setTC(agentId, { ...form, userId: existing?.userId });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  async function handleSave() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    try {
+      await saveTC(form.name, form.email, form.phone);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {}
+    setSaving(false);
   }
 
-  function handleClear() {
-    clearTC(agentId);
+  async function handleClear() {
+    await removeTC().catch(() => {});
     setForm({ name: '', email: '', phone: '' });
     setConfirmClear(false);
   }
@@ -805,7 +810,7 @@ function TransactionCoordinatorSection({ agentId }: { agentId: string }) {
             </label>
             <input
               type={key === 'email' ? 'email' : 'text'}
-              value={form[key as keyof TCInfo] ?? ''}
+              value={form[key as keyof typeof form] ?? ''}
               onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
               placeholder={placeholder}
               className="flex-1 rounded-lg border border-transparent bg-gray-50 px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-navy/20 focus:bg-white focus:ring-2 focus:ring-brand-navy/10 transition-all"
@@ -831,7 +836,7 @@ function TransactionCoordinatorSection({ agentId }: { agentId: string }) {
               : 'bg-gray-100 text-gray-300 cursor-not-allowed',
           ].join(' ')}
         >
-          {saved ? <><Check size={15} /> Saved</> : existing ? 'Update TC' : 'Save TC'}
+          {saved ? <><Check size={15} /> Saved</> : saving ? 'Saving…' : existing ? 'Update TC' : 'Save TC'}
         </button>
 
         {existing && !confirmClear && (
@@ -860,13 +865,8 @@ function TransactionCoordinatorSection({ agentId }: { agentId: string }) {
 
 // ─── My Agents Section (TC only) ─────────────────────────────────────────────
 
-function MyAgentsSection({ tcUserId }: { tcUserId: string }) {
-  const { agentTCMap } = useAgentTCStore();
-
-  // Find all agents who have this TC assigned
-  const myAgents = MOCK_AGENT_ROSTER.filter(
-    (agent) => agentTCMap[agent.id]?.userId === tcUserId
-  );
+function MyAgentsSection({ tcUserId: _tcUserId }: { tcUserId: string }) {
+  const { agents: myAgents, loading } = useMyAgents();
 
   return (
     <div className="space-y-5 max-w-lg">
@@ -883,7 +883,11 @@ function MyAgentsSection({ tcUserId }: { tcUserId: string }) {
         </div>
       </div>
 
-      {myAgents.length === 0 ? (
+      {loading ? (
+        <div className="rounded-2xl bg-white shadow-sm px-5 py-6 text-center">
+          <p className="text-sm text-gray-300">Loading…</p>
+        </div>
+      ) : myAgents.length === 0 ? (
         <div className="rounded-2xl bg-white shadow-sm px-5 py-10 text-center">
           <Users size={28} className="mx-auto mb-2 text-gray-200" />
           <p className="text-sm text-gray-400">No agents linked yet</p>
@@ -893,18 +897,11 @@ function MyAgentsSection({ tcUserId }: { tcUserId: string }) {
         <div className="rounded-2xl bg-white shadow-sm overflow-hidden divide-y divide-gray-50">
           {myAgents.map((agent) => (
             <div key={agent.id} className="flex items-center gap-4 px-5 py-4">
-              <img
-                src={agent.avatar}
-                alt={agent.name}
-                className="h-11 w-11 rounded-xl object-cover flex-shrink-0 ring-2 ring-brand-navy/10"
-              />
+              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-brand-navy/10 text-brand-navy font-bold text-sm">
+                {agent.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-brand-navy">{agent.name}</span>
-                  {agent.licenseNumber && (
-                    <span className="text-[10px] text-gray-300 font-mono">{agent.licenseNumber}</span>
-                  )}
-                </div>
+                <span className="font-bold text-brand-navy">{agent.name}</span>
                 <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                   <a
                     href={`mailto:${agent.email}`}
@@ -934,9 +931,11 @@ function MyAgentsSection({ tcUserId }: { tcUserId: string }) {
         </div>
       )}
 
-      <p className="text-xs text-gray-300">
-        {myAgents.length} agent{myAgents.length !== 1 ? 's' : ''} · You appear in {myAgents.reduce((sum, a) => sum + a.activeDealCount, 0)} active deal files
-      </p>
+      {!loading && (
+        <p className="text-xs text-gray-300">
+          {myAgents.length} agent{myAgents.length !== 1 ? 's' : ''} · You appear in {myAgents.reduce((sum, a) => sum + a.activeDealCount, 0)} active deal files
+        </p>
+      )}
     </div>
   );
 }
