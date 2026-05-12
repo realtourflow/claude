@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-chi/chi/v5"
 	"realtourflow/internal/arive"
+	"realtourflow/internal/email"
 )
 
 type Handler struct {
@@ -17,9 +18,11 @@ type Handler struct {
 	ariveClient         *arive.Client
 	stripeKey           string
 	stripeWebhookSecret string
+	emailClient         *email.Client
+	frontendURL         string
 }
 
-func New(db *sql.DB, s3Client *s3.Client, s3Bucket string, ariveClient *arive.Client, stripeKey, stripeWebhookSecret string) *Handler {
+func New(db *sql.DB, s3Client *s3.Client, s3Bucket string, ariveClient *arive.Client, stripeKey, stripeWebhookSecret, resendKey, frontendURL string) *Handler {
 	return &Handler{
 		db:                  db,
 		s3Client:            s3Client,
@@ -27,6 +30,8 @@ func New(db *sql.DB, s3Client *s3.Client, s3Bucket string, ariveClient *arive.Cl
 		ariveClient:         ariveClient,
 		stripeKey:           stripeKey,
 		stripeWebhookSecret: stripeWebhookSecret,
+		emailClient:         email.New(resendKey),
+		frontendURL:         frontendURL,
 	}
 }
 

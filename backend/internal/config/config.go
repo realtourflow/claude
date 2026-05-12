@@ -20,6 +20,8 @@ type Config struct {
 	AriveWebhookURL   string
 	StripeSecretKey    string
 	StripeWebhookSecret string
+	ResendAPIKey        string
+	FrontendURL         string
 }
 
 func Load() *Config {
@@ -38,6 +40,8 @@ func Load() *Config {
 		AriveWebhookURL:     getEnv("ARIVE_WEBHOOK_URL", ""),
 		StripeSecretKey:     getEnv("STRIPE_SECRET_KEY", ""),
 		StripeWebhookSecret: getEnv("STRIPE_WEBHOOK_SECRET", ""),
+		ResendAPIKey:        getEnv("RESEND_API_KEY", ""),
+		FrontendURL:         getEnv("FRONTEND_URL", "http://localhost:5173"),
 	}
 }
 

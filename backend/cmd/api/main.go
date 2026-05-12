@@ -62,7 +62,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
-	h := handlers.New(database, s3Client, cfg.S3Bucket, ariveClient, cfg.StripeSecretKey, cfg.StripeWebhookSecret)
+	h := handlers.New(database, s3Client, cfg.S3Bucket, ariveClient, cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.ResendAPIKey, cfg.FrontendURL)
 	r.Mount("/api", h.Routes(middleware.Auth0(cfg.Auth0Domain, cfg.Auth0Audience)))
 
 	srv := &http.Server{

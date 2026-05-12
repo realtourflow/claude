@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"realtourflow/internal/email"
 	"realtourflow/internal/middleware"
 	"realtourflow/internal/models"
 )
@@ -166,7 +168,71 @@ func (h *Handler) CreateInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	inv.ExpiresAt = expiresAt.Format(time.RFC3339)
 
+	// Fire invite email — best-effort, non-blocking
+	go func() {
+		var agentName string
+		h.db.QueryRowContext(r.Context(), `SELECT name FROM users WHERE id = $1`, agentID).Scan(&agentName)
+		if agentName == "" {
+			agentName = "Your agent"
+		}
+		roleLabel := "buyer"
+		if req.Role == "seller" {
+			roleLabel = "seller"
+		}
+		inviteURL := fmt.Sprintf("%s/join/%s", h.frontendURL, inv.Token)
+		html := buildInviteEmail(req.Name, agentName, roleLabel, inviteURL)
+		msg := email.Message{
+			From:    "RealTour Flow <noreply@realtourflow.com>",
+			To:      []string{req.Email},
+			Subject: fmt.Sprintf("%s has invited you to your %s portal", agentName, roleLabel),
+			HTML:    html,
+		}
+		if err := h.emailClient.Send(context.Background(), msg); err != nil {
+			fmt.Printf("invite email failed: %v\n", err)
+		}
+	}()
+
 	respond(w, http.StatusCreated, inv)
+}
+
+func buildInviteEmail(clientName, agentName, role, inviteURL string) string {
+	roleLabel := "Buyer Portal"
+	if role == "seller" {
+		roleLabel = "Seller Portal"
+	}
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8f9fa;margin:0;padding:0;">
+<table width="100%%" bgcolor="#f8f9fa" cellpadding="0" cellspacing="0">
+<tr><td align="center" style="padding:40px 16px;">
+<table width="560" bgcolor="#ffffff" cellpadding="0" cellspacing="0" style="border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08);">
+  <tr><td bgcolor="#0f1b35" style="padding:32px 40px;">
+    <p style="margin:0;color:#c9a83c;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">RealTour Flow</p>
+    <h1 style="margin:8px 0 0;color:#ffffff;font-size:24px;font-weight:900;">You've been invited!</h1>
+  </td></tr>
+  <tr><td style="padding:32px 40px;">
+    <p style="margin:0 0 16px;color:#374151;font-size:16px;">Hi %s,</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.6;">
+      <strong>%s</strong> has set up your <strong>%s</strong> — your private hub to track your transaction, communicate with your agent, and stay on top of every step.
+    </p>
+    <p style="margin:0 0 24px;color:#6b7280;font-size:14px;line-height:1.6;">
+      Click the button below to claim your account and get started. This link is unique to you and expires in 7 days.
+    </p>
+    <a href="%s" style="display:inline-block;background:#0f1b35;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:14px 32px;border-radius:10px;">
+      Open My %s →
+    </a>
+    <p style="margin:24px 0 0;color:#9ca3af;font-size:12px;">
+      If you weren't expecting this invitation, you can safely ignore this email.
+    </p>
+  </td></tr>
+  <tr><td style="padding:16px 40px;border-top:1px solid #f3f4f6;">
+    <p style="margin:0;color:#d1d5db;font-size:11px;">RealTour Flow · Sent on behalf of %s</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`, clientName, agentName, roleLabel, inviteURL, roleLabel, agentName)
 }
 
 // ClaimInvite — authenticated (JWT required, role claim not required).
