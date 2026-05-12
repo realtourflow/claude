@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useTC, useMyAgents } from '../../hooks/useTC';
-import { useAgentDocStore, DocType, DOC_TYPE_LABELS, AgentDocTemplate } from '../../store/agentDocStore';
+import { useAgentDocs, DocType, DOC_TYPE_LABELS, AgentDocTemplate } from '../../hooks/useAgentDocs';
 import {
   VendorCategory,
   VENDOR_CATEGORY_LABELS,
@@ -952,33 +952,44 @@ const DOC_TYPE_DESCRIPTIONS: Record<DocType, string> = {
   other:             'Any other template document',
 };
 
-function DocumentsSection({ agentId }: { agentId: string }) {
-  const { docsByAgent, addDoc, removeDoc, updateDoc } = useAgentDocStore();
-  const docs = docsByAgent[agentId] ?? [];
+function DocumentsSection({ agentId: _agentId }: { agentId: string }) {
+  const { docs, loading, uploadDoc, updateDoc, removeDoc, getDownloadUrl } = useAgentDocs();
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formDocType, setFormDocType] = useState<DocType>('baa');
   const [formName, setFormName]       = useState('');
   const [formNotes, setFormNotes]     = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadErr, setUploadErr] = useState('');
 
-  function handleAdd() {
-    const name = formName.trim() || DOC_TYPE_LABELS[formDocType];
-    addDoc({
-      id: `doc-${formDocType}-${Date.now()}`,
-      agentId,
-      name,
-      docType: formDocType,
-      fileName: `${name.replace(/ /g, '_')}_Template.pdf`,
-      uploadedAt: new Date().toISOString(),
-      notes: formNotes.trim() || undefined,
-    });
-    setShowAddForm(false);
-    setFormName(''); setFormNotes(''); setFormDocType('baa');
+  async function handleAdd() {
+    if (!selectedFile || uploading) return;
+    setUploading(true);
+    setUploadErr('');
+    try {
+      await uploadDoc(selectedFile, formDocType, formName, formNotes);
+      setShowAddForm(false);
+      setFormName(''); setFormNotes(''); setFormDocType('baa'); setSelectedFile(null);
+    } catch {
+      setUploadErr('Upload failed — please try again.');
+    }
+    setUploading(false);
   }
 
-  function handleSaveEdit(doc: AgentDocTemplate) {
-    updateDoc(doc.id, { name: formName.trim() || doc.name, notes: formNotes.trim() || undefined });
+  async function handleSaveEdit(doc: AgentDocTemplate) {
+    await updateDoc(doc.id, {
+      name: formName.trim() || undefined,
+      notes: formNotes.trim() || null,
+    }).catch(() => {});
     setEditingId(null);
+  }
+
+  async function handleDownload(id: string) {
+    try {
+      const url = await getDownloadUrl(id);
+      window.open(url, '_blank');
+    } catch {}
   }
 
   const DOC_TYPE_ICON_COLOR: Record<DocType, string> = {
@@ -1027,12 +1038,25 @@ function DocumentsSection({ agentId }: { agentId: string }) {
               placeholder="e.g. Valid 90 days from signing"
               className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none text-brand-navy placeholder:text-gray-300" />
           </div>
+          <div>
+            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">File <span className="text-red-400">*</span></label>
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-500 hover:border-brand-navy/30 hover:bg-gray-50 transition-colors">
+              <Upload size={14} className="text-gray-400" />
+              {selectedFile ? selectedFile.name : 'Choose file…'}
+              <input type="file" className="hidden"
+                accept=".pdf,.doc,.docx"
+                onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)} />
+            </label>
+          </div>
+          {uploadErr && <p className="text-xs text-red-500">{uploadErr}</p>}
           <div className="flex items-center gap-2 pt-1">
-            <button onClick={handleAdd}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-navy py-2 text-sm font-bold text-white hover:bg-brand-navy/90 transition-colors">
-              <Upload size={13} /> Simulate upload
+            <button
+              onClick={handleAdd}
+              disabled={!selectedFile || uploading}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-navy py-2 text-sm font-bold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-40">
+              <Upload size={13} /> {uploading ? 'Uploading…' : 'Upload template'}
             </button>
-            <button onClick={() => { setShowAddForm(false); setFormName(''); setFormNotes(''); }}
+            <button onClick={() => { setShowAddForm(false); setFormName(''); setFormNotes(''); setSelectedFile(null); setUploadErr(''); }}
               className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 transition-colors">
               Cancel
             </button>
@@ -1041,13 +1065,17 @@ function DocumentsSection({ agentId }: { agentId: string }) {
       )}
 
       {/* Template list */}
-      {docs.length === 0 && !showAddForm && (
+      {loading ? (
+        <div className="rounded-xl border border-dashed border-gray-200 px-5 py-6 text-center">
+          <p className="text-sm text-gray-300">Loading…</p>
+        </div>
+      ) : docs.length === 0 && !showAddForm ? (
         <div className="rounded-xl border border-dashed border-gray-200 px-5 py-10 text-center">
           <FileText size={28} className="mx-auto mb-2 text-gray-200" />
           <p className="text-sm font-semibold text-gray-400">No templates yet</p>
           <p className="mt-1 text-xs text-gray-300">Add your buyer agency agreement, listing agreement, and more.</p>
         </div>
-      )}
+      ) : null}
 
       <div className="space-y-2">
         {docs.map((doc) => {
@@ -1076,10 +1104,15 @@ function DocumentsSection({ agentId }: { agentId: string }) {
                   ) : (
                     <>
                       <p className="text-sm font-semibold text-brand-navy">{doc.name}</p>
-                      <p className="text-xs text-gray-400 truncate">{doc.fileName}</p>
+                      <button
+                        onClick={() => handleDownload(doc.id)}
+                        className="flex items-center gap-1 text-xs text-brand-navy/60 hover:text-brand-navy transition-colors mt-0.5 truncate max-w-full"
+                      >
+                        <ExternalLink size={10} className="flex-shrink-0" /> {doc.fileName}
+                      </button>
                       {doc.notes && <p className="text-xs text-gray-400 italic mt-0.5">{doc.notes}</p>}
                       <p className="text-[10px] text-gray-300 mt-1">
-                        Added {new Date(doc.uploadedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        Added {new Date(doc.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </p>
                     </>
                   )}

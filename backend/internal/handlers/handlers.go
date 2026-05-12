@@ -82,6 +82,13 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Delete("/me/tc", h.DeleteMyTC)
 		r.Get("/me/agents", h.ListMyAgents)
 
+		r.Get("/me/doc-templates", h.ListAgentDocs)
+		r.Post("/me/doc-templates/upload-url", h.GetAgentDocUploadURL)
+		r.Post("/me/doc-templates", h.CreateAgentDoc)
+		r.Patch("/me/doc-templates/{docId}", h.UpdateAgentDoc)
+		r.Delete("/me/doc-templates/{docId}", h.DeleteAgentDoc)
+		r.Get("/me/doc-templates/{docId}/download-url", h.GetAgentDocDownloadURL)
+
 		r.Get("/deals/{dealId}/participants", h.ListParticipants)
 		r.Post("/deals/{dealId}/participants", h.AddParticipant)
 		r.Delete("/deals/{dealId}/participants/{userId}", h.RemoveParticipant)
