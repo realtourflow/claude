@@ -128,6 +128,9 @@ export type Deal = {
   feeStatus?: 'unpaid' | 'pending' | 'paid' | 'waived';
   feeAmountCents?: number;
   feePaidAt?: string | null;
+  /** Deal flags — populated from real API */
+  preApproved?: boolean;
+  baaSigned?: boolean;
 };
 
 export const MOCK_DEALS: Deal[] = [

@@ -1,15 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
-import { useNotificationStore } from '../../store/notificationStore';
-import { useTaskStore } from '../../store/taskStore';
-import { useDealStageStore } from '../../store/dealStageStore';
-import { useClientContactStore } from '../../store/clientContactStore';
-import { MOCK_DEALS } from '../../data/mockDeals';
+import { api } from '../../api/client';
 import { CheckCircle2, ChevronRight, ArrowRight } from 'lucide-react';
 import OnboardingLayout from './OnboardingLayout';
 import PitchPage, { LenderChoice } from './PitchPage';
-import { MOCK_USERS } from '../../data/mockUsers';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -554,10 +549,10 @@ function DoneScreen({ agentName }: { agentName: string }) {
   const navigate = useNavigate();
   const activeUser = useAuthStore((s) => s.activeUser);
   function goToDashboard() {
-    if (activeUser?.groupId === 'buyer') {
+    if (activeUser?.id) {
       navigate(`/buyer/${activeUser.id}`);
     } else {
-      navigate('/buyer/buyer-smith');
+      navigate('/');
     }
   }
   return (
@@ -587,18 +582,27 @@ function DoneScreen({ agentName }: { agentName: string }) {
 export default function BuyerOnboarding() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const agentId = searchParams.get('agent') ?? 'agent-sarah';
-  const agentUser = MOCK_USERS.find((u) => u.id === agentId);
-  const agentName = agentUser?.name ?? agentId;
+  const token = searchParams.get('token');
 
   const activeUser = useAuthStore((s) => s.activeUser);
-  const addNotification = useNotificationStore((s) => s.add);
-  const addTask = useTaskStore((s) => s.addTask);
-  const setStage = useDealStageStore((s) => s.setStage);
-  const setContact = useClientContactStore((s) => s.setContact);
+
+  const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
+  const [inviteDealId, setInviteDealId] = useState<string | null>(null);
 
   const [screen, setScreen] = useState(-1);
   const [data, setData] = useState<BuyerData>(EMPTY);
+
+  // Fetch invite details from token to get real agentName + dealId
+  useEffect(() => {
+    if (!token) return;
+    api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
+      .then((inv) => {
+        setAgentName(inv.agent_name);
+        setInviteDealId(inv.deal_id);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   // Resume after Fast Pass survey — restore lenderChoice and jump to MTN CTA
   useEffect(() => {
@@ -615,41 +619,22 @@ export default function BuyerOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fire agent notification + task when buyer reaches done screen
-  const hasNotifiedRef = useRef(false);
+  // On done screen: persist contact info + claim invite (which advances stage + creates task + notifies agent)
+  const hasSubmittedRef = useRef(false);
   useEffect(() => {
-    if (screen === TOTAL - 1 && !hasNotifiedRef.current) {
-      hasNotifiedRef.current = true;
-      const buyerName = data.contactName || activeUser?.name || 'Your buyer';
-      const deal = MOCK_DEALS.find((d) => d.clientId === activeUser?.id);
-      // Advance deal stage so the intake card clears immediately
-      if (deal) {
-        setStage(deal.id, 'active_search');
-        setContact(deal.id, {
-          name: data.contactName,
-          phone: data.contactPhone,
-          email: data.contactEmail,
-        });
-      }
-      addNotification({
-        title: `${buyerName} just completed onboarding`,
-        body: 'Call them ASAP to schedule their buyer strategy call.',
-        type: 'buyer_onboarding',
-        clientName: buyerName,
-      });
-      addTask({
-        id: `task-onboard-${Date.now()}`,
-        dealId: deal?.id ?? 'deal-chen',
-        title: `Call ${buyerName} — just completed onboarding`,
-        description: 'Buyer finished their onboarding questionnaire. Call them to schedule the strategy call and unlock their next tasks.',
-        assignedTo: 'agent',
-        assignedToId: agentId,
-        status: 'pending',
-        priority: 'high',
-        source: 'ai',
-        stageContext: 'intake',
-        dueDate: new Date().toISOString().slice(0, 10),
-      });
+    if (screen !== TOTAL - 1 || hasSubmittedRef.current) return;
+    hasSubmittedRef.current = true;
+
+    const name = data.contactName || activeUser?.name || '';
+    const phone = data.contactPhone;
+    const email = activeUser?.email || data.contactEmail;
+
+    if (phone || name) {
+      api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
+    }
+
+    if (token && email) {
+      api.post(`/invites/${token}/claim`, { email, name }).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
@@ -704,7 +689,7 @@ export default function BuyerOnboarding() {
   function renderScreen() {
     // Welcome
     if (screen < 0) {
-      return <WelcomeScreen agentName={agentName} agentAvatar={agentUser?.avatar} onStart={advance} />;
+      return <WelcomeScreen agentName={agentName} onStart={advance} />;
     }
 
     // Screen 0: cash or loan

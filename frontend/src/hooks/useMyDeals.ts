@@ -46,5 +46,5 @@ export function useMyDeals() {
     load();
   }, [load]);
 
-  return { deals, loading, error };
+  return { deals, loading, error, refresh: load };
 }

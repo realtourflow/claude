@@ -50,6 +50,8 @@ type Deal struct {
 	FeePaidAt        *time.Time       `json:"fee_paid_at,omitempty"`
 	FastPass         *json.RawMessage `json:"fast_pass,omitempty"`
 	SmoothExit       *json.RawMessage `json:"smooth_exit,omitempty"`
+	PreApproved      bool             `json:"pre_approved"`
+	BaaSigned        bool             `json:"baa_signed"`
 	CreatedAt        time.Time        `json:"created_at"`
 	UpdatedAt        time.Time        `json:"updated_at"`
 }

@@ -7,9 +7,9 @@ import {
 } from 'lucide-react';
 import { useAgentDocStore, DocType, DOC_TYPE_LABELS } from '../../store/agentDocStore';
 import OnboardingLayout from './OnboardingLayout';
-import { MOCK_USERS } from '../../data/mockUsers';
-import { useAgentTCStore } from '../../store/agentTCStore';
 import { useAgentSetupStore } from '../../store/agentSetupStore';
+import { api } from '../../api/client';
+import { useAuthStore } from '../../store/authStore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -473,7 +473,7 @@ function BrokerageScreen({
 // ─── Screen 7: Transaction Coordinator ───────────────────────────────────────
 
 function TCScreen({
-  tcName, tcEmail, tcPhone, tcLinkedUserId,
+  tcName, tcEmail, tcPhone,
   onChange, onContinue, onSolo,
 }: {
   tcName: string; tcEmail: string; tcPhone: string; tcLinkedUserId: string;
@@ -482,25 +482,6 @@ function TCScreen({
   onSolo: () => void;
 }) {
   const [usesTC, setUsesTC] = useState<boolean | null>(null);
-  const [recognizedTC, setRecognizedTC] = useState<{ name: string; id: string } | null>(null);
-  const [dismissed, setDismissed] = useState(false);
-
-  useEffect(() => {
-    if (!tcEmail || dismissed) { setRecognizedTC(null); return; }
-    const match = MOCK_USERS.find(
-      (u) => u.groupId === 'tc' && u.email.toLowerCase() === tcEmail.toLowerCase()
-    );
-    setRecognizedTC(match ? { name: match.name, id: match.id } : null);
-  }, [tcEmail, dismissed]);
-
-  function linkRecognized() {
-    if (!recognizedTC) return;
-    onChange('tcName', recognizedTC.name);
-    onChange('tcLinkedUserId', recognizedTC.id);
-    setDismissed(false);
-  }
-
-  const isLinked = !!tcLinkedUserId;
 
   // Step 1: yes / no question
   if (usesTC === null) {
@@ -539,63 +520,28 @@ function TCScreen({
         note="They'll be automatically added to every deal — messages, checklists, and tasks"
       />
       <div className="w-full max-w-sm space-y-3">
-        {recognizedTC && !isLinked && !dismissed && (
-          <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-green-800">
-                Found <span className="font-black">{recognizedTC.name}</span> in RealTourFlow
-              </p>
-              <p className="text-xs text-green-600 mt-0.5">Is this your TC?</p>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button onClick={linkRecognized}
-                className="rounded-lg bg-green-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-green-600 transition-colors">
-                Yes, link →
-              </button>
-              <button onClick={() => { setDismissed(true); onChange('tcLinkedUserId', ''); }}
-                className="text-xs text-green-500 hover:text-green-700 transition-colors">
-                No
-              </button>
-            </div>
-          </div>
-        )}
-
-        {isLinked && (
-          <div className="rounded-xl bg-green-50 border border-green-200 px-4 py-3 flex items-center gap-3">
-            <CheckCircle2 size={16} className="text-green-500 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-green-800">{tcName} linked</p>
-              <p className="text-xs text-green-600 mt-0.5">They'll be notified when you open your first deal</p>
-            </div>
-            <button onClick={() => onChange('tcLinkedUserId', '')}
-              className="ml-auto text-xs text-green-500 hover:text-green-700 transition-colors">
-              Unlink
-            </button>
-          </div>
-        )}
-
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">Full name</label>
           <input type="text" value={tcName} onChange={(e) => onChange('tcName', e.target.value)}
-            placeholder="e.g. Jamie Taylor" disabled={isLinked}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 disabled:opacity-60" />
+            placeholder="e.g. Jamie Taylor"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10" />
         </div>
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">Email</label>
           <input type="email" value={tcEmail} onChange={(e) => onChange('tcEmail', e.target.value)}
-            placeholder="jamie@youroffice.com" disabled={isLinked}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 disabled:opacity-60" />
+            placeholder="jamie@youroffice.com"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10" />
         </div>
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
             Phone <span className="font-normal normal-case text-gray-300">(optional)</span>
           </label>
           <input type="tel" value={tcPhone} onChange={(e) => onChange('tcPhone', e.target.value)}
-            placeholder="(205) 555-0244" disabled={isLinked}
-            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 disabled:opacity-60" />
+            placeholder="(205) 555-0244"
+            className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10" />
         </div>
 
-        <ContinueBtn onClick={onContinue} disabled={!tcName.trim() && !isLinked} />
+        <ContinueBtn onClick={onContinue} disabled={!tcName.trim()} />
         <button onClick={() => setUsesTC(null)}
           className="mt-3 block w-full text-center text-sm text-gray-400 hover:text-gray-600 transition-colors">
           ← Back
@@ -909,25 +855,49 @@ function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
 
 function DoneScreen({ data }: { data: AgentSetupData }) {
   const navigate = useNavigate();
-  const { setTC, setSoloMode } = useAgentTCStore();
-  const { markComplete } = useAgentSetupStore();
   const { docsByAgent } = useAgentDocStore();
-  const docCount = (docsByAgent['agent-sarah'] ?? []).length;
+  const activeUser = useAuthStore((s) => s.activeUser);
+  const docCount = (docsByAgent[activeUser?.id ?? 'agent-sarah'] ?? []).length;
   const isSolo = !data.tcName;
 
   useEffect(() => {
-    markComplete();
-    if (data.tcName && data.tcEmail) {
-      setSoloMode(false);
-      setTC('agent-sarah', {
-        name: data.tcName,
-        email: data.tcEmail,
-        phone: data.tcPhone || undefined,
-        userId: data.tcLinkedUserId || undefined,
-      });
-    } else {
-      setSoloMode(true);
+    const profileUpdate: Record<string, string> = {};
+    if (data.name) profileUpdate.name = data.name;
+    if (data.phone) profileUpdate.phone = data.phone;
+    if (Object.keys(profileUpdate).length > 0) {
+      api.patch('/me/profile', profileUpdate).catch(() => {});
     }
+
+    const settings = {
+      title: data.title,
+      license_number: data.licenseNumber,
+      brokerage: data.brokerage,
+      brokerage_address: data.brokerageAddress,
+      bio: data.bio,
+      photo_url: data.photoUrl,
+      lender_choice: data.lenderChoice,
+      buyer_welcome_message: data.buyerMessage,
+      seller_welcome_message: data.sellerMessage,
+      tc: data.tcName ? { name: data.tcName, email: data.tcEmail, phone: data.tcPhone } : null,
+      notifications: {
+        deal_stage: data.notifDealStage,
+        client_messages: data.notifClientMsg,
+        overdue: data.notifOverdue,
+        disclosures: data.notifDisclosures,
+        fast_pass: data.notifFastPass,
+      },
+      integrations: {
+        docusign: data.toolDocuSign,
+        google_cal: data.toolGoogleCal,
+        outlook: data.toolOutlook,
+        dotloop: data.toolDotloop,
+        skyslope: data.toolSkyslope,
+        zapier: data.toolZapier,
+      },
+      setup_complete: true,
+    };
+    api.put('/me/settings', settings).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const summary = [

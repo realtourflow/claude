@@ -51,6 +51,8 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Get("/deals/{dealId}", h.GetDeal)
 		r.Patch("/deals/{dealId}/stage", h.AdvanceStage)
 		r.Patch("/deals/{dealId}/notes", h.UpdateDealNotes)
+		r.Patch("/deals/{dealId}/flags", h.PatchDealFlags)
+		r.Post("/deals/{dealId}/baa/sign", h.SignBAA)
 
 		r.Get("/tasks", h.ListAllTasks)
 		r.Get("/deals/{dealId}/tasks", h.ListTasks)

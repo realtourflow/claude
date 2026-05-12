@@ -1,13 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { CheckCircle2, ChevronRight, Circle } from 'lucide-react';
 import OnboardingLayout from './OnboardingLayout';
 import PitchPage, { LenderChoice } from './PitchPage';
-import { nextStepQualifiesForBridge } from '../../data/mockSmoothExit';
 import { useAuthStore } from '../../store/authStore';
-import { MOCK_DEALS } from '../../data/mockDeals';
-import { useDealStageStore } from '../../store/dealStageStore';
-import { useClientContactStore } from '../../store/clientContactStore';
+import { api } from '../../api/client';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -307,26 +304,9 @@ function YesNoWithFieldScreen({ question, note, fieldLabel, fieldPlaceholder, va
 }
 
 // Seller confirmation
-function ConfirmationScreen({ data, agentId }: { data: SellerData; agentId: string }) {
+function ConfirmationScreen({ data, agentName }: { data: SellerData; agentName: string }) {
   const navigate = useNavigate();
   const activeUser = useAuthStore((s) => s.activeUser);
-  const setStage = useDealStageStore((s) => s.setStage);
-  const setContact = useClientContactStore((s) => s.setContact);
-
-  useEffect(() => {
-    if (!activeUser) return;
-    const deal = MOCK_DEALS.find(
-      (d) => d.clientId === activeUser.id && d.type === 'sell'
-    );
-    if (deal) {
-      setStage(deal.id, 'active_search');
-      setContact(deal.id, {
-        name: data.contactName,
-        phone: data.contactPhone,
-        email: data.contactEmail,
-      });
-    }
-  }, []);
   const stages = [
     { label: 'Onboarding', done: true },
     { label: 'Strategy Consultation', done: false },
@@ -365,11 +345,11 @@ function ConfirmationScreen({ data, agentId }: { data: SellerData; agentId: stri
         ))}
       </div>
 
-      <p className="mt-4 text-xs text-gray-400">Agent: {agentId}</p>
+      <p className="mt-4 text-xs text-gray-400">Agent: {agentName}</p>
       <button
         onClick={() => {
-          sessionStorage.setItem('seller_welcomed', '1');
-          navigate('/');
+          if (activeUser?.id) navigate(`/seller/${activeUser.id}`);
+          else navigate('/');
         }}
         className="mt-6 flex items-center gap-2 rounded-xl bg-purple-600 px-8 py-4 text-base font-bold text-white hover:bg-purple-700 transition-all active:scale-[0.98]"
       >
@@ -384,10 +364,26 @@ function ConfirmationScreen({ data, agentId }: { data: SellerData; agentId: stri
 export default function SellerOnboarding() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const agentId = searchParams.get('agent') ?? 'your-agent';
+  const token = searchParams.get('token');
+
+  const activeUser = useAuthStore((s) => s.activeUser);
+  const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
+  const [inviteDealId, setInviteDealId] = useState<string | null>(null);
 
   const [data, setData] = useState<SellerData>(EMPTY);
   const [screenIndex, setScreenIndex] = useState(0);
+
+  // Fetch invite details from token to get real agentName + dealId
+  useEffect(() => {
+    if (!token) return;
+    api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
+      .then((inv) => { setAgentName(inv.agent_name); setInviteDealId(inv.deal_id); })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // On confirmation screen: persist contact info + claim invite
+  const hasSubmittedRef = useRef(false);
 
   // Local transient state (resets on screen change)
   const [localText, setLocalText] = useState('');
@@ -398,6 +394,23 @@ export default function SellerOnboarding() {
   const currentId = visibleScreens[screenIndex];
   const total = visibleScreens.length;
   const progress = Math.min((screenIndex / (total - 1)) * 100, 100);
+
+  useEffect(() => {
+    if (currentId !== 'confirmation' || hasSubmittedRef.current) return;
+    hasSubmittedRef.current = true;
+
+    const name = data.contactName || activeUser?.name || '';
+    const phone = data.contactPhone;
+    const email = activeUser?.email || data.contactEmail;
+
+    if (phone || name) {
+      api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
+    }
+    if (token && email) {
+      api.post(`/invites/${token}/claim`, { email, name }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId]);
 
   useEffect(() => {
     setLocalText('');
@@ -620,7 +633,7 @@ export default function SellerOnboarding() {
 
       case 'smoothExitPitch': {
         const isBuying = data.alsoLookingToBuy === 'yes';
-        const qualifiesBridge = isBuying && nextStepQualifiesForBridge('buying_local');
+        const qualifiesBridge = isBuying;
         return (
           <div key={key} className="screen-enter flex flex-col items-center">
             <div className="mb-6 text-center">
@@ -712,7 +725,7 @@ export default function SellerOnboarding() {
       }
 
       case 'confirmation':
-        return <ConfirmationScreen key={key} data={data} agentId={agentId} />;
+        return <ConfirmationScreen key={key} data={data} agentName={agentName} />;
 
       default:
         return null;

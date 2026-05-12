@@ -52,9 +52,8 @@ import {
 import MetroMap from '../../components/MetroMap';
 import { MOCK_USERS } from '../../data/mockUsers';
 import { usePropertyStore, TrackedProperty, PropertyStatus } from '../../store/propertyStore';
-import { usePreApprovalStore } from '../../store/preApprovalStore';
 import { useDealStageStore } from '../../store/dealStageStore';
-import { useClientContactStore } from '../../store/clientContactStore';
+import { useParticipants } from '../../hooks/useParticipants';
 import { useShowingAvailabilityStore, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from '../../store/showingAvailabilityStore';
 import { useOfferStore, Offer } from '../../store/offerStore';
 import { useNetSheetStore, NetSheet, calcNetProceeds } from '../../store/netSheetStore';
@@ -1522,7 +1521,8 @@ function SmoothExitCard({ deal }: { deal: Deal }) {
 
 function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; onRefresh?: () => void }) {
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
-  const clientContact = useClientContactStore((s) => s.getContact(deal.id));
+  const { participants } = useParticipants(deal.id);
+  const clientParticipant = participants.find((p) => p.role === 'buyer' || p.role === 'seller');
 
   return (
     <div className="space-y-4">
@@ -1576,24 +1576,24 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
             <dt className="text-gray-400 text-xs mb-0.5">Client</dt>
             <dd className="font-semibold text-brand-navy">{deal.clientName}</dd>
           </div>
-          {clientContact && (
+          {clientParticipant && (
             <>
-              {clientContact.phone && (
+              {clientParticipant.phone && (
                 <div>
                   <dt className="text-gray-400 text-xs mb-0.5">Phone</dt>
                   <dd>
-                    <a href={`tel:${clientContact.phone}`} className="font-semibold text-brand-navy hover:text-blue-600 transition-colors">
-                      {clientContact.phone}
+                    <a href={`tel:${clientParticipant.phone}`} className="font-semibold text-brand-navy hover:text-blue-600 transition-colors">
+                      {clientParticipant.phone}
                     </a>
                   </dd>
                 </div>
               )}
-              {clientContact.email && (
+              {clientParticipant.email && (
                 <div>
                   <dt className="text-gray-400 text-xs mb-0.5">Email</dt>
                   <dd>
-                    <a href={`mailto:${clientContact.email}`} className="font-semibold text-brand-navy hover:text-blue-600 transition-colors break-all">
-                      {clientContact.email}
+                    <a href={`mailto:${clientParticipant.email}`} className="font-semibold text-brand-navy hover:text-blue-600 transition-colors break-all">
+                      {clientParticipant.email}
                     </a>
                   </dd>
                 </div>
@@ -3300,9 +3300,8 @@ function StageTransitionBar({
 
 // ─── Deal Header ─────────────────────────────────────────────────────────────
 
-function DealHeader({ deal }: { deal: Deal }) {
-  const preApproved = usePreApprovalStore((s) => s.preApprovedByDeal[deal.id] ?? false);
-  const { setPreApproved } = usePreApprovalStore();
+function DealHeader({ deal, onFlagChange }: { deal: Deal; onFlagChange?: (flags: { preApproved?: boolean }) => void }) {
+  const preApproved = deal.preApproved ?? false;
 
   return (
     <div className={`rounded-xl bg-white shadow-sm border-t-4 ${HEALTH_BORDER[deal.health]} px-5 py-4`}>
@@ -3312,7 +3311,7 @@ function DealHeader({ deal }: { deal: Deal }) {
             <h1 className="text-xl font-bold text-brand-navy">{deal.clientName}</h1>
             {deal.type === 'buy' && (
               <button
-                onClick={() => setPreApproved(deal.id, !preApproved)}
+                onClick={() => onFlagChange?.({ preApproved: !preApproved })}
                 className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition-all border ${
                   preApproved
                     ? 'bg-green-100 text-green-700 border-green-200 hover:bg-green-200'
@@ -3524,7 +3523,10 @@ export default function DealDetail() {
       </button>
 
       {/* Deal header */}
-      <DealHeader deal={localDeal} />
+      <DealHeader deal={localDeal} onFlagChange={async (flags) => {
+        await api.patch(`/deals/${localDeal.id}/flags`, flags).catch(() => {});
+        refreshDeal();
+      }} />
 
       {/* Stage transition bar — agents, TCs, admins only */}
       {canAdvanceStage && deal.status !== 'fallen_through' && (

@@ -92,6 +92,7 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 		       deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
 		       deals.fee_status, deals.fee_amount_cents, deals.fee_paid_at,
 		       deals.fast_pass, deals.smooth_exit,
+		       deals.pre_approved, deals.baa_signed,
 		       deals.created_at, deals.updated_at,
 		       u.name, u.email, u.phone,
 		       (SELECT COUNT(*) FROM tasks t
@@ -125,6 +126,7 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 			&d.AriveMilestones, &d.AriveKeyDates, &d.AriveLoanStatus,
 			&d.FeeStatus, &d.FeeAmountCents, &d.FeePaidAt,
 			&d.FastPass, &d.SmoothExit,
+			&d.PreApproved, &d.BaaSigned,
 			&d.CreatedAt, &d.UpdatedAt,
 			&d.AgentName, &d.AgentEmail, &d.AgentPhone,
 			&d.OpenTaskCount, &d.OverdueTaskCount,
@@ -207,7 +209,7 @@ func (h *Handler) GetDeal(w http.ResponseWriter, r *http.Request) {
 		       title, address, price, arive_linked,
 		       arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
 		       notes, fee_status, fee_amount_cents, fee_paid_at,
-		       fast_pass, smooth_exit,
+		       fast_pass, smooth_exit, pre_approved, baa_signed,
 		       created_at, updated_at
 		FROM deals
 		WHERE id = $1 AND agent_id = $2
@@ -216,7 +218,7 @@ func (h *Handler) GetDeal(w http.ResponseWriter, r *http.Request) {
 		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked,
 		&deal.AriveLoanID, &deal.AriveMilestones, &deal.AriveKeyDates, &deal.AriveLoanStatus, &deal.AriveSyncedAt,
 		&deal.Notes, &deal.FeeStatus, &deal.FeeAmountCents, &deal.FeePaidAt,
-		&deal.FastPass, &deal.SmoothExit,
+		&deal.FastPass, &deal.SmoothExit, &deal.PreApproved, &deal.BaaSigned,
 		&deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -366,6 +368,91 @@ func (h *Handler) UpdateDealNotes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "failed to update notes", http.StatusInternalServerError)
 		return
+	}
+
+	respond(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// SignBAA — POST /deals/:dealId/baa/sign — allows a buyer participant to mark the BAA as signed.
+func (h *Handler) SignBAA(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	dealID := chi.URLParam(r, "dealId")
+	userID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	// Caller must be a participant on the deal (buyer or agent)
+	var access int
+	h.db.QueryRowContext(r.Context(), `
+		SELECT COUNT(*) FROM deals
+		WHERE id = $1 AND (
+			agent_id = $2 OR
+			EXISTS (SELECT 1 FROM deal_participants WHERE deal_id = $1 AND user_id = $2)
+		)
+	`, dealID, userID).Scan(&access)
+	if access == 0 {
+		http.Error(w, "deal not found", http.StatusNotFound)
+		return
+	}
+
+	_, err = h.db.ExecContext(r.Context(),
+		`UPDATE deals SET baa_signed = TRUE, updated_at = NOW() WHERE id = $1`, dealID)
+	if err != nil {
+		http.Error(w, "failed to sign BAA", http.StatusInternalServerError)
+		return
+	}
+
+	respond(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// PatchDealFlags — PATCH /deals/:dealId/flags — toggles pre_approved and/or baa_signed.
+func (h *Handler) PatchDealFlags(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	dealID := chi.URLParam(r, "dealId")
+	userID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		PreApproved *bool `json:"pre_approved"`
+		BaaSigned   *bool `json:"baa_signed"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.PreApproved != nil {
+		if _, err := h.db.ExecContext(r.Context(),
+			`UPDATE deals SET pre_approved = $1, updated_at = NOW() WHERE id = $2 AND agent_id = $3`,
+			*req.PreApproved, dealID, userID,
+		); err != nil {
+			http.Error(w, "failed to update flags", http.StatusInternalServerError)
+			return
+		}
+	}
+	if req.BaaSigned != nil {
+		if _, err := h.db.ExecContext(r.Context(),
+			`UPDATE deals SET baa_signed = $1, updated_at = NOW() WHERE id = $2 AND agent_id = $3`,
+			*req.BaaSigned, dealID, userID,
+		); err != nil {
+			http.Error(w, "failed to update flags", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	respond(w, http.StatusOK, map[string]bool{"ok": true})

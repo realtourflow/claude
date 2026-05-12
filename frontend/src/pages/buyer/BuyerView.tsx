@@ -16,10 +16,10 @@ import {
 import MetroMap from '../../components/MetroMap';
 import VendorDirectory from '../../components/VendorDirectory';
 import { usePropertyStore, TrackedProperty, PropertyStatus } from '../../store/propertyStore';
-import { usePreApprovalStore } from '../../store/preApprovalStore';
 import { useTaskStore } from '../../store/taskStore';
 import { useAgentDocStore } from '../../store/agentDocStore';
 import { useNotificationStore } from '../../store/notificationStore';
+import { api } from '../../api/client';
 import { FAST_PASS_UPSELLS, FastPassUpsellId } from '../../data/mockFastPass';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -752,11 +752,10 @@ function BAASigningModal({ deal, agentId, onClose, onSigned }: {
 
 // ─── Active Search Card ───────────────────────────────────────────────────────
 
-function ActiveSearchCard({ deal }: { deal: Deal }) {
+function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () => void }) {
   const { propertiesByDeal, addProperty, updateStatus, removeProperty, updateBuyerNote, setOfferRequested } = usePropertyStore();
-  const preApproved  = usePreApprovalStore((s) => s.preApprovedByDeal[deal.id] ?? false);
-  const baaSigned    = usePreApprovalStore((s) => s.baaSignedByDeal[deal.id] ?? false);
-  const { setPreApproved, setBaaSigned } = usePreApprovalStore();
+  const preApproved = deal.preApproved ?? false;
+  const baaSigned = deal.baaSigned ?? false;
   const { addTask } = useTaskStore();
   const addNotification = useNotificationStore((s) => s.add);
 
@@ -968,7 +967,10 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
           deal={deal}
           agentId={deal.agentId}
           onClose={() => setShowBAAModal(false)}
-          onSigned={() => setBaaSigned(deal.id, true)}
+          onSigned={() => {
+            api.post(`/deals/${deal.id}/baa/sign`, {}).catch(() => {});
+            onBaaSigned?.();
+          }}
         />
       )}
     </div>
@@ -1544,11 +1546,11 @@ function FastPassPitch() {
 
 // ─── Stage card dispatcher ────────────────────────────────────────────────────
 
-function StageCard({ deal, firstName }: { deal: Deal; firstName: string }) {
+function StageCard({ deal, firstName, onRefresh }: { deal: Deal; firstName: string; onRefresh?: () => void }) {
   if (deal.status === 'fallen_through') return <FallenThroughCard deal={deal} firstName={firstName} />;
   switch (deal.stage) {
     case 'intake':         return <IntakeCard deal={deal} firstName={firstName} />;
-    case 'active_search':  return <ActiveSearchCard deal={deal} />;
+    case 'active_search':  return <ActiveSearchCard deal={deal} onBaaSigned={onRefresh} />;
     case 'offer_active':   return <OfferActiveCard deal={deal} />;
     case 'under_contract': return <UnderContractCard deal={deal} />;
     case 'pre_close':      return <PreCloseCard deal={deal} />;
@@ -1566,7 +1568,7 @@ export default function BuyerView() {
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
   const { getClientNotifications, dismissClientNotification } = useNotificationStore();
-  const { deals, loading: dealsLoading } = useMyDeals();
+  const { deals, loading: dealsLoading, refresh: refreshDeals } = useMyDeals();
   const deal = deals.find((d) => d.type === 'buy');
   const { tasks } = useTasks(deal?.id ?? '');
   const buyerTasks = tasks.filter((t) => t.assignedTo === 'buyer');
@@ -1679,7 +1681,7 @@ export default function BuyerView() {
       </div>
 
       {/* Stage-specific card */}
-      <StageCard deal={deal} firstName={firstName} />
+      <StageCard deal={deal} firstName={firstName} onRefresh={refreshDeals} />
 
       {/* Fast Pass tracker (enrolled) or pitch (unenrolled) */}
       {!isFallenThrough && deal.stage !== 'intake' && (

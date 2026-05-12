@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -231,6 +232,47 @@ func (h *Handler) ClaimInvite(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1, $2, $3)
 		ON CONFLICT DO NOTHING
 	`, dealID, user.ID, inviteRole)
+
+	// Best-effort: advance deal intake→active_search, create task, notify agent
+	var dealAgentID, currentStage string
+	if err := h.db.QueryRowContext(r.Context(),
+		`SELECT agent_id::TEXT, stage FROM deals WHERE id = $1`, dealID,
+	).Scan(&dealAgentID, &currentStage); err == nil {
+		if currentStage == "intake" {
+			if tx, err := h.db.BeginTx(r.Context(), nil); err == nil {
+				_, e1 := tx.ExecContext(r.Context(),
+					`UPDATE deals SET stage = 'active_search', updated_at = NOW() WHERE id = $1`, dealID)
+				_, e2 := tx.ExecContext(r.Context(),
+					`INSERT INTO deal_stage_history (deal_id, from_stage, to_stage, changed_by) VALUES ($1, 'intake', 'active_search', $2)`,
+					dealID, user.ID)
+				if e1 == nil && e2 == nil {
+					_ = tx.Commit()
+				} else {
+					_ = tx.Rollback()
+				}
+			}
+		}
+
+		var taskTitle, notifBody, notifType string
+		if inviteRole == "seller" {
+			taskTitle = fmt.Sprintf("Call %s — just completed listing onboarding", req.Name)
+			notifBody = "Call them to schedule their listing strategy call."
+			notifType = "seller_onboarding"
+		} else {
+			taskTitle = fmt.Sprintf("Call %s — just completed onboarding", req.Name)
+			notifBody = "Call them ASAP to schedule their buyer strategy call."
+			notifType = "buyer_onboarding"
+		}
+		today := time.Now().Format("2006-01-02")
+		_, _ = h.db.ExecContext(r.Context(), `
+			INSERT INTO tasks (deal_id, title, priority, source, stage_context, role, due_date)
+			VALUES ($1, $2, 'high', 'ai', 'intake', 'agent', $3::DATE)
+		`, dealID, taskTitle, today)
+
+		if dealAgentID != "" {
+			h.createNotification(dealAgentID, taskTitle, notifBody, notifType, &dealID, nil)
+		}
+	}
 
 	respond(w, http.StatusOK, user)
 }

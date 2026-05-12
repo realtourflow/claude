@@ -22,6 +22,8 @@ export type ApiDeal = {
   fee_paid_at?: string | null;
   fast_pass?: FastPassApiData | null;
   smooth_exit?: SmoothExitApiData | null;
+  pre_approved?: boolean;
+  baa_signed?: boolean;
   created_at: string;
   updated_at: string;
   agent_name?: string;
@@ -163,6 +165,8 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     feePaidAt: d.fee_paid_at ?? null,
     fastPass: d.fast_pass ? fastPassFromApi(d.fast_pass) : undefined,
     smoothExit: d.smooth_exit ? smoothExitFromApi(d.smooth_exit) : undefined,
+    preApproved: d.pre_approved ?? false,
+    baaSigned: d.baa_signed ?? false,
   };
 }
 
