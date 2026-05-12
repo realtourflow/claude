@@ -202,8 +202,9 @@ export function useDeal(id: string | undefined) {
   return { deal, loading, error, refresh: load };
 }
 
-export async function patchStage(dealId: string, stage: string): Promise<ApiDeal> {
-  return api.patch<ApiDeal>(`/deals/${dealId}/stage`, { stage });
+export async function patchStage(dealId: string, stage: string, force?: boolean): Promise<ApiDeal> {
+  const qs = force ? '?force=true' : '';
+  return api.patch<ApiDeal>(`/deals/${dealId}/stage${qs}`, { stage });
 }
 
 export function useDeals() {

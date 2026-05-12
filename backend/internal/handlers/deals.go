@@ -276,6 +276,50 @@ func (h *Handler) AdvanceStage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Gate check: if advancing forward and not forced, block on incomplete high-priority tasks.
+	force := r.URL.Query().Get("force") == "true"
+	if !force {
+		var stageOrder []models.DealStage = models.StageOrder
+		curIdx, newIdx := -1, -1
+		for i, s := range stageOrder {
+			if s == currentStage { curIdx = i }
+			if s == req.Stage { newIdx = i }
+		}
+		if curIdx >= 0 && newIdx > curIdx {
+			type blockingTask struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			}
+			rows, err := tx.QueryContext(r.Context(),
+				`SELECT id, title FROM tasks
+				 WHERE deal_id = $1
+				   AND priority = 'high'
+				   AND status != 'completed'
+				   AND (stage_context = $2 OR stage_context IS NULL)`,
+				dealID, string(currentStage),
+			)
+			if err == nil {
+				var blocking []blockingTask
+				for rows.Next() {
+					var bt blockingTask
+					if rows.Scan(&bt.ID, &bt.Title) == nil {
+						blocking = append(blocking, bt)
+					}
+				}
+				rows.Close()
+				if len(blocking) > 0 {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnprocessableEntity)
+					json.NewEncoder(w).Encode(map[string]any{
+						"gate":           true,
+						"blocking_tasks": blocking,
+					})
+					return
+				}
+			}
+		}
+	}
+
 	_, err = tx.ExecContext(r.Context(), `
 		UPDATE deals SET stage = $1, updated_at = NOW() WHERE id = $2
 	`, req.Stage, dealID)

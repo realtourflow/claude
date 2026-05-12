@@ -6,6 +6,18 @@ export function setTokenGetter(fn: () => Promise<string>) {
   tokenGetter = fn;
 }
 
+export class ApiError extends Error {
+  status: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(status: number, statusText: string, body: any) {
+    super(`${status} ${statusText}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -18,7 +30,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    let body: unknown = null;
+    try { body = await res.json(); } catch { /* ignore */ }
+    throw new ApiError(res.status, res.statusText, body);
+  }
   return res.json() as Promise<T>;
 }
 

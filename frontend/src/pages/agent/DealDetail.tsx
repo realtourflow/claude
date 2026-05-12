@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Deal, DealStage, LoanMilestones } from '../../data/mockDeals';
 import { useDeal, patchStage } from '../../hooks/useDeals';
+import { ApiError } from '../../api/client';
 import { api } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
 import { usePermission } from '../../permissions/usePermission';
@@ -3305,10 +3306,11 @@ function TimelineTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
 
 // ─── Stage Advance Automation Modal ──────────────────────────────────────────
 
-function StageAdvanceModal({ deal, nextStage, onConfirm, onCancel }: {
+function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: {
   deal: Deal;
   nextStage: DealStage;
-  onConfirm: (draftMessage: string) => void;
+  gateError?: { blockingTasks: { id: string; title: string }[] } | null;
+  onConfirm: (draftMessage: string, force?: boolean) => void;
   onCancel: () => void;
 }) {
   const autoTasks = STAGE_AUTO_TASKS[nextStage]?.(deal) ?? [];
@@ -3409,14 +3411,44 @@ function StageAdvanceModal({ deal, nextStage, onConfirm, onCancel }: {
           )}
         </div>
 
+        {/* Gate error — blocking tasks */}
+        {gateError && (
+          <div className="mx-5 mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
+              <p className="text-xs font-bold text-amber-700">
+                {gateError.blockingTasks.length} required task{gateError.blockingTasks.length !== 1 ? 's' : ''} still open
+              </p>
+            </div>
+            <div className="space-y-1 mb-3">
+              {gateError.blockingTasks.map((t) => (
+                <div key={t.id} className="flex items-center gap-2">
+                  <Circle size={10} className="text-amber-400 flex-shrink-0" />
+                  <span className="text-xs text-amber-800">{t.title}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-amber-600">Complete these tasks or use "Force Advance" to override.</p>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="border-t border-gray-100 px-5 py-4 space-y-2">
-          <button
-            onClick={() => onConfirm(msg)}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-navy py-3.5 text-sm font-bold text-white hover:bg-brand-navy/90 transition-colors"
-          >
-            <Zap size={14} /> Confirm & Advance
-          </button>
+          {gateError ? (
+            <button
+              onClick={() => onConfirm(msg, true)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 py-3.5 text-sm font-bold text-white hover:bg-amber-600 transition-colors"
+            >
+              <Zap size={14} /> Force Advance Anyway
+            </button>
+          ) : (
+            <button
+              onClick={() => onConfirm(msg)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-navy py-3.5 text-sm font-bold text-white hover:bg-brand-navy/90 transition-colors"
+            >
+              <Zap size={14} /> Confirm & Advance
+            </button>
+          )}
           <button
             onClick={onCancel}
             className="w-full text-center text-sm text-gray-400 hover:text-gray-600 py-1.5 transition-colors"
@@ -3611,6 +3643,7 @@ export default function DealDetail() {
   const activeUser = useAuthStore((s) => s.activeUser);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
+  const [stageGateError, setStageGateError] = useState<{ blockingTasks: { id: string; title: string }[] } | null>(null);
 
   const { deal: apiDeal, loading: dealLoading, refresh: refreshDeal } = useDeal(dealId);
   const { tasks: dealTasks, refresh: refreshTasks } = useTasks(dealId ?? '');
@@ -3693,13 +3726,17 @@ export default function DealDetail() {
     setShowAdvanceModal(true);
   }
 
-  async function handleAdvanceConfirm(_draftMessage: string) {
+  async function handleAdvanceConfirm(_draftMessage: string, force?: boolean) {
     const idx = STAGE_ORDER.indexOf(stage);
     if (idx < STAGE_ORDER.length - 1) {
       const nextStage = STAGE_ORDER[idx + 1];
       try {
-        await patchStage(deal.id, nextStage);
-      } catch {
+        await patchStage(deal.id, nextStage, force);
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 422 && err.body?.gate) {
+          setStageGateError({ blockingTasks: err.body.blocking_tasks ?? [] });
+          return;
+        }
         setShowAdvanceModal(false);
         return;
       }
@@ -3724,6 +3761,7 @@ export default function DealDetail() {
       );
       refreshTasks();
     }
+    setStageGateError(null);
     setShowAdvanceModal(false);
   }
 
@@ -3781,8 +3819,9 @@ export default function DealDetail() {
           <StageAdvanceModal
             deal={deal}
             nextStage={nextStage}
+            gateError={stageGateError}
             onConfirm={handleAdvanceConfirm}
-            onCancel={() => setShowAdvanceModal(false)}
+            onCancel={() => { setStageGateError(null); setShowAdvanceModal(false); }}
           />
         ) : null;
       })()}
