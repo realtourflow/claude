@@ -1730,6 +1730,186 @@ function AuditLog() {
   );
 }
 
+// ─── Outstanding Items ────────────────────────────────────────────────────────
+
+const STUCK_THRESHOLDS: Partial<Record<string, number>> = {
+  intake: 5, active_search: 30, offer_active: 10,
+  under_contract: 35, pre_close: 10, closing: 5,
+};
+
+type OutstandingGroup = {
+  id: string;
+  label: string;
+  severity: 'critical' | 'warning' | 'info';
+  deals: Deal[];
+};
+
+function OutstandingItems({ deals }: { deals: Deal[] }) {
+  const active = deals.filter((d) => d.stage !== 'post_close');
+
+  const groups: OutstandingGroup[] = [
+    {
+      id: 'red',
+      label: 'Red Health Deals',
+      severity: 'critical',
+      deals: active.filter((d) => d.health === 'red'),
+    },
+    {
+      id: 'overdue',
+      label: 'Overdue Tasks',
+      severity: 'critical',
+      deals: active.filter((d) => (d.overdueTaskCount ?? 0) > 0),
+    },
+    {
+      id: 'stuck',
+      label: 'Stuck in Stage',
+      severity: 'warning',
+      deals: active.filter((d) => {
+        const threshold = STUCK_THRESHOLDS[d.stage];
+        return threshold != null && d.timeline.daysInStage >= threshold;
+      }),
+    },
+    {
+      id: 'no_closing_date',
+      label: 'Missing Closing Date',
+      severity: 'warning',
+      deals: active.filter(
+        (d) => ['pre_close', 'closing'].includes(d.stage) && !d.timeline.closingDate,
+      ),
+    },
+    {
+      id: 'unpaid_fees',
+      label: 'Unpaid Closing Fees',
+      severity: 'info',
+      deals: deals.filter(
+        (d) => d.stage === 'post_close' && (d.feeStatus === 'unpaid' || d.feeStatus === 'pending'),
+      ),
+    },
+  ].filter((g) => g.deals.length > 0);
+
+  const totalDeals = new Set(groups.flatMap((g) => g.deals.map((d) => d.id))).size;
+
+  const SEVERITY_STYLES = {
+    critical: {
+      border: 'border-l-red-500',
+      icon: <AlertTriangle size={15} className="text-red-500 flex-shrink-0" />,
+      badge: 'bg-red-100 text-red-700',
+      header: 'text-red-600',
+    },
+    warning: {
+      border: 'border-l-amber-400',
+      icon: <AlertTriangle size={15} className="text-amber-500 flex-shrink-0" />,
+      badge: 'bg-amber-100 text-amber-700',
+      header: 'text-amber-600',
+    },
+    info: {
+      border: 'border-l-blue-400',
+      icon: <DollarSign size={15} className="text-blue-500 flex-shrink-0" />,
+      badge: 'bg-blue-100 text-blue-700',
+      header: 'text-blue-600',
+    },
+  };
+
+  return (
+    <div className="space-y-7">
+      <div>
+        <h1 className="text-2xl font-bold text-brand-navy">Outstanding Items</h1>
+        <p className="text-sm text-gray-400 mt-0.5">
+          {totalDeals} deal{totalDeals !== 1 ? 's' : ''} need attention across {groups.length} categor{groups.length !== 1 ? 'ies' : 'y'}
+        </p>
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="rounded-xl bg-white px-5 py-12 text-center shadow-sm">
+          <CheckSquare size={28} className="mx-auto mb-3 text-green-400" />
+          <p className="font-semibold text-green-600 mb-1">All clear</p>
+          <p className="text-sm text-gray-400">No outstanding items across the pipeline</p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {groups.map((g) => {
+              const styles = SEVERITY_STYLES[g.severity];
+              return (
+                <div key={g.id} className={`rounded-xl bg-white px-5 py-4 shadow-sm border-l-4 ${styles.border}`}>
+                  <div className={`text-xl font-bold mb-0.5 ${g.severity === 'critical' ? 'text-red-600' : g.severity === 'warning' ? 'text-amber-600' : 'text-blue-600'}`}>
+                    {g.deals.length}
+                  </div>
+                  <div className="text-xs text-gray-400 font-medium">{g.label}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="space-y-6">
+            {groups.map((g) => {
+              const styles = SEVERITY_STYLES[g.severity];
+              return (
+                <section key={g.id}>
+                  <div className="mb-3 flex items-center gap-2">
+                    {styles.icon}
+                    <h2 className={`text-xs font-bold uppercase tracking-wider ${styles.header}`}>
+                      {g.label} ({g.deals.length})
+                    </h2>
+                  </div>
+                  <div className="space-y-2">
+                    {g.deals.map((d) => (
+                      <div
+                        key={d.id}
+                        className={`flex items-center gap-4 border-l-4 ${HEALTH_BORDER[d.health] ?? 'border-l-gray-300'} bg-white px-5 py-3 rounded-r-xl shadow-sm`}
+                      >
+                        <div className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${HEALTH_DOT[d.health] ?? 'bg-gray-300'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-brand-navy text-sm">{d.clientName}</span>
+                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${d.type === 'buy' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                              {d.type}
+                            </span>
+                            {(d.overdueTaskCount ?? 0) > 0 && g.id === 'overdue' && (
+                              <span className="flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
+                                <AlertTriangle size={9} />
+                                {d.overdueTaskCount} overdue
+                              </span>
+                            )}
+                            {g.id === 'stuck' && (
+                              <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                                {d.timeline.daysInStage}d in stage
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-gray-400 truncate">
+                            {d.property.address && `${d.property.address}${d.property.city ? `, ${d.property.city}` : ''}`}
+                          </div>
+                        </div>
+                        <div className="text-xs text-gray-500 hidden sm:block w-28 text-center">
+                          {STAGE_LABELS[d.stage]}
+                        </div>
+                        {d.agentName && (
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-6 w-6 rounded-full bg-brand-navy/10 flex items-center justify-center text-[10px] font-bold text-brand-navy">
+                              {initials(d.agentName)}
+                            </div>
+                            <span className="hidden lg:block text-xs text-gray-500">{d.agentName.split(' ')[0]}</span>
+                          </div>
+                        )}
+                        {g.id === 'unpaid_fees' && (
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${FEE_BADGE[d.feeStatus ?? 'unpaid']}`}>
+                            {d.feeStatus ?? 'unpaid'}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Coming Soon placeholder ───────────────────────────────────────────────────
 
 function ComingSoon({ title }: { title: string }) {
@@ -1765,7 +1945,7 @@ export default function AdminDashboard() {
     case 'preapproval': return <PreApprovalQueue deals={deals} />;
     case 'stuck':       return <StuckDeals deals={deals} />;
     case 'fees':        return <FeesCollected deals={deals} />;
-    case 'outstanding': return <ComingSoon title="Outstanding Items" />;
+    case 'outstanding': return <OutstandingItems deals={deals} />;
     case 'fastpass':    return <ActiveFastPass deals={deals} />;
     case 'smoothexit':  return <SmoothExitQueue deals={deals} />;
     case 'arive':       return <AriveStatus deals={deals} />;
