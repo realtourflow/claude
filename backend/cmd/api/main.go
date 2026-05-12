@@ -20,6 +20,7 @@ import (
 	appconfig "realtourflow/internal/config"
 	"realtourflow/internal/arive"
 	"realtourflow/internal/db"
+	"realtourflow/internal/docusign"
 	"realtourflow/internal/handlers"
 	"realtourflow/internal/middleware"
 )
@@ -56,13 +57,27 @@ func main() {
 		}()
 	}
 
+	dsClient, dsErr := docusign.New(
+		cfg.DocuSignIntegrationKey,
+		cfg.DocuSignUserID,
+		cfg.DocuSignAccountID,
+		cfg.DocuSignPrivateKey,
+		cfg.DocuSignBaseURL,
+	)
+	if dsErr != nil {
+		log.Printf("warn: docusign init failed: %v", dsErr)
+		dsClient, _ = docusign.New("", "", "", "", "")
+	} else if dsClient.Enabled() {
+		log.Println("docusign configured")
+	}
+
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
-	h := handlers.New(database, s3Client, cfg.S3Bucket, ariveClient, cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.ResendAPIKey, cfg.FrontendURL)
+	h := handlers.New(database, s3Client, cfg.S3Bucket, ariveClient, cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.ResendAPIKey, cfg.FrontendURL, dsClient)
 	r.Mount("/api", h.Routes(middleware.Auth0(cfg.Auth0Domain, cfg.Auth0Audience)))
 
 	srv := &http.Server{

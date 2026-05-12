@@ -22,6 +22,11 @@ type Config struct {
 	StripeWebhookSecret string
 	ResendAPIKey        string
 	FrontendURL         string
+	DocuSignIntegrationKey string
+	DocuSignAccountID      string
+	DocuSignUserID         string
+	DocuSignPrivateKey     string
+	DocuSignBaseURL        string
 }
 
 func Load() *Config {
@@ -42,6 +47,11 @@ func Load() *Config {
 		StripeWebhookSecret: getEnv("STRIPE_WEBHOOK_SECRET", ""),
 		ResendAPIKey:        getEnv("RESEND_API_KEY", ""),
 		FrontendURL:         getEnv("FRONTEND_URL", "http://localhost:5173"),
+		DocuSignIntegrationKey: getEnv("DOCUSIGN_INTEGRATION_KEY", ""),
+		DocuSignAccountID:      getEnv("DOCUSIGN_ACCOUNT_ID", ""),
+		DocuSignUserID:         getEnv("DOCUSIGN_USER_ID", ""),
+		DocuSignPrivateKey:     getEnv("DOCUSIGN_PRIVATE_KEY", ""),
+		DocuSignBaseURL:        getEnv("DOCUSIGN_BASE_URL", "https://demo.docusign.net"),
 	}
 }
 

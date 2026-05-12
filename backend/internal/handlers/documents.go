@@ -174,7 +174,8 @@ func (h *Handler) ListDocuments(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT d.id, d.deal_id, d.uploaded_by, u.name, d.name, d.s3_key, d.mime_type, d.file_size, d.created_at
+		SELECT d.id, d.deal_id, d.uploaded_by, u.name, d.name, d.s3_key, d.mime_type, d.file_size, d.created_at,
+		       d.docusign_envelope_id, d.docusign_status, d.docusign_sent_at
 		FROM documents d
 		JOIN users u ON u.id = d.uploaded_by
 		WHERE d.deal_id = $1
@@ -192,6 +193,7 @@ func (h *Handler) ListDocuments(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(
 			&doc.ID, &doc.DealID, &doc.UploadedBy, &doc.UploaderName,
 			&doc.Name, &doc.S3Key, &doc.MimeType, &doc.FileSize, &doc.CreatedAt,
+			&doc.DocuSignEnvelopeID, &doc.DocuSignStatus, &doc.DocuSignSentAt,
 		); err != nil {
 			http.Error(w, "failed to scan document", http.StatusInternalServerError)
 			return

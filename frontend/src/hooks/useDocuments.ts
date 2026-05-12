@@ -11,6 +11,9 @@ export type Document = {
   mimeType: string;
   fileSize: number;
   createdAt: string;
+  envelopeId?: string;
+  docusignStatus?: string;
+  docusignSentAt?: string;
 };
 
 type ApiDocument = {
@@ -23,6 +26,9 @@ type ApiDocument = {
   mime_type: string;
   file_size: number;
   created_at: string;
+  docusign_envelope_id?: string;
+  docusign_status?: string;
+  docusign_sent_at?: string;
 };
 
 function apiDocToFrontend(d: ApiDocument): Document {
@@ -36,6 +42,9 @@ function apiDocToFrontend(d: ApiDocument): Document {
     mimeType: d.mime_type,
     fileSize: d.file_size,
     createdAt: d.created_at,
+    envelopeId: d.docusign_envelope_id,
+    docusignStatus: d.docusign_status ?? undefined,
+    docusignSentAt: d.docusign_sent_at ?? undefined,
   };
 }
 
@@ -99,4 +108,19 @@ export async function getDownloadUrl(documentId: string): Promise<string> {
 
 export async function deleteDocument(documentId: string): Promise<void> {
   await api.delete<void>(`/documents/${documentId}`);
+}
+
+export async function sendForSignature(
+  dealId: string,
+  documentId: string,
+  signers: { email: string; name: string }[],
+): Promise<{ envelope_id: string; status: string }> {
+  return api.post(`/deals/${dealId}/documents/${documentId}/send-for-signature`, { signers });
+}
+
+export async function refreshDocuSignStatus(
+  dealId: string,
+  documentId: string,
+): Promise<{ status: string }> {
+  return api.post(`/deals/${dealId}/documents/${documentId}/docusign/refresh`, {});
 }

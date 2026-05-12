@@ -11,7 +11,7 @@ import { useTaskStore } from '../../store/taskStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { Task } from '../../data/mockTasks';
 import { useTasks, patchTaskStatus, postTask } from '../../hooks/useTasks';
-import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, Document as ApiDocument } from '../../hooks/useDocuments';
+import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignature, refreshDocuSignStatus, Document as ApiDocument } from '../../hooks/useDocuments';
 import { useMessages, postMessage, MessageChannel } from '../../hooks/useMessages';
 import { useVendors } from '../../hooks/useVendors';
 import {
@@ -49,6 +49,8 @@ import {
   Lock,
   DollarSign,
   LogOut,
+  PenLine,
+  Send,
 } from 'lucide-react';
 import MetroMap from '../../components/MetroMap';
 import { MOCK_USERS } from '../../data/mockUsers';
@@ -2547,6 +2549,116 @@ function DocIcon({ mimeType }: { mimeType: string }) {
   return <FileText size={16} className="text-gray-400 flex-shrink-0" />;
 }
 
+const DOCUSIGN_STATUS_META: Record<string, { label: string; cls: string }> = {
+  sent:      { label: 'Sent for signature', cls: 'bg-blue-100 text-blue-700' },
+  delivered: { label: 'Viewed',             cls: 'bg-indigo-100 text-indigo-700' },
+  completed: { label: 'Signed',             cls: 'bg-green-100 text-green-700' },
+  declined:  { label: 'Declined',           cls: 'bg-red-100 text-red-700' },
+  voided:    { label: 'Voided',             cls: 'bg-gray-100 text-gray-500' },
+};
+
+function SendForSignatureModal({
+  doc,
+  dealId,
+  onClose,
+  onSent,
+}: {
+  doc: ApiDocument;
+  dealId: string;
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const { participants } = useParticipants(dealId);
+  const signable = participants.filter((p) => p.role === 'buyer' || p.role === 'seller');
+  const [selected, setSelected] = useState<Set<string>>(new Set(signable.map((p) => p.id)));
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState('');
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  async function handleSend() {
+    const signers = signable
+      .filter((p) => selected.has(p.id))
+      .map((p) => ({ email: p.email, name: p.name }));
+    if (signers.length === 0) { setErr('Select at least one signer.'); return; }
+    setSending(true);
+    setErr('');
+    try {
+      await sendForSignature(dealId, doc.id, signers);
+      onSent();
+    } catch (e: any) {
+      setErr(e?.message ?? 'Failed to send — check DocuSign configuration.');
+    }
+    setSending(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-sm rounded-2xl bg-white shadow-2xl overflow-hidden">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div className="flex items-center gap-2">
+            <PenLine size={16} className="text-brand-navy" />
+            <h2 className="font-bold text-brand-navy text-sm">Send for Signature</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <FileText size={13} className="text-gray-400 flex-shrink-0" />
+              <span className="text-sm font-semibold text-brand-navy truncate">{doc.name}</span>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Select signers</p>
+            {signable.length === 0 ? (
+              <p className="text-xs text-gray-400">No buyers or sellers on this deal yet.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {signable.map((p) => (
+                  <label key={p.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.id)}
+                      onChange={() => toggle(p.id)}
+                      className="h-4 w-4 rounded accent-brand-navy"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-brand-navy truncate">{p.name}</p>
+                      <p className="text-xs text-gray-400 truncate">{p.email}</p>
+                    </div>
+                    <span className="text-[10px] font-bold uppercase text-gray-300">{p.role}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {err && <p className="text-xs text-red-500">{err}</p>}
+        </div>
+        <div className="border-t px-5 py-4 flex gap-3">
+          <button onClick={onClose} className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50">Cancel</button>
+          <button
+            onClick={handleSend}
+            disabled={sending || selected.size === 0}
+            className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/90 disabled:opacity-40"
+          >
+            <Send size={13} /> {sending ? 'Sending…' : 'Send'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DocumentsTab({
   deal,
   docs,
@@ -2561,6 +2673,8 @@ function DocumentsTab({
   const [showUpload, setShowUpload] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [signingDoc, setSigningDoc] = useState<ApiDocument | null>(null);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
   const stageReq = STAGE_GATE[deal.stage];
   const stageDocFound = stageReq ? docs.some((d) => d.name === stageReq.name) : false;
@@ -2588,6 +2702,15 @@ function DocumentsTab({
     } finally {
       setDeletingId(null);
     }
+  }
+
+  async function handleRefreshStatus(doc: ApiDocument) {
+    setRefreshingId(doc.id);
+    try {
+      await refreshDocuSignStatus(deal.id ?? '', doc.id);
+      onRefresh();
+    } catch {}
+    setRefreshingId(null);
   }
 
   return (
@@ -2623,39 +2746,73 @@ function DocumentsTab({
               <p className="text-xs text-gray-300 mt-0.5">Upload the first one below</p>
             </div>
           ) : (
-            docs.map((doc) => (
-              <div key={doc.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-brand-bg transition-colors group">
-                <DocIcon mimeType={doc.mimeType} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-brand-navy truncate">{doc.name}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {doc.uploaderName} · {formatFileSize(doc.fileSize)} · {new Date(doc.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+            docs.map((doc) => {
+              const dsStatus = doc.docusignStatus;
+              const dsMeta = dsStatus ? DOCUSIGN_STATUS_META[dsStatus] : null;
+              return (
+                <div key={doc.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-brand-bg transition-colors group">
+                  <DocIcon mimeType={doc.mimeType} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-sm font-medium text-brand-navy truncate">{doc.name}</div>
+                      {dsMeta && (
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold flex-shrink-0 ${dsMeta.cls}`}>
+                          {dsMeta.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {doc.uploaderName} · {formatFileSize(doc.fileSize)} · {new Date(doc.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* Send for Signature — only if not already sent or completed */}
+                    {(!dsStatus || dsStatus === 'declined' || dsStatus === 'voided') && (
+                      <button
+                        onClick={() => setSigningDoc(doc)}
+                        title="Send for Signature"
+                        className="rounded-lg p-1.5 hover:bg-blue-50 transition-colors text-gray-400 hover:text-blue-600"
+                      >
+                        <PenLine size={14} />
+                      </button>
+                    )}
+                    {/* Refresh DocuSign status */}
+                    {dsStatus && dsStatus !== 'completed' && (
+                      <button
+                        onClick={() => handleRefreshStatus(doc)}
+                        disabled={refreshingId === doc.id}
+                        title="Refresh signature status"
+                        className="rounded-lg p-1.5 hover:bg-gray-100 transition-colors text-gray-400 hover:text-brand-navy disabled:opacity-40"
+                      >
+                        {refreshingId === doc.id
+                          ? <Loader2 size={14} className="animate-spin" />
+                          : <RefreshCw size={14} />}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDownload(doc)}
+                      disabled={downloadingId === doc.id}
+                      title="Download"
+                      className="rounded-lg p-1.5 hover:bg-gray-100 transition-colors text-gray-400 hover:text-brand-navy disabled:opacity-40"
+                    >
+                      {downloadingId === doc.id
+                        ? <Loader2 size={14} className="animate-spin" />
+                        : <ExternalLink size={14} />}
+                    </button>
+                    <button
+                      onClick={() => handleDelete(doc)}
+                      disabled={deletingId === doc.id}
+                      title="Delete"
+                      className="rounded-lg p-1.5 hover:bg-red-50 transition-colors text-gray-400 hover:text-red-500 disabled:opacity-40"
+                    >
+                      {deletingId === doc.id
+                        ? <Loader2 size={14} className="animate-spin" />
+                        : <X size={14} />}
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={() => handleDownload(doc)}
-                    disabled={downloadingId === doc.id}
-                    title="Download"
-                    className="rounded-lg p-1.5 hover:bg-gray-100 transition-colors text-gray-400 hover:text-brand-navy disabled:opacity-40"
-                  >
-                    {downloadingId === doc.id
-                      ? <Loader2 size={14} className="animate-spin" />
-                      : <ExternalLink size={14} />}
-                  </button>
-                  <button
-                    onClick={() => handleDelete(doc)}
-                    disabled={deletingId === doc.id}
-                    title="Delete"
-                    className="rounded-lg p-1.5 hover:bg-red-50 transition-colors text-gray-400 hover:text-red-500 disabled:opacity-40"
-                  >
-                    {deletingId === doc.id
-                      ? <Loader2 size={14} className="animate-spin" />
-                      : <X size={14} />}
-                  </button>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
         <div className="border-t px-5 py-3 flex items-center justify-between">
@@ -2680,6 +2837,15 @@ function DocumentsTab({
           dealId={deal.id ?? ''}
           onClose={() => setShowUpload(false)}
           onUploaded={() => { setShowUpload(false); onRefresh(); }}
+        />
+      )}
+
+      {signingDoc && (
+        <SendForSignatureModal
+          doc={signingDoc}
+          dealId={deal.id ?? ''}
+          onClose={() => setSigningDoc(null)}
+          onSent={() => { setSigningDoc(null); onRefresh(); }}
         />
       )}
     </div>
