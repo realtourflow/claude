@@ -43,6 +43,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 	// Public — no auth required
 	r.Get("/invites/role", h.GetInviteRole)
 	r.Get("/invites/{token}", h.GetInvite)
+	r.Get("/calendar/{token}/feed.ics", h.CalendarFeed)
 	r.Post("/arive/webhook", h.AriveWebhook)
 	r.Post("/stripe/webhook", h.StripeWebhook)
 
@@ -84,6 +85,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 
 		r.Get("/me/deals", h.ListMyDeals)
 		r.Get("/me/settings", h.GetSettings)
+			r.Get("/me/calendar-url", h.GetCalendarURL)
 		r.Put("/me/settings", h.PutSettings)
 		r.Patch("/me/profile", h.PatchProfile)
 		r.Get("/me/tc", h.GetMyTC)

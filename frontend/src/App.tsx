@@ -7,6 +7,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { RoleSwitcher } from './components/RoleSwitcher';
 
 import AgentDashboard from './pages/agent/AgentDashboard';
+import CalendarPage from './pages/CalendarPage';
 import Pipeline from './pages/agent/Pipeline';
 import DealDetail from './pages/agent/DealDetail';
 import BuyerView from './pages/buyer/BuyerView';
@@ -102,7 +103,7 @@ export default function App() {
           }
         />
         <Route path="/agent/deals" element={<AppLayout><Pipeline /></AppLayout>} />
-        <Route path="/agent/calendar" element={<AppLayout><ComingSoon title="Calendar" /></AppLayout>} />
+        <Route path="/agent/calendar" element={<AppLayout><CalendarPage /></AppLayout>} />
         <Route path="/agent/messages" element={<AppLayout><ComingSoon title="Messages" /></AppLayout>} />
         <Route path="/agent/documents" element={<AppLayout><ComingSoon title="Documents" /></AppLayout>} />
         <Route path="/agent/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
@@ -149,6 +150,7 @@ export default function App() {
         {/* TC routes */}
         <Route path="/tc/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
         <Route path="/tc/deals/:dealId" element={<AppLayout><DealDetail /></AppLayout>} />
+        <Route path="/tc/calendar" element={<AppLayout><CalendarPage /></AppLayout>} />
         <Route
           path="/tc"
           element={
