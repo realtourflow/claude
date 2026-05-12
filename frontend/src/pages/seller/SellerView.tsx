@@ -10,7 +10,7 @@ import { useTasks } from '../../hooks/useTasks';
 import { useMessages, postMessage } from '../../hooks/useMessages';
 import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from '../../hooks/useShowingAvailability';
 import { useOffers } from '../../hooks/useOffers';
-import { useNetSheetStore, calcNetProceeds } from '../../store/netSheetStore';
+import { useNetSheet, recalcLines, calcNetProceeds } from '../../hooks/useNetSheet';
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
@@ -616,6 +616,7 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
 function UnderContractCard({ deal }: { deal: Deal }) {
   const hasRepairRequest = deal.flags.includes('repair_request');
   const { buyerStatusByDeal } = useDealStageStore();
+  // Net sheet shown inline when agent marks it ready
   const buyerStatus = buyerStatusByDeal[deal.id];
 
   const BUYER_STATUS_STEPS = [
@@ -693,6 +694,7 @@ function UnderContractCard({ deal }: { deal: Deal }) {
           </div>
         )}
       </div>
+      <NetSheetReadOnlyCard dealId={deal.id} compact />
     </div>
   );
 }
@@ -706,30 +708,33 @@ function PreCloseCard({ deal }: { deal: Deal }) {
     { label: 'Utilities transfer arranged',       done: false },
   ];
   return (
-    <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-      <div className="bg-blue-50 border-b border-blue-100 px-5 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Star size={15} className="text-blue-600" />
-          <span className="text-sm font-bold text-blue-800">Almost at the finish line</span>
-        </div>
-        {deal.timeline.daysToClose !== undefined && (
-          <span className="text-sm font-black text-blue-700">{deal.timeline.daysToClose} days</span>
-        )}
-      </div>
-      <div className="p-5 space-y-2.5">
-        {items.map((item, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
-              item.done ? 'bg-green-400' : 'border-2 border-gray-200'
-            }`}>
-              {item.done && <CheckCircle2 size={12} className="text-white" />}
-            </div>
-            <span className={`text-sm ${item.done ? 'line-through text-gray-300' : 'text-gray-700'}`}>
-              {item.label}
-            </span>
+    <div className="space-y-3">
+      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+        <div className="bg-blue-50 border-b border-blue-100 px-5 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Star size={15} className="text-blue-600" />
+            <span className="text-sm font-bold text-blue-800">Almost at the finish line</span>
           </div>
-        ))}
+          {deal.timeline.daysToClose !== undefined && (
+            <span className="text-sm font-black text-blue-700">{deal.timeline.daysToClose} days</span>
+          )}
+        </div>
+        <div className="p-5 space-y-2.5">
+          {items.map((item, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+                item.done ? 'bg-green-400' : 'border-2 border-gray-200'
+              }`}>
+                {item.done && <CheckCircle2 size={12} className="text-white" />}
+              </div>
+              <span className={`text-sm ${item.done ? 'line-through text-gray-300' : 'text-gray-700'}`}>
+                {item.label}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
+      <NetSheetReadOnlyCard dealId={deal.id} compact />
     </div>
   );
 }
@@ -771,11 +776,60 @@ function ClosingCard({ deal }: { deal: Deal }) {
 
 // ─── PostCloseCard ────────────────────────────────────────────────────────────
 
+function NetSheetReadOnlyCard({ dealId, compact }: { dealId: string; compact?: boolean }) {
+  const { sheet, loading, notReady } = useNetSheet(dealId);
+  if (loading) return null;
+  if (notReady || !sheet || sheet.status !== 'ready') return null;
+  const lines = recalcLines(sheet.lines, sheet.salePrice, sheet.annualTaxes, sheet.closingDate);
+  const netProceeds = calcNetProceeds(lines, sheet.salePrice);
+  const enabledLines = lines.filter((l) => l.enabled && l.amount > 0);
+
+  if (compact) {
+    return (
+      <div className="rounded-xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-widest text-gray-500">Estimated Net Proceeds</span>
+          <span className="text-sm font-black text-green-600">${netProceeds.toLocaleString()}</span>
+        </div>
+        <div className="px-4 py-2 text-[11px] text-gray-400">
+          Your agent has shared your net sheet. See full breakdown on your post-close page.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-gray-100">
+        <span className="text-xs font-bold uppercase tracking-widest text-gray-500">Estimated Net Proceeds</span>
+      </div>
+      <div className="px-5 py-4 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-600">Sale Price</span>
+          <span className="text-sm font-semibold text-brand-navy">+${sheet.salePrice.toLocaleString()}</span>
+        </div>
+        {enabledLines.map((l) => (
+          <div key={l.id} className="flex items-center justify-between">
+            <span className="text-sm text-gray-600">{l.label}{l.isPct && l.pct ? ` (${l.pct}%)` : ''}</span>
+            <span className="text-sm font-semibold text-gray-500">-${l.amount.toLocaleString()}</span>
+          </div>
+        ))}
+        <div className="border-t border-gray-100 pt-2.5 flex items-center justify-between">
+          <span className="text-base font-black text-brand-navy">Estimated Net</span>
+          <span className={`text-2xl font-black ${netProceeds >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+            ${netProceeds.toLocaleString()}
+          </span>
+        </div>
+        <p className="text-[10px] text-gray-300 leading-relaxed">
+          Estimate only — actual figures provided by title at closing.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function PostCloseCard({ deal, firstName }: { deal: Deal; firstName: string }) {
-  const { netSheetByDeal } = useNetSheetStore();
   const [showReferral, setShowReferral] = useState(false);
-  const sheet = netSheetByDeal[deal.id];
-  const calc = sheet ? calcNetProceeds(sheet) : null;
 
   return (
     <div className="space-y-3">
@@ -794,43 +848,7 @@ function PostCloseCard({ deal, firstName }: { deal: Deal; firstName: string }) {
       </div>
 
       {/* Net sheet */}
-      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-gray-100">
-          <span className="text-xs font-bold uppercase tracking-widest text-gray-500">Estimated Net Proceeds</span>
-        </div>
-        {!sheet ? (
-          <div className="px-5 py-5 text-center">
-            <p className="text-sm text-gray-400">Your agent is preparing your net sheet.</p>
-            <p className="text-xs text-gray-300 mt-1">Check back soon — this will show your estimated take-home.</p>
-          </div>
-        ) : (
-          <div className="px-5 py-4 space-y-2.5">
-            {[
-              { label: 'Sale Price', value: sheet.salePrice, positive: true },
-              { label: `Commission (${sheet.commissionPct}%)`, value: -calc!.commission, positive: false },
-              { label: `Closing Costs (${sheet.closingCostsPct}%)`, value: -calc!.closingCosts, positive: false },
-              { label: 'Mortgage Payoff', value: -sheet.mortgagePayoff, positive: false },
-              ...(sheet.otherDeductions > 0 ? [{ label: sheet.otherDeductionsLabel || 'Other', value: -sheet.otherDeductions, positive: false }] : []),
-            ].map(({ label, value, positive }) => (
-              <div key={label} className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">{label}</span>
-                <span className={`text-sm font-semibold ${positive ? 'text-brand-navy' : 'text-gray-500'}`}>
-                  {positive ? '+' : ''}{value < 0 ? '-' : ''}${Math.abs(value).toLocaleString()}
-                </span>
-              </div>
-            ))}
-            <div className="border-t border-gray-200 pt-2.5 flex items-center justify-between">
-              <span className="text-sm font-bold text-brand-navy">Estimated Net to You</span>
-              <span className={`text-xl font-black ${calc!.netProceeds >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                ${calc!.netProceeds.toLocaleString()}
-              </span>
-            </div>
-            <p className="text-[10px] text-gray-300 leading-relaxed">
-              Estimate only. Final figures confirmed at closing by your title company.
-            </p>
-          </div>
-        )}
-      </div>
+      <NetSheetReadOnlyCard dealId={deal.id} />
 
       {/* Review ask */}
       <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
@@ -1309,7 +1327,7 @@ export default function SellerView() {
       )}
 
       {/* Overdue alert */}
-      {!isFallenThrough && allTasks.some((t) => t.status === 'overdue') && (
+      {!isFallenThrough && sellerTasks.some((t) => t.status === 'overdue') && (
         <div className="flex items-center gap-3 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
           <AlertCircle size={18} className="text-red-500 flex-shrink-0" />
           <div>
@@ -1341,9 +1359,9 @@ export default function SellerView() {
               {openTasks.filter((t) => t.status === 'overdue').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
               {openTasks.filter((t) => t.status === 'in_progress').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
               {openTasks.filter((t) => t.status === 'pending').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
-              {(allTasks.filter((t) => t.status === 'completed').length + completedIds.size) > 0 && (
+              {(sellerTasks.filter((t) => t.status === 'completed').length + completedIds.size) > 0 && (
                 <p className="text-center text-xs text-gray-300 pt-1">
-                  {allTasks.filter((t) => t.status === 'completed').length + completedIds.size} task{(allTasks.filter((t) => t.status === 'completed').length + completedIds.size) !== 1 ? 's' : ''} completed
+                  {sellerTasks.filter((t) => t.status === 'completed').length + completedIds.size} task{(sellerTasks.filter((t) => t.status === 'completed').length + completedIds.size) !== 1 ? 's' : ''} completed
                 </p>
               )}
             </div>

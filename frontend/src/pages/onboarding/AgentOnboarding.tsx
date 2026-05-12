@@ -43,6 +43,12 @@ type AgentSetupData = {
   toolDotloop: boolean;
   toolSkyslope: boolean;
   toolZapier: boolean;
+  buyerCommissionIsPct: boolean;
+  buyerCommissionPct: number;
+  buyerCommissionAmount: number;
+  sellerCommissionIsPct: boolean;
+  sellerCommissionPct: number;
+  sellerCommissionAmount: number;
 };
 
 const DEFAULT_BUYER_MSG =
@@ -58,27 +64,30 @@ const EMPTY: AgentSetupData = {
   lenderChoice: '', otherLenderName: '',
   notifDealStage: true, notifClientMsg: true, notifOverdue: true,
   notifDisclosures: true, notifFastPass: true,
+  buyerCommissionIsPct: true, buyerCommissionPct: 3, buyerCommissionAmount: 0,
+  sellerCommissionIsPct: true, sellerCommissionPct: 3, sellerCommissionAmount: 0,
   toolDocuSign: false, toolGoogleCal: false, toolOutlook: false,
   toolDotloop: false, toolSkyslope: false, toolZapier: false,
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const TOTAL_STEPS = 12; // screens 1–12; 0 = welcome, 13 = done
+const TOTAL_STEPS = 13; // screens 1–13; 0 = welcome, 14 = done
 
 const STEP_LABELS: Record<number, string> = {
-  1:  'Step 1 of 12 · Your Profile',
-  2:  'Step 2 of 12 · Your Profile',
-  3:  'Step 3 of 12 · Your Profile',
-  4:  'Step 4 of 12 · Your Profile',
-  5:  'Step 5 of 12 · Your Profile',
-  6:  'Step 6 of 12 · Brokerage',
-  7:  'Step 7 of 12 · Your Team',
-  8:  'Step 8 of 12 · Client Experience',
-  9:  'Step 9 of 12 · Preferences',
-  10: 'Step 10 of 12 · Preferences',
-  11: 'Step 11 of 12 · Integrations',
-  12: 'Step 12 of 12 · Documents',
+  1:  'Step 1 of 13 · Your Profile',
+  2:  'Step 2 of 13 · Your Profile',
+  3:  'Step 3 of 13 · Your Profile',
+  4:  'Step 4 of 13 · Your Profile',
+  5:  'Step 5 of 13 · Your Profile',
+  6:  'Step 6 of 13 · Brokerage',
+  7:  'Step 7 of 13 · Your Team',
+  8:  'Step 8 of 13 · Client Experience',
+  9:  'Step 9 of 13 · Preferences',
+  10: 'Step 10 of 13 · Preferences',
+  11: 'Step 11 of 13 · Integrations',
+  12: 'Step 12 of 13 · Documents',
+  13: 'Step 13 of 13 · Commission Defaults',
 };
 
 const TITLE_OPTIONS = [
@@ -853,6 +862,125 @@ function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
 
 // ─── Screen 13: Done ──────────────────────────────────────────────────────────
 
+// ─── Screen 13: Commission Defaults ───────────────────────────────────────────
+
+function CommissionScreen({
+  data, onChange, onContinue, onSkip,
+}: {
+  data: AgentSetupData;
+  onChange: <K extends keyof AgentSetupData>(key: K, val: AgentSetupData[K]) => void;
+  onContinue: () => void;
+  onSkip: () => void;
+}) {
+  function CommissionInput({
+    label, isPct, pct, amount, onToggle, onPctChange, onAmountChange, salePreview,
+  }: {
+    label: string;
+    isPct: boolean;
+    pct: number;
+    amount: number;
+    onToggle: () => void;
+    onPctChange: (v: number) => void;
+    onAmountChange: (v: number) => void;
+    salePreview?: number;
+  }) {
+    const dollarEquiv = salePreview && isPct ? Math.round(salePreview * pct / 100) : null;
+    const pctEquiv = salePreview && !isPct && salePreview > 0 ? ((amount / salePreview) * 100).toFixed(2) : null;
+    return (
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+        <p className="text-sm font-bold text-brand-navy">{label}</p>
+        {/* Toggle */}
+        <div className="flex rounded-xl overflow-hidden border border-gray-200">
+          <button
+            onClick={() => !isPct && onToggle()}
+            className={`flex-1 py-2 text-xs font-bold transition-colors ${isPct ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
+          >
+            Percentage %
+          </button>
+          <button
+            onClick={() => isPct && onToggle()}
+            className={`flex-1 py-2 text-xs font-bold transition-colors ${!isPct ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
+          >
+            Fixed Amount $
+          </button>
+        </div>
+        {/* Input */}
+        {isPct ? (
+          <div className="flex items-center gap-2 rounded-xl border border-brand-navy/20 bg-white px-4 py-3">
+            <input
+              type="number"
+              step="0.25"
+              min="0"
+              max="10"
+              value={pct}
+              onChange={(e) => onPctChange(parseFloat(e.target.value) || 0)}
+              className="flex-1 text-xl font-black text-brand-navy outline-none bg-transparent"
+            />
+            <span className="text-lg font-bold text-gray-400">%</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 rounded-xl border border-brand-navy/20 bg-white px-4 py-3">
+            <span className="text-lg font-bold text-gray-400">$</span>
+            <input
+              type="number"
+              step="100"
+              min="0"
+              value={amount}
+              onChange={(e) => onAmountChange(parseFloat(e.target.value) || 0)}
+              className="flex-1 text-xl font-black text-brand-navy outline-none bg-transparent"
+            />
+          </div>
+        )}
+        {/* Equivalent */}
+        {salePreview && (
+          <p className="text-xs text-gray-400 text-center">
+            {isPct && dollarEquiv !== null
+              ? `≈ $${dollarEquiv.toLocaleString()} on a $${salePreview.toLocaleString()} sale`
+              : !isPct && pctEquiv !== null
+              ? `≈ ${pctEquiv}% of a $${salePreview.toLocaleString()} sale`
+              : null}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Question
+        text="What's your typical commission?"
+        note="These pre-fill your net sheets on every deal. You can always adjust per transaction."
+      />
+      <div className="space-y-4">
+        <CommissionInput
+          label="Buyer Representation"
+          isPct={data.buyerCommissionIsPct}
+          pct={data.buyerCommissionPct}
+          amount={data.buyerCommissionAmount}
+          onToggle={() => onChange('buyerCommissionIsPct', !data.buyerCommissionIsPct)}
+          onPctChange={(v) => onChange('buyerCommissionPct', v)}
+          onAmountChange={(v) => onChange('buyerCommissionAmount', v)}
+          salePreview={350000}
+        />
+        <CommissionInput
+          label="Listing / Seller Representation"
+          isPct={data.sellerCommissionIsPct}
+          pct={data.sellerCommissionPct}
+          amount={data.sellerCommissionAmount}
+          onToggle={() => onChange('sellerCommissionIsPct', !data.sellerCommissionIsPct)}
+          onPctChange={(v) => onChange('sellerCommissionPct', v)}
+          onAmountChange={(v) => onChange('sellerCommissionAmount', v)}
+          salePreview={350000}
+        />
+      </div>
+      <ContinueBtn onClick={onContinue} label="Save & Continue" />
+      <SkipLink onClick={onSkip} label="Skip — I'll set this in Settings" />
+    </div>
+  );
+}
+
+// ─── Screen 14: Done ──────────────────────────────────────────────────────────
+
 function DoneScreen({ data }: { data: AgentSetupData }) {
   const navigate = useNavigate();
   const { docsByAgent } = useAgentDocStore();
@@ -893,6 +1021,16 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
         dotloop: data.toolDotloop,
         skyslope: data.toolSkyslope,
         zapier: data.toolZapier,
+      },
+      buyer_commission: {
+        is_pct: data.buyerCommissionIsPct,
+        pct: data.buyerCommissionIsPct ? data.buyerCommissionPct : null,
+        amount: data.buyerCommissionIsPct ? null : data.buyerCommissionAmount,
+      },
+      seller_commission: {
+        is_pct: data.sellerCommissionIsPct,
+        pct: data.sellerCommissionIsPct ? data.sellerCommissionPct : null,
+        amount: data.sellerCommissionIsPct ? null : data.sellerCommissionAmount,
       },
       setup_complete: true,
     };
@@ -979,7 +1117,7 @@ export default function AgentOnboarding() {
 
   const progress =
     screen === 0  ? 3 :
-    screen === 13 ? 100 :
+    screen === 14 ? 100 :
     Math.round((screen / (TOTAL_STEPS + 1)) * 100);
 
   const stepLabel = STEP_LABELS[screen];
@@ -1064,7 +1202,11 @@ export default function AgentOnboarding() {
         <DocumentsScreen onContinue={advance} />
       );
 
-      case 13: return <DoneScreen data={data} />;
+      case 13: return (
+        <CommissionScreen data={data} onChange={set} onContinue={advance} onSkip={advance} />
+      );
+
+      case 14: return <DoneScreen data={data} />;
 
       default: return null;
     }

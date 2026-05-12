@@ -116,6 +116,10 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/deals/{dealId}/offers", h.CreateOffer)
 		r.Delete("/offers/{offerId}", h.DeleteOffer)
 
+		r.Get("/deals/{dealId}/net-sheet", h.GetOrCreateNetSheet)
+		r.Put("/deals/{dealId}/net-sheet", h.PutNetSheet)
+		r.Post("/deals/{dealId}/net-sheet/ready", h.MarkNetSheetReady)
+
 		r.Get("/notifications", h.ListNotifications)
 		r.Patch("/notifications/{notifId}/read", h.MarkNotificationRead)
 		r.Post("/notifications/read-all", h.MarkAllNotificationsRead)
