@@ -1,0 +1,21 @@
+CREATE TABLE tracked_properties (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id            UUID NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  address            TEXT NOT NULL,
+  city               TEXT NOT NULL DEFAULT '',
+  state              TEXT NOT NULL DEFAULT '',
+  price              INTEGER NOT NULL DEFAULT 0,
+  beds               NUMERIC(4,1) NOT NULL DEFAULT 0,
+  baths              NUMERIC(4,1) NOT NULL DEFAULT 0,
+  sqft               INTEGER NOT NULL DEFAULT 0,
+  thumbnail_url      TEXT NOT NULL DEFAULT '',
+  source_url         TEXT NOT NULL DEFAULT '',
+  status             TEXT NOT NULL DEFAULT 'interested',
+  added_by           TEXT NOT NULL DEFAULT 'agent',
+  agent_note         TEXT,
+  buyer_note         TEXT,
+  agent_private_note TEXT,
+  offer_requested    BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

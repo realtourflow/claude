@@ -8,8 +8,8 @@ import { useDealStageStore } from '../../store/dealStageStore';
 import { useMyDeals } from '../../hooks/useMyDeals';
 import { useTasks } from '../../hooks/useTasks';
 import { useMessages, postMessage } from '../../hooks/useMessages';
-import { useShowingAvailabilityStore, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from '../../store/showingAvailabilityStore';
-import { useOfferStore } from '../../store/offerStore';
+import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from '../../hooks/useShowingAvailability';
+import { useOffers } from '../../hooks/useOffers';
 import { useNetSheetStore, calcNetProceeds } from '../../store/netSheetStore';
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
@@ -390,7 +390,7 @@ function ListingPrepCard() {
 // ─── ShowingAvailabilityModal ─────────────────────────────────────────────────
 
 function ShowingAvailabilityModal({ dealId, onClose }: { dealId: string; onClose: () => void }) {
-  const { setAvailability } = useShowingAvailabilityStore();
+  const { saveSlots } = useShowingAvailability(dealId);
   const [enabled, setEnabled] = useState<Set<DayOfWeek>>(new Set(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']));
   const [times, setTimes] = useState<Record<DayOfWeek, { from: string; to: string }>>({
     Mon: { from: '09:00', to: '18:00' }, Tue: { from: '09:00', to: '18:00' },
@@ -417,11 +417,11 @@ function ShowingAvailabilityModal({ dealId, onClose }: { dealId: string; onClose
     });
   }
 
-  function save() {
+  async function save() {
     const slots: ShowingSlot[] = DAYS_OF_WEEK
       .filter((d) => enabled.has(d))
       .map((d) => ({ day: d, from: times[d].from, to: times[d].to }));
-    setAvailability(dealId, slots);
+    await saveSlots(slots).catch(() => {});
     onClose();
   }
 
@@ -491,10 +491,8 @@ function ShowingAvailabilityModal({ dealId, onClose }: { dealId: string; onClose
 
 function ListingActiveCard({ deal }: { deal: Deal }) {
   const [showAvailModal, setShowAvailModal] = useState(false);
-  const { availabilityByDeal } = useShowingAvailabilityStore();
-  const { offersByDeal } = useOfferStore();
-  const availability = availabilityByDeal[deal.id] ?? [];
-  const offers = offersByDeal[deal.id] ?? [];
+  const { slots: availability } = useShowingAvailability(deal.id);
+  const { offers } = useOffers(deal.id);
   const daysOnMarket = deal.timeline.daysInStage ?? 0;
 
   function fmt(t: string) {
@@ -1185,15 +1183,13 @@ export default function SellerView() {
     return false;
   });
 
-  const { availabilityByDeal } = useShowingAvailabilityStore();
   const { getClientNotifications, dismissClientNotification } = useNotificationStore();
   const { deals, loading: dealsLoading } = useMyDeals();
   const deal = deals.find((d) => d.type === 'sell');
   const { tasks } = useTasks(deal?.id ?? '');
   const sellerTasks = tasks.filter((t) => t.assignedTo === 'seller');
   const openTasks = sellerTasks.filter((t) => t.status !== 'completed' && !completedIds.has(t.id));
-
-  const availability = deal ? availabilityByDeal[deal.id] ?? [] : [];
+  const { slots: availability } = useShowingAvailability(deal?.id);
   const [showingModalDismissed, setShowingModalDismissed] = useState(
     () => !!sessionStorage.getItem(`showing_avail_prompted_${deal?.id ?? ''}`)
   );

@@ -104,6 +104,18 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/deals/{dealId}/fastpass", h.EnrollFastPass)
 		r.Post("/deals/{dealId}/smoothexit", h.EnrollSmoothExit)
 
+		r.Get("/deals/{dealId}/properties", h.ListProperties)
+		r.Post("/deals/{dealId}/properties", h.CreateProperty)
+		r.Patch("/properties/{propertyId}", h.UpdateProperty)
+		r.Delete("/properties/{propertyId}", h.DeleteProperty)
+
+		r.Get("/deals/{dealId}/showing-availability", h.GetShowingAvailability)
+		r.Put("/deals/{dealId}/showing-availability", h.PutShowingAvailability)
+
+		r.Get("/deals/{dealId}/offers", h.ListOffers)
+		r.Post("/deals/{dealId}/offers", h.CreateOffer)
+		r.Delete("/offers/{offerId}", h.DeleteOffer)
+
 		r.Get("/notifications", h.ListNotifications)
 		r.Patch("/notifications/{notifId}/read", h.MarkNotificationRead)
 		r.Post("/notifications/read-all", h.MarkAllNotificationsRead)

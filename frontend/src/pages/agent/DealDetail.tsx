@@ -51,11 +51,11 @@ import {
 } from 'lucide-react';
 import MetroMap from '../../components/MetroMap';
 import { MOCK_USERS } from '../../data/mockUsers';
-import { usePropertyStore, TrackedProperty, PropertyStatus } from '../../store/propertyStore';
 import { useDealStageStore } from '../../store/dealStageStore';
 import { useParticipants } from '../../hooks/useParticipants';
-import { useShowingAvailabilityStore, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from '../../store/showingAvailabilityStore';
-import { useOfferStore, Offer } from '../../store/offerStore';
+import { useProperties, TrackedProperty, PropertyStatus } from '../../hooks/useProperties';
+import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from '../../hooks/useShowingAvailability';
+import { useOffers, Offer } from '../../hooks/useOffers';
 import { useNetSheetStore, NetSheet, calcNetProceeds } from '../../store/netSheetStore';
 import {
   VENDOR_CATEGORY_LABELS,
@@ -233,23 +233,14 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 // ─── Seller: Showing Availability Editor ─────────────────────────────────────
 
 function SellerShowingAvailabilityCard({ dealId }: { dealId: string }) {
-  const { availabilityByDeal, setAvailability } = useShowingAvailabilityStore();
-  const availability = availabilityByDeal[dealId] ?? [];
+  const { slots: availability, saveSlots } = useShowingAvailability(dealId);
   const [editing, setEditing] = useState(false);
-  const [enabled, setEnabled] = useState<Set<DayOfWeek>>(
-    () => new Set(availability.map((s) => s.day))
-  );
-  const [times, setTimes] = useState<Record<DayOfWeek, { from: string; to: string }>>(() => {
-    const defaults: Record<DayOfWeek, { from: string; to: string }> = {
-      Mon: { from: '09:00', to: '18:00' }, Tue: { from: '09:00', to: '18:00' },
-      Wed: { from: '09:00', to: '18:00' }, Thu: { from: '09:00', to: '18:00' },
-      Fri: { from: '09:00', to: '18:00' }, Sat: { from: '10:00', to: '15:00' },
-      Sun: { from: '12:00', to: '15:00' },
-    };
-    for (const slot of availability) {
-      defaults[slot.day] = { from: slot.from, to: slot.to };
-    }
-    return defaults;
+  const [enabled, setEnabled] = useState<Set<DayOfWeek>>(new Set());
+  const [times, setTimes] = useState<Record<DayOfWeek, { from: string; to: string }>>({
+    Mon: { from: '09:00', to: '18:00' }, Tue: { from: '09:00', to: '18:00' },
+    Wed: { from: '09:00', to: '18:00' }, Thu: { from: '09:00', to: '18:00' },
+    Fri: { from: '09:00', to: '18:00' }, Sat: { from: '10:00', to: '15:00' },
+    Sun: { from: '12:00', to: '15:00' },
   });
 
   const TIME_OPTIONS = [
@@ -271,11 +262,11 @@ function SellerShowingAvailabilityCard({ dealId }: { dealId: string }) {
     });
   }
 
-  function save() {
-    const slots: ShowingSlot[] = DAYS_OF_WEEK
+  async function save() {
+    const newSlots: ShowingSlot[] = DAYS_OF_WEEK
       .filter((d) => enabled.has(d))
       .map((d) => ({ day: d, from: times[d].from, to: times[d].to }));
-    setAvailability(dealId, slots);
+    await saveSlots(newSlots).catch(() => {});
     setEditing(false);
   }
 
@@ -394,8 +385,7 @@ function SellerShowingAvailabilityCard({ dealId }: { dealId: string }) {
 const CONTINGENCY_OPTIONS = ['Inspection', 'Financing', 'Appraisal', 'Sale of Home'];
 
 function SellerOffersCard({ dealId }: { dealId: string }) {
-  const { offersByDeal, addOffer, removeOffer } = useOfferStore();
-  const offers = offersByDeal[dealId] ?? [];
+  const { offers, addOffer, removeOffer } = useOffers(dealId);
   const [showForm, setShowForm] = useState(false);
   const [buyerName, setBuyerName] = useState('');
   const [offerPrice, setOfferPrice] = useState('');
@@ -409,18 +399,15 @@ function SellerOffersCard({ dealId }: { dealId: string }) {
     );
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     if (!buyerName.trim() || !offerPrice) return;
-    addOffer({
-      id: `offer-${Date.now()}`,
-      dealId,
+    await addOffer({
       buyerName: buyerName.trim(),
       offerPrice: parseInt(offerPrice.replace(/\D/g, ''), 10) || 0,
-      closeDate: closeDate,
+      closeDate: closeDate || undefined,
       contingencies,
       agentNotes: agentNotes.trim(),
-      submittedAt: new Date().toISOString().split('T')[0],
-    });
+    }).catch(() => {});
     setBuyerName(''); setOfferPrice(''); setCloseDate('');
     setContingencies([]); setAgentNotes('');
     setShowForm(false);
@@ -1057,15 +1044,14 @@ const AGENT_STATUS_CONFIG: Record<PropertyStatus, { label: string; style: string
   offer_submitted:  { label: 'Offer Submitted',  style: 'bg-green-100 text-green-700' },
 };
 
-function AgentPropertyRow({ prop, onRemove }: { prop: TrackedProperty; onRemove: () => void }) {
-  const { updateAgentNote } = usePropertyStore();
+function AgentPropertyRow({ prop, onRemove, onUpdateAgentNote }: { prop: TrackedProperty; onRemove: () => void; onUpdateAgentNote: (id: string, note: string) => void }) {
   const [imgErr, setImgErr] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState(prop.agentPrivateNote ?? '');
   const cfg = AGENT_STATUS_CONFIG[prop.status];
 
   function saveNote() {
-    updateAgentNote(prop.id, noteDraft.trim());
+    onUpdateAgentNote(prop.id, noteDraft.trim());
     setNoteOpen(false);
   }
 
@@ -1188,8 +1174,7 @@ function AgentPropertyRow({ prop, onRemove }: { prop: TrackedProperty; onRemove:
 }
 
 function PropertyTrackingCard({ deal }: { deal: Deal }) {
-  const { propertiesByDeal, addProperty, removeProperty } = usePropertyStore();
-  const properties = propertiesByDeal[deal.id] ?? [];
+  const { properties, addProperty, removeProperty, updateAgentNote } = useProperties(deal.id);
 
   const [showForm, setShowForm] = useState(false);
   const [url, setUrl] = useState('');
@@ -1197,12 +1182,11 @@ function PropertyTrackingCard({ deal }: { deal: Deal }) {
   const [price, setPrice] = useState('');
   const [note, setNote] = useState('');
 
-  function handleAdd() {
+  async function handleAdd() {
     const trimAddr = address.trim();
     if (!trimAddr) return;
     const parts = trimAddr.split(',').map((s) => s.trim());
-    addProperty({
-      id: `prop-${deal.id}-${Date.now()}`,
+    await addProperty({
       dealId: deal.id,
       address: parts[0] ?? trimAddr,
       city: parts[1] ?? '',
@@ -1216,7 +1200,7 @@ function PropertyTrackingCard({ deal }: { deal: Deal }) {
       status: 'interested',
       addedBy: 'agent',
       agentNote: note.trim() || undefined,
-    });
+    }).catch(() => {});
     setUrl(''); setAddress(''); setPrice(''); setNote('');
     setShowForm(false);
   }
@@ -1301,7 +1285,7 @@ function PropertyTrackingCard({ deal }: { deal: Deal }) {
       {properties.length > 0 ? (
         <div className="space-y-2">
           {properties.map((p) => (
-            <AgentPropertyRow key={p.id} prop={p} onRemove={() => removeProperty(p.id)} />
+            <AgentPropertyRow key={p.id} prop={p} onRemove={() => removeProperty(p.id)} onUpdateAgentNote={updateAgentNote} />
           ))}
         </div>
       ) : (
@@ -3215,9 +3199,9 @@ function StageTransitionBar({
   const gateDocSigned = true;
 
   const isOfferActive = stage === 'offer_active';
-  const { propertiesByDeal } = usePropertyStore();
+  const { properties: stageProperties } = useProperties(isOfferActive ? deal.id : undefined);
   const offerProperty = isOfferActive
-    ? (propertiesByDeal[deal.id] ?? []).find((p) => p.offerRequested)
+    ? stageProperties.find((p) => p.offerRequested)
     : null;
 
   return (

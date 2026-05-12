@@ -15,8 +15,7 @@ import {
 } from 'lucide-react';
 import MetroMap from '../../components/MetroMap';
 import VendorDirectory from '../../components/VendorDirectory';
-import { usePropertyStore, TrackedProperty, PropertyStatus } from '../../store/propertyStore';
-import { useTaskStore } from '../../store/taskStore';
+import { useProperties, TrackedProperty, PropertyStatus } from '../../hooks/useProperties';
 import { useAgentDocStore } from '../../store/agentDocStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { api } from '../../api/client';
@@ -753,36 +752,14 @@ function BAASigningModal({ deal, agentId, onClose, onSigned }: {
 // ─── Active Search Card ───────────────────────────────────────────────────────
 
 function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () => void }) {
-  const { propertiesByDeal, addProperty, updateStatus, removeProperty, updateBuyerNote, setOfferRequested } = usePropertyStore();
+  const { properties, addProperty, updateStatus, removeProperty, updateBuyerNote, setOfferRequested } = useProperties(deal.id);
   const preApproved = deal.preApproved ?? false;
   const baaSigned = deal.baaSigned ?? false;
-  const { addTask } = useTaskStore();
-  const addNotification = useNotificationStore((s) => s.add);
 
-  function handleOfferInterest(propertyId: string, address: string) {
-    setOfferRequested(propertyId, true);
-    addNotification({
-      title: `${deal.clientName} wants to make an offer`,
-      body: `On ${address} — reach out to discuss price, terms, and next steps.`,
-      type: 'buyer_onboarding',
-      clientName: deal.clientName,
-    });
-    addTask({
-      id: `task-offer-${propertyId}-${Date.now()}`,
-      dealId: deal.id,
-      title: `${deal.clientName} wants to make an offer on ${address}`,
-      description: 'Buyer requested an offer. Contact them to discuss purchase price, terms, contingencies, and timeline.',
-      assignedTo: 'agent',
-      assignedToId: deal.agentId,
-      status: 'pending',
-      priority: 'high',
-      source: 'ai',
-      stageContext: 'active_search',
-      dueDate: new Date().toISOString().slice(0, 10),
-    });
+  async function handleOfferInterest(propertyId: string, _address: string) {
+    await setOfferRequested(propertyId, true).catch(() => {});
   }
   const [showBAAModal, setShowBAAModal] = useState(false);
-  const properties = propertiesByDeal[deal.id] ?? [];
   const isMountainMortgage = deal.flags.includes('mountain_mortgage');
 
   const [showForm, setShowForm] = useState(false);
@@ -790,11 +767,10 @@ function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () 
   const [addressInput, setAddressInput] = useState('');
   const [priceInput, setPriceInput] = useState('');
 
-  function handleAdd() {
+  async function handleAdd() {
     const addr = addressInput.trim() || (urlInput.trim() ? 'Property from link' : '');
     if (!addr) return;
-    addProperty({
-      id: `prop-${Date.now()}`,
+    await addProperty({
       dealId: deal.id,
       address: addr,
       city: '', state: '',
@@ -804,30 +780,17 @@ function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () 
       sourceUrl: urlInput.trim(),
       status: 'interested',
       addedBy: 'buyer',
-    });
+    }).catch(() => {});
     setUrlInput(''); setAddressInput(''); setPriceInput('');
     setShowForm(false);
   }
 
   function handleUploadLetter() {
-    setPreApproved(deal.id, true);
+    // Pre-approval flag is set by the agent — this is informational
   }
 
   function handleLetterLater() {
-    setPreApproved(deal.id, true);
-    addTask({
-      id: `task-preapproval-${deal.id}`,
-      dealId: deal.id,
-      title: 'Upload your pre-approval letter',
-      description: 'Your agent needs a copy of your pre-approval letter to proceed. Upload it when you have it.',
-      status: 'pending',
-      assignedTo: 'buyer',
-      assignedToId: '',
-      priority: 'medium',
-      source: 'manual',
-      stageContext: deal.stage,
-      dueDate: undefined,
-    });
+    // Pre-approval flag is set by the agent — this is informational
   }
 
   return (
