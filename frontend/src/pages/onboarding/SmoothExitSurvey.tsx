@@ -461,7 +461,7 @@ function SubmittedScreen({ data, paymentOption, fromOnboarding }: { data: Survey
       </p>
       <div className="mt-4 rounded-xl border border-purple-200 bg-purple-50 px-5 py-3 text-sm text-purple-800">
         <span className="font-semibold">
-          {paymentOption === 'from_proceeds' ? 'Fee deducted at closing' : 'Fee via buyer concession'}
+          {paymentOption === 'from_proceeds' ? 'Base 1% fee deducted at closing' : 'Base 1% fee via buyer concession'}
         </span>
         {' — '}nothing due today.
       </div>
@@ -485,8 +485,10 @@ export default function SmoothExitSurvey() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
-  const locationState = location.state as { dealId?: string | null } | null;
+  const locationState = location.state as { dealId?: string | null; selectedUpsells?: string[]; upsellTotal?: number } | null;
   const dealId = locationState?.dealId ?? null;
+  const selectedUpsells = locationState?.selectedUpsells ?? [];
+  const upsellTotal = locationState?.upsellTotal ?? 0;
   const [screen, setScreen] = useState(0);
   const [data, setData] = useState<SurveyData>(EMPTY);
   const [submitted, setSubmitted] = useState(false);
@@ -552,12 +554,18 @@ export default function SmoothExitSurvey() {
                 setSubmitting(true);
                 try {
                   const price = parseFloat(data.estimatedSalePrice) || 0;
-                  await api.post(`/deals/${dealId}/smoothexit`, {
+                  const res = await api.post<{ ok?: boolean; checkout_url?: string }>(`/deals/${dealId}/smoothexit`, {
                     payment_option: opt,
                     estimated_sale_price: Math.round(price),
                     fee_cents: Math.round(price * 0.01 * 100),
                     survey_answers: data,
+                    selected_upsells: selectedUpsells,
+                    upsell_total_cents: Math.round(upsellTotal * 100),
                   });
+                  if (res.checkout_url) {
+                    window.location.href = res.checkout_url;
+                    return;
+                  }
                 } catch {
                   // fall through to show submitted screen
                 } finally {

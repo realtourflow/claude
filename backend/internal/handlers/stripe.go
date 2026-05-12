@@ -151,6 +151,10 @@ func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 			if err := h.markFastPassPaid(dealID); err != nil {
 				log.Printf("mark fast_pass paid error for deal %s: %v", dealID, err)
 			}
+		case "smooth_exit_upsell":
+			if err := h.markSmoothExitUpsellPaid(dealID); err != nil {
+				log.Printf("mark smooth_exit_upsell paid error for deal %s: %v", dealID, err)
+			}
 		default:
 			if err := h.markFeePaid(dealID, sess.ID); err != nil {
 				log.Printf("mark fee paid error for deal %s: %v", dealID, err)
@@ -182,6 +186,16 @@ func (h *Handler) markFeePaid(dealID, sessionID string) error {
 		     fee_paid_at = $2
 		 WHERE id = $3 AND fee_status != 'waived'`,
 		sessionID, time.Now().UTC(), dealID,
+	)
+	return err
+}
+
+func (h *Handler) markSmoothExitUpsellPaid(dealID string) error {
+	_, err := h.db.Exec(
+		`UPDATE deals
+		 SET smooth_exit = jsonb_set(COALESCE(smooth_exit, '{}'::jsonb), '{upsells_paid}', 'true')
+		 WHERE id = $1`,
+		dealID,
 	)
 	return err
 }

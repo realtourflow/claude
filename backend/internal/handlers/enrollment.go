@@ -164,10 +164,15 @@ func (h *Handler) EnrollSmoothExit(w http.ResponseWriter, r *http.Request) {
 		EstimatedSalePrice int             `json:"estimated_sale_price"`
 		FeeCents           int             `json:"fee_cents"`
 		SurveyAnswers      json.RawMessage `json:"survey_answers"`
+		SelectedUpsells    []string        `json:"selected_upsells"`
+		UpsellTotalCents   int             `json:"upsell_total_cents"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
+	}
+	if req.SelectedUpsells == nil {
+		req.SelectedUpsells = []string{}
 	}
 
 	enrollment := map[string]interface{}{
@@ -176,6 +181,9 @@ func (h *Handler) EnrollSmoothExit(w http.ResponseWriter, r *http.Request) {
 		"estimated_sale_price": req.EstimatedSalePrice,
 		"fee_cents":            req.FeeCents,
 		"survey_answers":       req.SurveyAnswers,
+		"selected_upsells":     req.SelectedUpsells,
+		"upsell_total_cents":   req.UpsellTotalCents,
+		"upsells_paid":         false,
 		"enrolled_at":          time.Now().UTC().Format(time.RFC3339),
 	}
 
@@ -185,6 +193,52 @@ func (h *Handler) EnrollSmoothExit(w http.ResponseWriter, r *http.Request) {
 		enrollJSON, dealID,
 	); err != nil {
 		http.Error(w, "failed to save enrollment", http.StatusInternalServerError)
+		return
+	}
+
+	// If upsells were selected, charge them upfront via Stripe.
+	if req.UpsellTotalCents > 0 && h.stripeKey != "" {
+		stripe.Key = h.stripeKey
+
+		var dealTitle string
+		h.db.QueryRowContext(r.Context(), `SELECT title FROM deals WHERE id = $1`, dealID).Scan(&dealTitle)
+
+		successURL := fmt.Sprintf("%s/smooth-exit/complete?deal_id=%s&upsells=paid", h.frontendURL, dealID)
+		cancelURL := fmt.Sprintf("%s/smooth-exit/survey?deal_id=%s&cancelled=1", h.frontendURL, dealID)
+
+		params := &stripe.CheckoutSessionParams{
+			PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
+			LineItems: []*stripe.CheckoutSessionLineItemParams{
+				{
+					PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+						Currency: stripe.String("usd"),
+						ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+							Name:        stripe.String("Smooth Exit Add-ons"),
+							Description: stripe.String(fmt.Sprintf("Concierge add-ons for: %s", dealTitle)),
+						},
+						UnitAmount: stripe.Int64(int64(req.UpsellTotalCents)),
+					},
+					Quantity: stripe.Int64(1),
+				},
+			},
+			Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
+			SuccessURL: stripe.String(successURL),
+			CancelURL:  stripe.String(cancelURL),
+			Metadata: map[string]string{
+				"deal_id": dealID,
+				"type":    "smooth_exit_upsell",
+			},
+		}
+
+		sess, err := session.New(params)
+		if err != nil {
+			log.Printf("stripe smooth exit upsell checkout error: %v", err)
+			// Enrollment already saved — just return ok without checkout url.
+			respond(w, http.StatusOK, map[string]bool{"ok": true})
+			return
+		}
+
+		respond(w, http.StatusOK, map[string]string{"ok": "true", "checkout_url": sess.URL})
 		return
 	}
 
