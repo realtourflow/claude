@@ -968,7 +968,7 @@ const ROLE_STYLES: Record<string, { badge: string; label: string }> = {
 };
 
 function UserManagement() {
-  const { users, loading } = useUsers();
+  const { users, loading, deactivateUser, activateUser } = useUsers();
 
   const groups = [
     { id: 'agent',  label: 'Agents' },
@@ -983,6 +983,7 @@ function UserManagement() {
   }));
 
   function UserRow({ user }: { user: AppUser }) {
+    const isDeactivated = !!user.deactivatedAt;
     const style = ROLE_STYLES[user.role] ?? ROLE_STYLES.agent;
     const userInitials = initials(user.name);
 
@@ -1013,18 +1014,33 @@ function UserManagement() {
           <span className="text-xs text-gray-400">—</span>
         </td>
         <td className="px-5 py-3">
-          <span className="flex items-center gap-1 text-xs font-medium text-green-600">
-            <ShieldCheck size={13} /> Active
-          </span>
+          {isDeactivated ? (
+            <span className="flex items-center gap-1 text-xs font-medium text-red-400">
+              <UserX size={13} /> Deactivated
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-xs font-medium text-green-600">
+              <ShieldCheck size={13} /> Active
+            </span>
+          )}
         </td>
         <td className="px-5 py-3 text-right">
           <div className="flex items-center justify-end gap-2">
-            <button className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
-              View Deals
-            </button>
-            <button className="flex items-center gap-1 rounded-lg border border-red-100 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors">
-              <UserX size={11} /> Deactivate
-            </button>
+            {isDeactivated ? (
+              <button
+                onClick={() => activateUser(user.id).catch(() => {})}
+                className="flex items-center gap-1 rounded-lg border border-green-200 px-2.5 py-1 text-xs font-medium text-green-600 hover:bg-green-50 transition-colors"
+              >
+                <ShieldCheck size={11} /> Reactivate
+              </button>
+            ) : (
+              <button
+                onClick={() => deactivateUser(user.id).catch(() => {})}
+                className="flex items-center gap-1 rounded-lg border border-red-100 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors"
+              >
+                <UserX size={11} /> Deactivate
+              </button>
+            )}
           </div>
         </td>
       </tr>

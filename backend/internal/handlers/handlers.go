@@ -50,6 +50,8 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Use(auth)
 		r.Post("/users/sync", h.SyncUser)
 		r.Get("/users", h.ListUsers)
+		r.Patch("/users/{userId}/deactivate", h.DeactivateUser)
+		r.Patch("/users/{userId}/activate", h.ActivateUser)
 
 		r.Get("/deals", h.ListDeals)
 		r.Post("/deals", h.CreateDeal)

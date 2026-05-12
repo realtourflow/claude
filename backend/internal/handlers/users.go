@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"realtourflow/internal/middleware"
 	"realtourflow/internal/models"
 )
@@ -62,7 +63,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, email, name, role, phone, created_at
+		SELECT id, email, name, role, phone, created_at, deactivated_at
 		FROM users
 		ORDER BY role, name
 	`)
@@ -73,12 +74,13 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type apiUser struct {
-		ID        string  `json:"id"`
-		Email     string  `json:"email"`
-		Name      string  `json:"name"`
-		Role      string  `json:"role"`
-		Phone     *string `json:"phone,omitempty"`
-		CreatedAt string  `json:"created_at"`
+		ID            string  `json:"id"`
+		Email         string  `json:"email"`
+		Name          string  `json:"name"`
+		Role          string  `json:"role"`
+		Phone         *string `json:"phone,omitempty"`
+		CreatedAt     string  `json:"created_at"`
+		DeactivatedAt *string `json:"deactivated_at,omitempty"`
 	}
 
 	var users []apiUser
@@ -86,7 +88,8 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		var u apiUser
 		var phone sql.NullString
 		var createdAt time.Time
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &phone, &createdAt); err != nil {
+		var deactivatedAt sql.NullTime
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &phone, &createdAt, &deactivatedAt); err != nil {
 			http.Error(w, "failed to scan user", http.StatusInternalServerError)
 			return
 		}
@@ -94,12 +97,70 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 			u.Phone = &phone.String
 		}
 		u.CreatedAt = createdAt.Format(time.RFC3339)
+		if deactivatedAt.Valid {
+			s := deactivatedAt.Time.Format(time.RFC3339)
+			u.DeactivatedAt = &s
+		}
 		users = append(users, u)
 	}
 	if users == nil {
 		users = []apiUser{}
 	}
 	respond(w, http.StatusOK, users)
+}
+
+// DeactivateUser — admin only; sets deactivated_at to NOW().
+func (h *Handler) DeactivateUser(w http.ResponseWriter, r *http.Request) {
+	isAdmin := false
+	for _, role := range middleware.GetRoles(r) {
+		if role == "admin" { isAdmin = true; break }
+	}
+	if !isAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	targetID := chi.URLParam(r, "userId")
+	res, err := h.db.ExecContext(r.Context(),
+		`UPDATE users SET deactivated_at = NOW() WHERE id = $1 AND deactivated_at IS NULL`,
+		targetID,
+	)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "user not found or already deactivated", http.StatusNotFound)
+		return
+	}
+	respond(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// ActivateUser — admin only; clears deactivated_at.
+func (h *Handler) ActivateUser(w http.ResponseWriter, r *http.Request) {
+	isAdmin := false
+	for _, role := range middleware.GetRoles(r) {
+		if role == "admin" { isAdmin = true; break }
+	}
+	if !isAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	targetID := chi.URLParam(r, "userId")
+	res, err := h.db.ExecContext(r.Context(),
+		`UPDATE users SET deactivated_at = NULL WHERE id = $1`,
+		targetID,
+	)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+	respond(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func upsertUser(ctx context.Context, db *sql.DB, auth0ID, email, name string, role models.UserRole) (*models.User, error) {
