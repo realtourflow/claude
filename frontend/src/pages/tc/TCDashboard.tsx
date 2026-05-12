@@ -5,6 +5,7 @@ import { Deal, LoanMilestones } from '../../data/mockDeals';
 import { useDeals } from '../../hooks/useDeals';
 import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType, Contingency } from '../../hooks/useContingencies';
 import { useChecklist, ChecklistAssignee } from '../../hooks/useChecklist';
+import { useAgentTasks } from '../../hooks/useTasks';
 import { usePermission } from '../../permissions/usePermission';
 import { PERMISSIONS } from '../../permissions/permissions';
 import {
@@ -271,13 +272,35 @@ type DeadlineEntry = {
 };
 
 function Deadlines() {
-  const deals       = useMyDeals();
+  const deals            = useMyDeals();
+  const { tasks }        = useAgentTasks();
+  const allContingencies = useAllContingenciesForDeals(deals.map((d) => d.id));
 
-  const taskEntries: DeadlineEntry[] = [];
+  const taskEntries: DeadlineEntry[] = tasks
+    .filter((t) => t.dueDate && t.status !== 'completed')
+    .map((t) => ({
+      id: t.id,
+      dealId: t.dealId,
+      title: t.title,
+      dueDate: t.dueDate!,
+      assignedTo: t.assignedTo ?? 'agent',
+      status: t.status as DeadlineEntry['status'],
+      source: 'task' as const,
+    }));
 
   const checklistEntries: DeadlineEntry[] = [];
 
-  const contingencyEntries: DeadlineEntry[] = [];
+  const contingencyEntries: DeadlineEntry[] = allContingencies
+    .filter((c) => c.status === 'active' && c.deadline)
+    .map((c) => ({
+      id: c.id,
+      dealId: c.dealId,
+      title: c.label,
+      dueDate: c.deadline!,
+      assignedTo: 'tc',
+      status: 'pending' as const,
+      source: 'contingency' as const,
+    }));
 
   const all = [...taskEntries, ...checklistEntries, ...contingencyEntries]
     .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
