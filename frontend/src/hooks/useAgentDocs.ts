@@ -125,3 +125,26 @@ export function useAgentDocs() {
 
   return { docs, loading, refresh: load, uploadDoc, updateDoc, removeDoc, getDownloadUrl };
 }
+
+export function useAgentDocTemplatesForDeal(dealId: string | undefined) {
+  const [templates, setTemplates] = useState<AgentDocTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!dealId) { setLoading(false); return; }
+    setLoading(true);
+    api.get<ApiDoc[]>(`/deals/${dealId}/agent-doc-templates`)
+      .then((raw) => setTemplates(raw.map(fromApi)))
+      .catch(() => setTemplates([]))
+      .finally(() => setLoading(false));
+  }, [dealId]);
+
+  async function getDownloadUrl(id: string): Promise<string> {
+    const { download_url } = await api.get<{ download_url: string }>(
+      `/me/doc-templates/${id}/download-url`,
+    );
+    return download_url;
+  }
+
+  return { templates, loading, getDownloadUrl };
+}

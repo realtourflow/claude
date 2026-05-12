@@ -29,6 +29,19 @@ func (h *Handler) ownsDeaL(r *http.Request, dealID, userID string) (bool, error)
 	return exists, err
 }
 
+// canAccessDeal returns true if the user is the deal's agent OR a participant.
+func (h *Handler) canAccessDeal(r *http.Request, dealID, userID string) (bool, error) {
+	var exists bool
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT EXISTS(
+			SELECT 1 FROM deals WHERE id = $1 AND agent_id = $2
+			UNION
+			SELECT 1 FROM deal_participants WHERE deal_id = $1 AND user_id = $2
+		)
+	`, dealID, userID).Scan(&exists)
+	return exists, err
+}
+
 // GetUploadURL returns a pre-signed S3 PUT URL the browser uses to upload directly.
 func (h *Handler) GetUploadURL(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
@@ -154,7 +167,7 @@ func (h *Handler) ListDocuments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := h.ownsDeaL(r, dealID, userID)
+	ok, err := h.canAccessDeal(r, dealID, userID)
 	if err != nil || !ok {
 		http.Error(w, "deal not found", http.StatusNotFound)
 		return
@@ -208,7 +221,10 @@ func (h *Handler) GetDownloadURL(w http.ResponseWriter, r *http.Request) {
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT d.s3_key FROM documents d
 		JOIN deals ON deals.id = d.deal_id
-		WHERE d.id = $1 AND deals.agent_id = $2
+		WHERE d.id = $1 AND (
+			deals.agent_id = $2
+			OR EXISTS(SELECT 1 FROM deal_participants WHERE deal_id = deals.id AND user_id = $2)
+		)
 	`, docID, userID).Scan(&s3KeyVal)
 	if err != nil {
 		http.Error(w, "document not found", http.StatusNotFound)
@@ -268,4 +284,65 @@ func (h *Handler) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListAgentDocTemplatesForDeal returns the agent's document templates for a deal.
+// Any deal participant (buyer, seller, TC) may call this.
+func (h *Handler) ListAgentDocTemplatesForDeal(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	dealID := chi.URLParam(r, "dealId")
+	userID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	ok, err := h.canAccessDeal(r, dealID, userID)
+	if err != nil || !ok {
+		http.Error(w, "deal not found", http.StatusNotFound)
+		return
+	}
+
+	rows, err := h.db.QueryContext(r.Context(), `
+		SELECT t.id, t.agent_id, t.name, t.doc_type, t.file_name, t.s3_key, t.mime_type, t.file_size, t.notes, t.created_at
+		FROM agent_doc_templates t
+		JOIN deals d ON d.agent_id = t.agent_id
+		WHERE d.id = $1
+		ORDER BY t.created_at DESC
+	`, dealID)
+	if err != nil {
+		http.Error(w, "failed to fetch templates", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type apiTemplate struct {
+		ID        string  `json:"id"`
+		AgentID   string  `json:"agent_id"`
+		Name      string  `json:"name"`
+		DocType   string  `json:"doc_type"`
+		FileName  string  `json:"file_name"`
+		S3Key     string  `json:"s3_key"`
+		MimeType  string  `json:"mime_type"`
+		FileSize  int64   `json:"file_size"`
+		Notes     *string `json:"notes"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+
+	templates := make([]apiTemplate, 0)
+	for rows.Next() {
+		var t apiTemplate
+		if err := rows.Scan(&t.ID, &t.AgentID, &t.Name, &t.DocType, &t.FileName,
+			&t.S3Key, &t.MimeType, &t.FileSize, &t.Notes, &t.CreatedAt); err != nil {
+			continue
+		}
+		templates = append(templates, t)
+	}
+
+	respond(w, http.StatusOK, templates)
 }

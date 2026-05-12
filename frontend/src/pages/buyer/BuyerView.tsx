@@ -17,6 +17,8 @@ import MetroMap from '../../components/MetroMap';
 import VendorDirectory from '../../components/VendorDirectory';
 import { useProperties, TrackedProperty, PropertyStatus } from '../../hooks/useProperties';
 import { useAgentDocStore } from '../../store/agentDocStore';
+import { useAgentDocTemplatesForDeal, DOC_TYPE_LABELS } from '../../hooks/useAgentDocs';
+import { useDocuments, getDownloadUrl as getDealDocDownloadUrl } from '../../hooks/useDocuments';
 import ClientNotifications from '../../components/ClientNotifications';
 import { api } from '../../api/client';
 import { FAST_PASS_UPSELLS, FastPassUpsellId } from '../../data/mockFastPass';
@@ -300,33 +302,87 @@ function MessagesTab({ dealId }: { dealId: string }) {
 
 // ─── Shared: Documents tab ────────────────────────────────────────────────────
 
-const BUYER_DOCS = [
-  { id: 'd1', name: 'Purchase Agreement',   status: 'signed',             date: '2026-02-01' },
-  { id: 'd2', name: 'Inspection Report',    status: 'pending_review',     date: '2026-02-10' },
-  { id: 'd3', name: 'ARIVE Disclosures',    status: 'pending_signature',  date: '2026-02-12' },
-];
-const DOC_STATUS: Record<string, { label: string; style: string }> = {
-  signed:            { label: 'Signed',        style: 'bg-green-100 text-green-700' },
-  pending_review:    { label: 'Review needed', style: 'bg-amber-100 text-amber-700' },
-  pending_signature: { label: 'Sign now',      style: 'bg-red-100 text-red-700' },
-};
+function DocumentsTab({ dealId }: { dealId: string }) {
+  const { templates, loading: tLoading, getDownloadUrl: getTemplateUrl } = useAgentDocTemplatesForDeal(dealId);
+  const { docs, loading: dLoading } = useDocuments(dealId);
+  const [downloading, setDownloading] = useState<string | null>(null);
 
-function DocumentsTab() {
+  async function handleDownload(id: string, isTemplate: boolean) {
+    setDownloading(id);
+    try {
+      const url = isTemplate ? await getTemplateUrl(id) : await getDealDocDownloadUrl(id);
+      window.open(url, '_blank');
+    } catch {
+      // ignore
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  if (tLoading || dLoading) {
+    return <div className="py-6 text-center text-sm text-gray-400">Loading documents…</div>;
+  }
+
+  if (templates.length === 0 && docs.length === 0) {
+    return (
+      <div className="rounded-xl bg-white px-4 py-8 text-center text-sm text-gray-400">
+        No documents yet — your agent will share forms here.
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-2">
-      {BUYER_DOCS.map((doc) => {
-        const s = DOC_STATUS[doc.status];
-        return (
-          <div key={doc.id} className="flex items-center gap-3 rounded-xl bg-white border border-gray-100 px-4 py-3">
-            <FileText size={16} className="flex-shrink-0 text-gray-300" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-brand-navy truncate">{doc.name}</p>
-              <p className="text-[11px] text-gray-400">{doc.date}</p>
-            </div>
-            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${s.style}`}>{s.label}</span>
+    <div className="space-y-4">
+      {templates.length > 0 && (
+        <section>
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">Agent Forms</p>
+          <div className="space-y-2">
+            {templates.map((t) => (
+              <div key={t.id} className="flex items-center gap-3 rounded-xl bg-white border border-gray-100 px-4 py-3">
+                <FileText size={16} className="flex-shrink-0 text-gray-300" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-brand-navy truncate">{t.name}</p>
+                  <p className="text-[11px] text-gray-400">{DOC_TYPE_LABELS[t.docType] ?? t.docType}</p>
+                </div>
+                <button
+                  onClick={() => handleDownload(t.id, true)}
+                  disabled={downloading === t.id}
+                  className="flex items-center gap-1 rounded-lg bg-brand-navy/5 px-2.5 py-1 text-xs font-semibold text-brand-navy hover:bg-brand-navy/10 disabled:opacity-50 transition-colors"
+                >
+                  {downloading === t.id ? <Loader2 size={11} className="animate-spin" /> : <ExternalLink size={11} />}
+                  Open
+                </button>
+              </div>
+            ))}
           </div>
-        );
-      })}
+        </section>
+      )}
+      {docs.length > 0 && (
+        <section>
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">Deal Documents</p>
+          <div className="space-y-2">
+            {docs.map((d) => (
+              <div key={d.id} className="flex items-center gap-3 rounded-xl bg-white border border-gray-100 px-4 py-3">
+                <FileText size={16} className="flex-shrink-0 text-gray-300" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-brand-navy truncate">{d.name}</p>
+                  <p className="text-[11px] text-gray-400">
+                    {new Date(d.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleDownload(d.id, false)}
+                  disabled={downloading === d.id}
+                  className="flex items-center gap-1 rounded-lg bg-brand-navy/5 px-2.5 py-1 text-xs font-semibold text-brand-navy hover:bg-brand-navy/10 disabled:opacity-50 transition-colors"
+                >
+                  {downloading === d.id ? <Loader2 size={11} className="animate-spin" /> : <ExternalLink size={11} />}
+                  Open
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -1662,7 +1718,7 @@ export default function BuyerView() {
             </div>
           )}
           {activeTab === 'messages' && <MessagesTab dealId={deal.id} />}
-          {activeTab === 'documents' && <DocumentsTab />}
+          {activeTab === 'documents' && <DocumentsTab dealId={deal.id} />}
         </>
       )}
 

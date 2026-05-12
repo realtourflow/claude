@@ -71,6 +71,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/deals/{dealId}/messages", h.CreateMessage)
 
 		r.Get("/deals/{dealId}/documents", h.ListDocuments)
+		r.Get("/deals/{dealId}/agent-doc-templates", h.ListAgentDocTemplatesForDeal)
 		r.Post("/deals/{dealId}/documents/upload-url", h.GetUploadURL)
 		r.Post("/deals/{dealId}/documents", h.CreateDocument)
 		r.Get("/documents/{documentId}/download-url", h.GetDownloadURL)
