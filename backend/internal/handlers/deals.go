@@ -316,6 +316,11 @@ func (h *Handler) AdvanceStage(w http.ResponseWriter, r *http.Request) {
 
 	respond(w, http.StatusOK, deal)
 
+	h.logAudit(&userID, "stage_change", &dealID, nil, map[string]any{
+		"from_stage": string(currentStage),
+		"to_stage":   string(req.Stage),
+	})
+
 	// Notify participants of the stage change in background
 	go func() {
 		stageLabelMap := map[models.DealStage]string{

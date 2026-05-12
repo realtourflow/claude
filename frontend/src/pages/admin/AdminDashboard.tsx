@@ -2,7 +2,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useDeals } from '../../hooks/useDeals';
 import { useUsers, AppUser } from '../../hooks/useUsers';
-import { useSystemConfig, usePromoCodes, SystemConfig, CreatePromoCodeInput } from '../../hooks/useAdmin';
+import { useSystemConfig, usePromoCodes, useAuditLog, SystemConfig, CreatePromoCodeInput } from '../../hooks/useAdmin';
 import { Deal } from '../../data/mockDeals';
 import {
   AlertTriangle,
@@ -22,6 +22,8 @@ import {
   Plus,
   Trash2,
   Save,
+  ScrollText,
+  Clock,
 } from 'lucide-react';
 import { FAST_PASS_UPSELLS } from '../../data/mockFastPass';
 import { NEXT_STEP_LABELS, nextStepQualifiesForBridge } from '../../data/mockSmoothExit';
@@ -1594,6 +1596,140 @@ function Promotions() {
   );
 }
 
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+
+const EVENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  stage_change:    { label: 'Stage Change',    color: 'bg-blue-100 text-blue-700' },
+  fee_waive:       { label: 'Fee Waived',      color: 'bg-green-100 text-green-700' },
+  user_deactivate: { label: 'User Deactivated', color: 'bg-red-100 text-red-600' },
+  user_activate:   { label: 'User Activated',  color: 'bg-green-100 text-green-700' },
+  config_update:   { label: 'Config Updated',  color: 'bg-purple-100 text-purple-700' },
+  promo_create:    { label: 'Promo Created',   color: 'bg-amber-100 text-amber-700' },
+  promo_delete:    { label: 'Promo Deleted',   color: 'bg-red-100 text-red-600' },
+};
+
+const EVENT_TYPE_OPTIONS = [
+  { value: '', label: 'All Events' },
+  { value: 'stage_change',    label: 'Stage Changes' },
+  { value: 'fee_waive',       label: 'Fee Waives' },
+  { value: 'user_deactivate', label: 'User Deactivations' },
+  { value: 'user_activate',   label: 'User Activations' },
+  { value: 'config_update',   label: 'Config Updates' },
+  { value: 'promo_create',    label: 'Promo Creations' },
+  { value: 'promo_delete',    label: 'Promo Deletions' },
+];
+
+function describeEntry(e: ReturnType<typeof useAuditLog>['entries'][number]): string {
+  const actor = e.actorName ?? 'Unknown';
+  const deal = e.dealTitle ? ` on deal "${e.dealTitle}"` : '';
+  switch (e.eventType) {
+    case 'stage_change': {
+      const from = (e.metadata?.from_stage as string | null)?.replace(/_/g, ' ') ?? '?';
+      const to = (e.metadata?.to_stage as string | null)?.replace(/_/g, ' ') ?? '?';
+      return `${actor} moved${deal} from ${from} → ${to}`;
+    }
+    case 'fee_waive':       return `${actor} waived the closing fee${deal}`;
+    case 'user_deactivate': return `${actor} deactivated a user`;
+    case 'user_activate':   return `${actor} reactivated a user`;
+    case 'config_update':   return `${actor} updated system config`;
+    case 'promo_create': {
+      const code = e.metadata?.code as string | null;
+      return `${actor} created promo code${code ? ` "${code}"` : ''}`;
+    }
+    case 'promo_delete': return `${actor} deleted a promo code`;
+    default: return `${actor} performed ${e.eventType}`;
+  }
+}
+
+function AuditLog() {
+  const [filter, setFilter] = useState('');
+  const { entries, total, loading } = useAuditLog(filter || undefined);
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold text-brand-navy">Audit Log</h1>
+        <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Loading…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-7">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-navy">Audit Log</h1>
+          <p className="text-sm text-gray-400 mt-0.5">
+            {total} event{total !== 1 ? 's' : ''} — stage transitions, fee waives, user changes, config edits
+          </p>
+        </div>
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-navy focus:outline-none"
+        >
+          {EVENT_TYPE_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="rounded-xl bg-white px-5 py-10 text-center shadow-sm">
+          <ScrollText size={24} className="mx-auto mb-3 text-gray-300" />
+          <p className="text-gray-400 text-sm">No audit events yet</p>
+        </div>
+      ) : (
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-400">
+                <th className="px-5 py-3">Time</th>
+                <th className="px-5 py-3">Event</th>
+                <th className="px-5 py-3">Description</th>
+                <th className="px-5 py-3">Actor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => {
+                const typeInfo = EVENT_TYPE_LABELS[e.eventType] ?? { label: e.eventType, color: 'bg-gray-100 text-gray-500' };
+                const ts = new Date(e.createdAt);
+                return (
+                  <tr key={e.id} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
+                    <td className="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        <Clock size={11} />
+                        <span>{ts.toLocaleDateString()}</span>
+                        <span className="text-gray-300">{ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide whitespace-nowrap ${typeInfo.color}`}>
+                        {typeInfo.label}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-sm text-gray-700">{describeEntry(e)}</td>
+                    <td className="px-5 py-3">
+                      {e.actorName ? (
+                        <div>
+                          <div className="text-xs font-medium text-brand-navy">{e.actorName}</div>
+                          {e.actorEmail && <div className="text-[10px] text-gray-400">{e.actorEmail}</div>}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-300 italic">system</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Coming Soon placeholder ───────────────────────────────────────────────────
 
 function ComingSoon({ title }: { title: string }) {
@@ -1636,6 +1772,7 @@ export default function AdminDashboard() {
     case 'metro':       return <ComingSoon title="Metro View" />;
     case 'promotions':  return <Promotions />;
     case 'config':      return <AdminSystemConfig />;
+    case 'audit':       return <AuditLog />;
     default:            return <PipelineOverview deals={deals} />;
   }
 }

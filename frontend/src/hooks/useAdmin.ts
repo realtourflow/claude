@@ -90,6 +90,64 @@ function apiToPromoCode(raw: Record<string, unknown>): PromoCode {
   };
 }
 
+// ─── Audit Log ─────────────────────────────────────────────────────────────────
+
+export type AuditEntry = {
+  id: string;
+  actorId: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  eventType: string;
+  dealId: string | null;
+  dealTitle: string | null;
+  targetId: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+type AuditLogResponse = { entries: AuditEntry[]; total: number };
+
+function apiToAuditEntry(raw: Record<string, unknown>): AuditEntry {
+  return {
+    id: raw.id as string,
+    actorId: (raw.actor_id as string | null) ?? null,
+    actorName: (raw.actor_name as string | null) ?? null,
+    actorEmail: (raw.actor_email as string | null) ?? null,
+    eventType: raw.event_type as string,
+    dealId: (raw.deal_id as string | null) ?? null,
+    dealTitle: (raw.deal_title as string | null) ?? null,
+    targetId: (raw.target_id as string | null) ?? null,
+    metadata: (raw.metadata as Record<string, unknown> | null) ?? null,
+    createdAt: raw.created_at as string,
+  };
+}
+
+export function useAuditLog(eventTypeFilter?: string) {
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const qs = eventTypeFilter ? `?event_type=${encodeURIComponent(eventTypeFilter)}&limit=200` : '?limit=200';
+      const data = await api.get<Record<string, unknown>>(`/admin/audit-log${qs}`);
+      const resp = data as unknown as AuditLogResponse;
+      setEntries((resp.entries ?? []).map((e) => apiToAuditEntry(e as unknown as Record<string, unknown>)));
+      setTotal(resp.total ?? 0);
+    } catch {
+      setError('Failed to load audit log');
+    } finally {
+      setLoading(false);
+    }
+  }, [eventTypeFilter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return { entries, total, loading, error };
+}
+
 export type CreatePromoCodeInput = {
   code: string;
   discountType: 'pct' | 'fixed';

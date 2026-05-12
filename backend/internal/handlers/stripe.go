@@ -226,4 +226,8 @@ func (h *Handler) WaiveFee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusOK, map[string]string{"status": "waived"})
+
+	if actorID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject); err == nil {
+		h.logAudit(&actorID, "fee_waive", &dealID, nil, nil)
+	}
 }

@@ -87,6 +87,8 @@ func (h *Handler) PutSystemConfig(w http.ResponseWriter, r *http.Request) {
 	var cfg any
 	json.Unmarshal(raw, &cfg)
 	respond(w, http.StatusOK, map[string]any{"config": cfg, "updated_at": updatedAt.Format(time.RFC3339)})
+
+	h.logAudit(&userID, "config_update", nil, nil, nil)
 }
 
 // ─── Promo Codes ─────────────────────────────────────────────────────────────
@@ -214,6 +216,8 @@ func (h *Handler) CreatePromoCode(w http.ResponseWriter, r *http.Request) {
 	}
 	c.CreatedAt = createdAt.Format(time.RFC3339)
 	respond(w, http.StatusCreated, c)
+
+	h.logAudit(&userID, "promo_create", nil, &c.ID, map[string]any{"code": c.Code})
 }
 
 // DeletePromoCode removes a promo code (admin only).
@@ -222,6 +226,7 @@ func (h *Handler) DeletePromoCode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	claims := middleware.GetClaims(r)
 
 	codeID := chi.URLParam(r, "codeId")
 	res, err := h.db.ExecContext(r.Context(), `DELETE FROM promo_codes WHERE id = $1`, codeID)
@@ -234,4 +239,10 @@ func (h *Handler) DeletePromoCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+
+	if claims != nil {
+		if actorID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject); err == nil {
+			h.logAudit(&actorID, "promo_delete", nil, &codeID, nil)
+		}
+	}
 }

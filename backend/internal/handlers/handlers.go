@@ -147,6 +147,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Get("/admin/promo-codes", h.ListPromoCodes)
 		r.Post("/admin/promo-codes", h.CreatePromoCode)
 		r.Delete("/admin/promo-codes/{codeId}", h.DeletePromoCode)
+		r.Get("/admin/audit-log", h.ListAuditLog)
 	})
 
 	return r

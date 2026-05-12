@@ -25,6 +25,7 @@ import {
   LogOut,
   Bell,
   X,
+  ScrollText,
   type LucideIcon,
 } from 'lucide-react';
 import InviteModal from '../InviteModal';
@@ -131,6 +132,7 @@ const ADMIN_NAV = [
   { label: 'User Management', icon: Users, href: '/admin/users' },
   { label: 'Promotions', icon: Tag, href: '/admin/promotions' },
   { label: 'System Config', icon: Sliders, href: '/admin/config' },
+  { label: 'Audit Log', icon: ScrollText, href: '/admin/audit' },
   { label: 'Settings', icon: Settings, href: '/admin/settings' },
 ];
 

@@ -111,6 +111,7 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 // DeactivateUser — admin only; sets deactivated_at to NOW().
 func (h *Handler) DeactivateUser(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
 	isAdmin := false
 	for _, role := range middleware.GetRoles(r) {
 		if role == "admin" { isAdmin = true; break }
@@ -134,10 +135,17 @@ func (h *Handler) DeactivateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusOK, map[string]bool{"ok": true})
+
+	if claims != nil {
+		if actorID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject); err == nil {
+			h.logAudit(&actorID, "user_deactivate", nil, &targetID, nil)
+		}
+	}
 }
 
 // ActivateUser — admin only; clears deactivated_at.
 func (h *Handler) ActivateUser(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
 	isAdmin := false
 	for _, role := range middleware.GetRoles(r) {
 		if role == "admin" { isAdmin = true; break }
@@ -161,6 +169,12 @@ func (h *Handler) ActivateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusOK, map[string]bool{"ok": true})
+
+	if claims != nil {
+		if actorID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject); err == nil {
+			h.logAudit(&actorID, "user_activate", nil, &targetID, nil)
+		}
+	}
 }
 
 func upsertUser(ctx context.Context, db *sql.DB, auth0ID, email, name string, role models.UserRole) (*models.User, error) {
