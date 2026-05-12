@@ -27,7 +27,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { FAST_PASS_UPSELLS } from '../../data/mockFastPass';
-import { NEXT_STEP_LABELS, nextStepQualifiesForBridge } from '../../data/mockSmoothExit';
+import { NEXT_STEP_LABELS, SMOOTH_EXIT_UPSELLS, nextStepQualifiesForBridge } from '../../data/mockSmoothExit';
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -689,6 +689,9 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
             <div className="text-xs text-gray-400 truncate">
               {d.property.address}, {d.property.city}
             </div>
+            {d.agentName && (
+              <div className="text-[10px] text-gray-300 mt-0.5">Agent: {d.agentName}</div>
+            )}
           </div>
           <div className="text-right flex-shrink-0">
             {fp && (
@@ -757,6 +760,9 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
     );
   }
 
+  const allFpDeals = deals.filter((d) => d.fastPass);
+  const totalRevenue = allFpDeals.reduce((sum, d) => sum + (d.fastPass?.totalPaid ?? 0), 0);
+
   return (
     <div className="space-y-7">
       <div>
@@ -764,6 +770,22 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
         <p className="text-sm text-gray-400 mt-0.5">
           Deals enrolled in the Mountain Mortgage Fast Pass program
         </p>
+      </div>
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl bg-white p-4 shadow-sm text-center">
+          <p className="text-2xl font-black text-brand-navy">{allFpDeals.length}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Total Enrolled</p>
+        </div>
+        <div className="rounded-xl bg-white p-4 shadow-sm text-center">
+          <p className="text-2xl font-black text-green-700">${totalRevenue.toLocaleString()}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Total Paid</p>
+        </div>
+        <div className="rounded-xl bg-white p-4 shadow-sm text-center">
+          <p className="text-2xl font-black text-amber-600">{awaitingCollection.length}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Awaiting Collection</p>
+        </div>
       </div>
 
       {fpDeals.length === 0 && awaitingCollection.length === 0 ? (
@@ -862,9 +884,13 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
 // ─── Smooth Exit ──────────────────────────────────────────────────────────────
 
 function SmoothExitQueue({ deals }: { deals: Deal[] }) {
-  const seDeals = deals.filter((d) => d.smoothExit && d.stage !== 'post_close');
+  const allSeDeals = deals.filter((d) => d.smoothExit);
+  const seDeals = allSeDeals.filter((d) => d.stage !== 'post_close');
+  const completed = allSeDeals.filter((d) => d.stage === 'post_close');
   const pending = seDeals.filter((d) => d.smoothExit?.status === 'pending');
   const active = seDeals.filter((d) => d.smoothExit?.status === 'active');
+  const totalFees = allSeDeals.reduce((sum, d) => sum + (d.smoothExit?.fee ?? 0), 0);
+  const totalUpsells = allSeDeals.reduce((sum, d) => sum + Math.round((d.smoothExit?.upsellTotalCents ?? 0) / 100), 0);
 
   function SECard({ d }: { d: Deal }) {
     const se = d.smoothExit!;
@@ -875,10 +901,10 @@ function SmoothExitQueue({ deals }: { deals: Deal[] }) {
         <div className="flex items-center gap-3 px-5 py-4">
           <span className="text-xl flex-shrink-0">🚪</span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-brand-navy text-sm">{d.clientName}</span>
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${se.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700'}`}>
-                {se.status === 'pending' ? 'Pending' : 'Active'}
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${se.status === 'pending' ? 'bg-amber-100 text-amber-700' : se.status === 'complete' ? 'bg-gray-100 text-gray-500' : 'bg-purple-100 text-purple-700'}`}>
+                {se.status === 'pending' ? 'Pending' : se.status === 'complete' ? 'Complete' : 'Active'}
               </span>
               {qualifies && (
                 <span className="rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-bold text-purple-600">
@@ -889,6 +915,9 @@ function SmoothExitQueue({ deals }: { deals: Deal[] }) {
             <div className="text-xs text-gray-400 truncate">
               {d.property.address}, {d.property.city}
             </div>
+            {d.agentName && (
+              <div className="text-[10px] text-gray-300 mt-0.5">Agent: {d.agentName}</div>
+            )}
           </div>
           <div className="text-right flex-shrink-0">
             <div className="text-sm font-black text-brand-navy">${se.fee.toLocaleString()}</div>
@@ -900,6 +929,27 @@ function SmoothExitQueue({ deals }: { deals: Deal[] }) {
             </button>
           )}
         </div>
+        {(se.selectedUpsells && se.selectedUpsells.length > 0) && (
+          <div className="border-t border-gray-50 px-5 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-300">Add-ons</div>
+              {se.upsellsPaid ? (
+                <span className="flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-bold text-green-700">
+                  <Check size={9} strokeWidth={3} /> Paid
+                </span>
+              ) : (
+                <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-600">Unpaid</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {SMOOTH_EXIT_UPSELLS.filter((u) => se.selectedUpsells!.includes(u.id)).map((u) => (
+                <span key={u.id} className="flex items-center gap-1 rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700">
+                  <Check size={9} strokeWidth={3} /> {u.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         {se.surveyAnswers && (
           <div className="border-t border-gray-50 px-5 py-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
             <div>
@@ -935,7 +985,23 @@ function SmoothExitQueue({ deals }: { deals: Deal[] }) {
         <p className="text-sm text-gray-400 mt-0.5">Seller concierge enrollments — move-out coordination and bridge financing</p>
       </div>
 
-      {seDeals.length === 0 ? (
+      {/* Summary stats */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl bg-white p-4 shadow-sm text-center">
+          <p className="text-2xl font-black text-brand-navy">{allSeDeals.length}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Total Enrolled</p>
+        </div>
+        <div className="rounded-xl bg-white p-4 shadow-sm text-center">
+          <p className="text-2xl font-black text-purple-700">${totalFees.toLocaleString()}</p>
+          <p className="text-xs text-gray-400 mt-0.5">1% Fees Due</p>
+        </div>
+        <div className="rounded-xl bg-white p-4 shadow-sm text-center">
+          <p className="text-2xl font-black text-green-700">${totalUpsells.toLocaleString()}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Upsell Revenue</p>
+        </div>
+      </div>
+
+      {allSeDeals.length === 0 ? (
         <div className="rounded-xl bg-white px-5 py-10 text-center text-gray-400 shadow-sm">
           No active Smooth Exit enrollments
         </div>
@@ -954,6 +1020,12 @@ function SmoothExitQueue({ deals }: { deals: Deal[] }) {
             <section>
               <h2 className="mb-3 text-xs font-bold uppercase tracking-wider text-gray-400">Active ({active.length})</h2>
               <div className="space-y-3">{active.map((d) => <SECard key={d.id} d={d} />)}</div>
+            </section>
+          )}
+          {completed.length > 0 && (
+            <section>
+              <h2 className="mb-3 text-xs font-bold uppercase tracking-wider text-gray-400">Closed ({completed.length})</h2>
+              <div className="space-y-3">{completed.map((d) => <SECard key={d.id} d={d} />)}</div>
             </section>
           )}
         </>

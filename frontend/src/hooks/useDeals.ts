@@ -48,6 +48,9 @@ type SmoothExitApiData = {
   estimated_sale_price?: number;
   fee_cents?: number;
   enrolled_at?: string;
+  selected_upsells?: string[];
+  upsell_total_cents?: number;
+  upsells_paid?: boolean;
 };
 
 function fastPassFromApi(d: FastPassApiData): FastPassEnrollment {
@@ -69,6 +72,9 @@ function smoothExitFromApi(d: SmoothExitApiData): SmoothExitEnrollment {
     estimatedSalePrice: salePrice,
     fee: Math.round((d.fee_cents ?? salePrice * 0.01)),
     buyingNext: false,
+    selectedUpsells: d.selected_upsells ?? [],
+    upsellTotalCents: d.upsell_total_cents ?? 0,
+    upsellsPaid: d.upsells_paid ?? false,
   };
 }
 

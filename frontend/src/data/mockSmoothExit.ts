@@ -57,6 +57,9 @@ export type SmoothExitEnrollment = {
   buyingNext: boolean;
   nextStep?: SmoothExitNextStep;
   surveyAnswers?: SmoothExitSurveyAnswers;
+  selectedUpsells?: string[];
+  upsellTotalCents?: number;
+  upsellsPaid?: boolean;
 };
 
 export function calcSmoothExitFee(salePrice: number): number {
