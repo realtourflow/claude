@@ -16,6 +16,7 @@ import {
 import MetroMap from '../../components/MetroMap';
 import VendorDirectory from '../../components/VendorDirectory';
 import { useProperties, TrackedProperty, PropertyStatus } from '../../hooks/useProperties';
+import { useMLSListings, MLSListing } from '../../hooks/useMLS';
 import { useAgentDocStore } from '../../store/agentDocStore';
 import { useAgentDocTemplatesForDeal, DOC_TYPE_LABELS } from '../../hooks/useAgentDocs';
 import { useDocuments, getDownloadUrl as getDealDocDownloadUrl } from '../../hooks/useDocuments';
@@ -805,6 +806,175 @@ function BAASigningModal({ deal, agentId, onClose, onSigned }: {
   );
 }
 
+// ─── MLS Browser ─────────────────────────────────────────────────────────────
+
+function MLSListingCard({ listing, onAdd }: { listing: MLSListing; onAdd: (l: MLSListing) => void }) {
+  const photo = listing.photos?.[0];
+  const price = listing.listPrice > 0
+    ? `$${listing.listPrice.toLocaleString()}`
+    : 'Price unavailable';
+  const beds = listing.property.bedrooms;
+  const baths = listing.property.bathsFull;
+  const sqft = listing.property.area > 0 ? Math.round(listing.property.area).toLocaleString() : null;
+  const dom = listing.mls.daysOnMarket;
+
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white overflow-hidden shadow-sm">
+      {photo ? (
+        <img src={photo} alt={listing.address.full} className="w-full h-36 object-cover" />
+      ) : (
+        <div className="w-full h-36 bg-gray-100 flex items-center justify-center">
+          <Home size={24} className="text-gray-300" />
+        </div>
+      )}
+      <div className="p-3">
+        <div className="flex items-start justify-between gap-1">
+          <div>
+            <p className="font-black text-brand-navy text-sm leading-tight">{price}</p>
+            <p className="text-xs text-gray-500 mt-0.5 leading-tight truncate">{listing.address.full}</p>
+            <p className="text-xs text-gray-400">{listing.address.city}, {listing.address.state}</p>
+          </div>
+          {dom <= 7 && (
+            <span className="flex-shrink-0 rounded-full bg-green-100 px-1.5 py-0.5 text-[9px] font-bold text-green-700 uppercase">
+              New
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-2 text-[11px] text-gray-500">
+          {beds > 0 && <span>{beds} bd</span>}
+          {baths > 0 && <span>· {baths} ba</span>}
+          {sqft && <span>· {sqft} sqft</span>}
+          <span className="ml-auto text-gray-300">{dom}d</span>
+        </div>
+        <button
+          onClick={() => onAdd(listing)}
+          className="mt-2 w-full rounded-lg bg-brand-navy/5 py-1.5 text-xs font-semibold text-brand-navy hover:bg-brand-navy/10 transition-colors"
+        >
+          + Add to my list
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MLSBrowser({ deal, onAddProperty }: {
+  deal: Deal;
+  onAddProperty: (address: string, city: string, price: number, sourceUrl?: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [cityInput, setCityInput] = useState(deal.property.city ?? '');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [minBeds, setMinBeds] = useState('');
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const { listings, loading, error, search } = useMLSListings(deal.id);
+
+  function handleSearch() {
+    search({
+      cities: cityInput.trim() ? [cityInput.trim()] : undefined,
+      minPrice: minPrice ? parseInt(minPrice.replace(/\D/g, ''), 10) : undefined,
+      maxPrice: maxPrice ? parseInt(maxPrice.replace(/\D/g, ''), 10) : undefined,
+      minBeds: minBeds ? parseInt(minBeds, 10) : undefined,
+    });
+  }
+
+  function handleAdd(l: MLSListing) {
+    onAddProperty(l.address.full, l.address.city, l.listPrice);
+    setAddedIds((prev) => new Set(prev).add(l.mlsId));
+  }
+
+  return (
+    <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-4 py-3"
+      >
+        <div className="flex items-center gap-2">
+          <Building2 size={15} className="text-brand-navy" />
+          <span className="text-sm font-bold text-brand-navy">Browse live MLS listings</span>
+        </div>
+        <span className="text-xs text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-50 px-4 pb-4">
+          {/* Search filters */}
+          <div className="pt-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={cityInput}
+                onChange={(e) => setCityInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                placeholder="City"
+                className="col-span-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 outline-none focus:border-brand-navy/30"
+              />
+              <input
+                value={minPrice}
+                onChange={(e) => setMinPrice(e.target.value)}
+                placeholder="Min price"
+                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 outline-none focus:border-brand-navy/30"
+              />
+              <input
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(e.target.value)}
+                placeholder="Max price"
+                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 outline-none focus:border-brand-navy/30"
+              />
+              <select
+                value={minBeds}
+                onChange={(e) => setMinBeds(e.target.value)}
+                className="col-span-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-800 outline-none focus:border-brand-navy/30"
+              >
+                <option value="">Any bedrooms</option>
+                <option value="1">1+ bed</option>
+                <option value="2">2+ beds</option>
+                <option value="3">3+ beds</option>
+                <option value="4">4+ beds</option>
+              </select>
+            </div>
+            <button
+              onClick={handleSearch}
+              disabled={loading}
+              className="w-full rounded-lg bg-brand-navy py-2 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Searching…' : 'Search listings'}
+            </button>
+          </div>
+
+          {error && (
+            <p className="mt-3 text-xs text-red-500">{error === 'agent has not connected MLS' ? 'Your agent hasn\'t connected their MLS yet.' : error}</p>
+          )}
+
+          {listings.length > 0 && (
+            <div className="mt-4">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">
+                {listings.length} listing{listings.length !== 1 ? 's' : ''} found
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {listings.map((l) => (
+                  addedIds.has(l.mlsId) ? (
+                    <div key={l.mlsId} className="rounded-xl border border-green-200 bg-green-50 p-3 flex items-center justify-center">
+                      <span className="flex items-center gap-1 text-xs font-semibold text-green-700">
+                        <CheckCircle2 size={13} /> Added
+                      </span>
+                    </div>
+                  ) : (
+                    <MLSListingCard key={l.mlsId} listing={l} onAdd={handleAdd} />
+                  )
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!loading && !error && listings.length === 0 && (
+            <p className="mt-3 text-center text-xs text-gray-300">Search above to see live listings</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Active Search Card ───────────────────────────────────────────────────────
 
 function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () => void }) {
@@ -979,6 +1149,25 @@ function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () 
             onOfferRequest={() => handleOfferInterest(prop.id, prop.address)} />
         ))}
       </div>
+
+      {/* Live MLS listings browser */}
+      <MLSBrowser
+        deal={deal}
+        onAddProperty={(address, city, price) =>
+          addProperty({
+            dealId: deal.id,
+            address,
+            city,
+            state: '',
+            price,
+            beds: 0, baths: 0, sqft: 0,
+            thumbnailUrl: '',
+            sourceUrl: '',
+            status: 'interested',
+            addedBy: 'buyer',
+          }).catch(() => {})
+        }
+      />
 
       {/* BAA signing modal */}
       {showBAAModal && (

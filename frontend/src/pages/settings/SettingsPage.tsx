@@ -14,6 +14,7 @@ import {
 } from '../../data/mockVendors';
 import { useVendors, Vendor, VendorInput } from '../../hooks/useVendors';
 import { useSettings } from '../../hooks/useSettings';
+import { useMLSConnection } from '../../hooks/useMLS';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
@@ -605,9 +606,158 @@ function NotificationsSection() {
 
 // ─── Integrations Section ─────────────────────────────────────────────────────
 
+function MLSCard() {
+  const { connected, loading, saveMLS, disconnectMLS } = useMLSConnection();
+  const [expanded, setExpanded] = useState(false);
+  const [keyInput, setKeyInput] = useState('');
+  const [secretInput, setSecretInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
+  async function handleSave() {
+    if (!keyInput.trim() || !secretInput.trim() || saving) return;
+    setSaving(true);
+    setSaveErr('');
+    try {
+      await saveMLS(keyInput.trim(), secretInput.trim());
+      setSaved(true);
+      setExpanded(false);
+      setKeyInput('');
+      setSecretInput('');
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e: any) {
+      setSaveErr(e?.message ?? 'Failed to save — check your credentials');
+    }
+    setSaving(false);
+  }
+
+  async function handleDisconnect() {
+    await disconnectMLS().catch(() => {});
+    setConfirmDisconnect(false);
+  }
+
+  return (
+    <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
+      <div className="flex items-start gap-4 p-5">
+        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-gray-50 text-2xl">
+          🏠
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-brand-navy text-sm">SimplyRETS MLS</span>
+            {!loading && connected && (
+              <span className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
+                <Check size={9} strokeWidth={3} /> Connected
+              </span>
+            )}
+            {saved && (
+              <span className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
+                <Check size={9} strokeWidth={3} /> Saved!
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-gray-400 leading-relaxed">
+            Connect your SimplyRETS account to show live MLS listings to buyers in their portal. Buyers can browse active listings and add homes to their tracked list.
+          </p>
+          {!loading && connected && (
+            <p className="mt-1 text-xs text-green-600 font-medium">Live MLS listings are active in all buyer portals</p>
+          )}
+        </div>
+      </div>
+
+      {/* Credential form */}
+      {expanded && (
+        <div className="border-t border-gray-50 px-5 py-4 space-y-3 bg-gray-50/50">
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            Enter your SimplyRETS API credentials. Find them at{' '}
+            <span className="font-semibold text-brand-navy">app.simplyrets.com</span> under your app settings.
+          </p>
+          <div className="space-y-2">
+            <input
+              type="text"
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+              placeholder="API Key (username)"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+            />
+            <input
+              type="password"
+              value={secretInput}
+              onChange={(e) => setSecretInput(e.target.value)}
+              placeholder="API Secret (password)"
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+            />
+          </div>
+          {saveErr && <p className="text-xs text-red-500">{saveErr}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              disabled={!keyInput.trim() || !secretInput.trim() || saving}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-navy px-4 py-2 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-40"
+            >
+              <Check size={12} /> {saving ? 'Verifying…' : 'Save & connect'}
+            </button>
+            <button
+              onClick={() => { setExpanded(false); setKeyInput(''); setSecretInput(''); setSaveErr(''); }}
+              className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-500 hover:bg-gray-100 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-gray-50 px-5 py-3 flex items-center justify-between">
+        {!loading && !connected && !expanded && (
+          <button
+            onClick={() => setExpanded(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-navy/90 transition-colors"
+          >
+            <ExternalLink size={11} /> Connect SimplyRETS
+          </button>
+        )}
+        {!loading && connected && !confirmDisconnect && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-500 hover:bg-gray-50 transition-colors"
+            >
+              <Pencil size={11} /> Update credentials
+            </button>
+            <button
+              onClick={() => setConfirmDisconnect(true)}
+              className="text-xs text-gray-300 hover:text-red-400 transition-colors"
+            >
+              Disconnect
+            </button>
+          </div>
+        )}
+        {confirmDisconnect && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Remove MLS connection?</span>
+            <button onClick={handleDisconnect} className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-600">
+              Disconnect
+            </button>
+            <button onClick={() => setConfirmDisconnect(false)} className="text-xs text-gray-400 hover:text-gray-600">
+              Cancel
+            </button>
+          </div>
+        )}
+        {loading && <span className="text-xs text-gray-300">Loading…</span>}
+        {!loading && !connected && !expanded && (
+          <span className="text-xs text-gray-300">Live MLS listings for buyer portals</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function IntegrationsSection() {
   const { activeUser } = useAuthStore();
   const isMountainMortgage = activeUser?.groupId === 'admin' || activeUser?.id === 'agent-sarah';
+  const isAgent = activeUser?.groupId === 'agent' || activeUser?.groupId === 'admin';
 
   const integrations = [
     {
@@ -647,6 +797,9 @@ function IntegrationsSection() {
 
   return (
     <div className="space-y-3 max-w-lg">
+      {/* SimplyRETS MLS — agents only, real connection */}
+      {isAgent && <MLSCard />}
+
       {integrations.map(({ name, logo, description, status, cta, ctaStyle, connectedNote }) => (
         <div key={name} className="rounded-2xl bg-white shadow-sm overflow-hidden">
           <div className="flex items-start gap-4 p-5">

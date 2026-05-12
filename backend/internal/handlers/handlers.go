@@ -93,6 +93,11 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Delete("/me/tc", h.DeleteMyTC)
 		r.Get("/me/agents", h.ListMyAgents)
 
+		r.Get("/me/mls", h.GetMyMLS)
+		r.Patch("/me/mls", h.PatchMyMLS)
+
+		r.Get("/deals/{dealId}/listings/search", h.SearchListings)
+
 		r.Get("/me/doc-templates", h.ListAgentDocs)
 		r.Post("/me/doc-templates/upload-url", h.GetAgentDocUploadURL)
 		r.Post("/me/doc-templates", h.CreateAgentDoc)
