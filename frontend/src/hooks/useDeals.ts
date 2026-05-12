@@ -24,6 +24,7 @@ export type ApiDeal = {
   smooth_exit?: SmoothExitApiData | null;
   pre_approved?: boolean;
   baa_signed?: boolean;
+  commission_pct?: number;
   created_at: string;
   updated_at: string;
   agent_name?: string;
@@ -152,7 +153,8 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     },
     flags: d.arive_linked ? ['mountain_mortgage'] : [],
     status: 'active',
-    estimatedCommission: Math.round(price * 0.03),
+    estimatedCommission: Math.round(price * ((d.commission_pct ?? 3) / 100)),
+    commissionPct: d.commission_pct ?? 3,
     agentName: d.agent_name,
     agentEmail: d.agent_email,
     agentPhone: d.agent_phone,

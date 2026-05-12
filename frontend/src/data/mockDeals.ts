@@ -114,6 +114,7 @@ export type Deal = {
   /** Vendors assigned to this file — lender, title company, inspector. */
   vendors?: DealVendors;
   estimatedCommission: number;
+  commissionPct?: number;
   notes?: string;
   fastPass?: FastPassEnrollment;
   smoothExit?: SmoothExitEnrollment;

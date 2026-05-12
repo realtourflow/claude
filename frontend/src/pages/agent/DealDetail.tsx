@@ -1467,6 +1467,92 @@ function PropertyTrackingCard({ deal }: { deal: Deal }) {
   );
 }
 
+function CommissionRateField({ deal, onUpdated }: { deal: Deal; onUpdated: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [pct, setPct] = useState(String(deal.commissionPct ?? 3));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function handleSave() {
+    const val = parseFloat(pct);
+    if (isNaN(val) || val <= 0 || val > 20) return;
+    setSaving(true);
+    try {
+      await api.patch(`/deals/${deal.id}/commission`, { commission_pct: val });
+      setEditing(false);
+      setSaved(true);
+      onUpdated();
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // keep editing open
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const price = deal.property.price ?? 0;
+  const previewCommission = Math.round(price * (parseFloat(pct) / 100));
+
+  return (
+    <>
+      <div>
+        <dt className="text-gray-400 text-xs flex items-center gap-1">
+          Est. Commission
+          {saved && <span className="text-green-600 text-[10px] font-semibold">Saved</span>}
+        </dt>
+        <dd className="font-semibold text-green-700 mt-0.5">
+          {editing ? (
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <input
+                type="number"
+                step="0.1"
+                min="0.1"
+                max="20"
+                value={pct}
+                onChange={(e) => setPct(e.target.value)}
+                className="w-16 rounded border border-gray-300 px-1.5 py-0.5 text-xs text-brand-navy focus:outline-none focus:border-brand-navy"
+                autoFocus
+              />
+              <span className="text-xs text-gray-400">%</span>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="rounded bg-brand-navy px-2 py-0.5 text-[10px] font-semibold text-white disabled:opacity-50"
+              >
+                {saving ? '…' : 'Save'}
+              </button>
+              <button
+                onClick={() => { setEditing(false); setPct(String(deal.commissionPct ?? 3)); }}
+                className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-gray-400 hover:text-gray-600"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setEditing(true)}
+              className="group flex items-center gap-1 hover:text-green-800 transition-colors"
+              title="Edit commission rate"
+            >
+              ${deal.estimatedCommission.toLocaleString()}
+              <span className="text-[10px] font-normal text-gray-400 group-hover:text-green-700">
+                ({deal.commissionPct ?? 3}%)
+              </span>
+              <Pencil size={10} className="text-gray-300 group-hover:text-green-600 transition-colors" />
+            </button>
+          )}
+        </dd>
+      </div>
+      {editing && !isNaN(parseFloat(pct)) && price > 0 && (
+        <div>
+          <dt className="text-gray-400 text-xs">Preview at {pct}%</dt>
+          <dd className="font-semibold text-green-600 mt-0.5">${previewCommission.toLocaleString()}</dd>
+        </div>
+      )}
+    </>
+  );
+}
+
 function InternalNotesCard({ deal }: { deal: Deal }) {
   const [editing, setEditing] = useState(false);
   const [notes, setNotes] = useState(deal.notes ?? '');
@@ -1707,10 +1793,7 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
               <dd className="font-semibold text-brand-navy mt-0.5">{deal.timeline.closingDate}</dd>
             </div>
           )}
-          <div>
-            <dt className="text-gray-400 text-xs">Est. Commission</dt>
-            <dd className="font-semibold text-green-700 mt-0.5">${deal.estimatedCommission.toLocaleString()}</dd>
-          </div>
+          <CommissionRateField deal={deal} onUpdated={onRefresh ?? (() => {})} />
           <div>
             <dt className="text-gray-400 text-xs">Created</dt>
             <dd className="font-semibold text-brand-navy mt-0.5">

@@ -92,7 +92,7 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 		       deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
 		       deals.fee_status, deals.fee_amount_cents, deals.fee_paid_at,
 		       deals.fast_pass, deals.smooth_exit,
-		       deals.pre_approved, deals.baa_signed,
+		       deals.pre_approved, deals.baa_signed, deals.commission_pct,
 		       deals.created_at, deals.updated_at,
 		       u.name, u.email, u.phone,
 		       (SELECT COUNT(*) FROM tasks t
@@ -126,7 +126,7 @@ func (h *Handler) ListDeals(w http.ResponseWriter, r *http.Request) {
 			&d.AriveMilestones, &d.AriveKeyDates, &d.AriveLoanStatus,
 			&d.FeeStatus, &d.FeeAmountCents, &d.FeePaidAt,
 			&d.FastPass, &d.SmoothExit,
-			&d.PreApproved, &d.BaaSigned,
+			&d.PreApproved, &d.BaaSigned, &d.CommissionPct,
 			&d.CreatedAt, &d.UpdatedAt,
 			&d.AgentName, &d.AgentEmail, &d.AgentPhone,
 			&d.OpenTaskCount, &d.OverdueTaskCount,
@@ -209,7 +209,7 @@ func (h *Handler) GetDeal(w http.ResponseWriter, r *http.Request) {
 		       title, address, price, arive_linked,
 		       arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
 		       notes, fee_status, fee_amount_cents, fee_paid_at,
-		       fast_pass, smooth_exit, pre_approved, baa_signed,
+		       fast_pass, smooth_exit, pre_approved, baa_signed, commission_pct,
 		       created_at, updated_at
 		FROM deals
 		WHERE id = $1 AND agent_id = $2
@@ -218,7 +218,7 @@ func (h *Handler) GetDeal(w http.ResponseWriter, r *http.Request) {
 		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked,
 		&deal.AriveLoanID, &deal.AriveMilestones, &deal.AriveKeyDates, &deal.AriveLoanStatus, &deal.AriveSyncedAt,
 		&deal.Notes, &deal.FeeStatus, &deal.FeeAmountCents, &deal.FeePaidAt,
-		&deal.FastPass, &deal.SmoothExit, &deal.PreApproved, &deal.BaaSigned,
+		&deal.FastPass, &deal.SmoothExit, &deal.PreApproved, &deal.BaaSigned, &deal.CommissionPct,
 		&deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -302,12 +302,12 @@ func (h *Handler) AdvanceStage(w http.ResponseWriter, r *http.Request) {
 	deal := &models.Deal{}
 	err = h.db.QueryRowContext(r.Context(), `
 		SELECT id, agent_id, type, stage, `+healthExpr+` AS health,
-		       title, address, price, arive_linked, notes, created_at, updated_at
+		       title, address, price, arive_linked, notes, commission_pct, created_at, updated_at
 		FROM deals
 		WHERE id = $1
 	`, dealID).Scan(
 		&deal.ID, &deal.AgentID, &deal.Type, &deal.Stage, &deal.Health,
-		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked, &deal.Notes, &deal.CreatedAt, &deal.UpdatedAt,
+		&deal.Title, &deal.Address, &deal.Price, &deal.AriveLinked, &deal.Notes, &deal.CommissionPct, &deal.CreatedAt, &deal.UpdatedAt,
 	)
 	if err != nil {
 		http.Error(w, "failed to fetch updated deal", http.StatusInternalServerError)
@@ -407,6 +407,48 @@ func (h *Handler) UpdateDealNotes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// PatchDealCommission — PATCH /deals/:dealId/commission — agent-only; sets commission_pct.
+func (h *Handler) PatchDealCommission(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	dealID := chi.URLParam(r, "dealId")
+	userID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	var req struct {
+		CommissionPct float64 `json:"commission_pct"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.CommissionPct <= 0 || req.CommissionPct > 20 {
+		http.Error(w, "commission_pct must be between 0 and 20", http.StatusBadRequest)
+		return
+	}
+
+	res, err := h.db.ExecContext(r.Context(),
+		`UPDATE deals SET commission_pct = $1, updated_at = NOW() WHERE id = $2 AND agent_id = $3`,
+		req.CommissionPct, dealID, userID,
+	)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "deal not found", http.StatusNotFound)
+		return
+	}
+	respond(w, http.StatusOK, map[string]any{"commission_pct": req.CommissionPct})
 }
 
 // SignBAA — POST /deals/:dealId/baa/sign — allows a buyer participant to mark the BAA as signed.
