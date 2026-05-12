@@ -39,6 +39,29 @@ function apiTaskToFrontend(t: ApiTask): Task {
   };
 }
 
+export function useAgentTasks() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const raw = await api.get<ApiTask[]>('/tasks');
+      setTasks(raw.map(apiTaskToFrontend));
+    } catch {
+      setTasks([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return { tasks, loading, refresh: load };
+}
+
 export function useTasks(dealId: string) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);

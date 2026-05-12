@@ -10,6 +10,67 @@ import (
 	"realtourflow/internal/models"
 )
 
+// ListAllTasks — GET /tasks
+// Returns all tasks across every deal the authenticated user owns (or all deals for TC/admin).
+// Used by the AgentDashboard to power the "Needs Action / Waiting / On Track" columns.
+func (h *Handler) ListAllTasks(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetClaims(r)
+	if claims == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	userID, err := resolveUserID(r.Context(), h.db, claims.RegisteredClaims.Subject)
+	if err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	isTCOrAdmin := false
+	for _, role := range middleware.GetRoles(r) {
+		if role == "tc" || role == "admin" {
+			isTCOrAdmin = true
+			break
+		}
+	}
+
+	q := `
+		SELECT t.id::TEXT, t.deal_id::TEXT, t.assigned_to::TEXT, t.title, t.description,
+		       t.status, t.priority, t.source, t.stage_context, t.role,
+		       t.due_date::TEXT, t.created_at, t.updated_at
+		FROM tasks t
+		JOIN deals d ON d.id = t.deal_id`
+
+	var args []interface{}
+	if !isTCOrAdmin {
+		q += ` WHERE d.agent_id = $1`
+		args = append(args, userID)
+	}
+	q += ` ORDER BY t.due_date ASC NULLS LAST, t.created_at ASC`
+
+	rows, err := h.db.QueryContext(r.Context(), q, args...)
+	if err != nil {
+		http.Error(w, "failed to fetch tasks", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	tasks := make([]*models.Task, 0)
+	for rows.Next() {
+		t := &models.Task{}
+		if err := rows.Scan(
+			&t.ID, &t.DealID, &t.AssignedTo, &t.Title, &t.Description,
+			&t.Status, &t.Priority, &t.Source, &t.StageContext, &t.Role,
+			&t.DueDate, &t.CreatedAt, &t.UpdatedAt,
+		); err != nil {
+			http.Error(w, "failed to scan task", http.StatusInternalServerError)
+			return
+		}
+		tasks = append(tasks, t)
+	}
+
+	respond(w, http.StatusOK, tasks)
+}
+
 func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
 	if claims == nil {

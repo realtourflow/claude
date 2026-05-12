@@ -781,14 +781,84 @@ function ConfettiCelebration({ onDismiss }: { onDismiss: () => void }) {
 
 // ─── Loan Milestones Card ────────────────────────────────────────────────────
 
-function LoanMilestonesCard({ deal }: { deal: Deal }) {
+function LoanMilestonesCard({ deal, onRefresh }: { deal: Deal; onRefresh?: () => void }) {
   const [milestones, setMilestones] = useState<LoanMilestones | null>(
     deal.loanMilestones ?? null
   );
   const [showCelebration, setShowCelebration] = useState(false);
+  const [ariveInput, setAriveInput] = useState('');
+  const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState('');
 
   const lender = deal.vendors?.lender;
   const isArive = milestones?.source === 'arive';
+  const isLinked = deal.flags.includes('mountain_mortgage');
+
+  async function handleLink() {
+    if (!ariveInput.trim()) return;
+    setLinking(true);
+    setLinkError('');
+    try {
+      await api.patch(`/deals/${deal.id}/arive`, { arive_loan_id: ariveInput.trim() });
+      onRefresh?.();
+    } catch {
+      setLinkError('Failed to link — check the loan ID and try again.');
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  async function handleForceSync() {
+    try {
+      await api.post(`/deals/${deal.id}/arive/sync`, {});
+      onRefresh?.();
+    } catch { /* ignore */ }
+  }
+
+  if (!milestones && deal.type === 'buy') {
+    return (
+      <div className="rounded-xl bg-white p-5 shadow-sm">
+        <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">Loan Milestones</h3>
+        {isLinked ? (
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <LinkIcon size={14} className="text-green-500" />
+              <span>ARIVE loan linked — milestones syncing</span>
+            </div>
+            <button
+              onClick={handleForceSync}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-500 hover:bg-gray-50 transition-colors"
+            >
+              <RefreshCw size={12} /> Sync
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Link an ARIVE loan ID to auto-sync Mountain Mortgage milestones. Leave blank for manual milestone tracking.
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={ariveInput}
+                onChange={(e) => setAriveInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLink()}
+                placeholder="ARIVE loan ID"
+                className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand-navy/40 focus:ring-2 focus:ring-brand-navy/10"
+              />
+              <button
+                onClick={handleLink}
+                disabled={!ariveInput.trim() || linking}
+                className="rounded-lg bg-brand-navy px-4 py-2 text-sm font-bold text-white disabled:opacity-40 hover:bg-brand-navy/90 transition-colors"
+              >
+                {linking ? 'Linking…' : 'Link'}
+              </button>
+            </div>
+            {linkError && <p className="text-xs text-red-500">{linkError}</p>}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (!milestones) return null;
 
@@ -845,9 +915,13 @@ function LoanMilestonesCard({ deal }: { deal: Deal }) {
               </span>
             )}
             {isArive ? (
-              <span className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-[10px] font-bold text-green-700">
+              <button
+                onClick={handleForceSync}
+                title="Force sync from ARIVE"
+                className="flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-[10px] font-bold text-green-700 hover:bg-green-200 transition-colors"
+              >
                 <RefreshCw size={9} /> ARIVE
-              </span>
+              </button>
             ) : (
               <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-bold text-amber-700">
                 <Pencil size={9} /> Manual
@@ -1446,14 +1520,14 @@ function SmoothExitCard({ deal }: { deal: Deal }) {
   );
 }
 
-function OverviewTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
+function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; onRefresh?: () => void }) {
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
   const clientContact = useClientContactStore((s) => s.getContact(deal.id));
 
   return (
     <div className="space-y-4">
-      {/* Loan Milestones */}
-      <LoanMilestonesCard deal={deal} />
+      {/* Loan Milestones + ARIVE Linker */}
+      <LoanMilestonesCard deal={deal} onRefresh={onRefresh} />
 
       {/* Deal Details */}
       <div className="rounded-xl bg-white p-5 shadow-sm">
@@ -3507,7 +3581,7 @@ export default function DealDetail() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'overview' && <OverviewTab deal={localDeal} tasks={dealTasks} />}
+      {activeTab === 'overview' && <OverviewTab deal={localDeal} tasks={dealTasks} onRefresh={refreshDeal} />}
       {activeTab === 'tasks' && <TasksTab deal={localDeal} tasks={dealTasks} onTasksChange={refreshTasks} />}
       {activeTab === 'messages' && <MessagesTab deal={localDeal} />}
       {activeTab === 'documents' && <DocumentsTab deal={localDeal} docs={dealDocs} loading={docsLoading} onRefresh={refreshDocs} />}

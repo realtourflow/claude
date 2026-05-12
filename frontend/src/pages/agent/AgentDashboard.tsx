@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { Deal } from '../../data/mockDeals';
-import { MOCK_TASKS, Task } from '../../data/mockTasks';
+import { Task } from '../../data/mockTasks';
 import { useDeals } from '../../hooks/useDeals';
-import { useNotificationStore, AgentNotification } from '../../store/notificationStore';
-import { useTaskStore } from '../../store/taskStore';
+import { useAgentTasks } from '../../hooks/useTasks';
+import { useNotifications, AppNotification } from '../../hooks/useNotifications';
 import { TrendingUp, Layers, CheckSquare, ArrowRight, Clock, AlertCircle, CheckCircle2, DollarSign, Zap, Share2, X, Phone } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -107,8 +107,7 @@ function TaskRow({ task, deal }: { task: Task; deal?: Deal }) {
 }
 
 function DealCard({ deal }: { deal: Deal }) {
-  const tasks = MOCK_TASKS.filter((t) => t.dealId === deal.id);
-  const openTasks = tasks.filter((t) => t.status !== 'completed').length;
+  const openTasks = deal.openTaskCount ?? 0;
 
   return (
     <Link
@@ -161,7 +160,7 @@ function Section({ icon: Icon, title, color, children, count }: {
 // ─── Notification Banner ─────────────────────────────────────────────────────
 
 function NotificationBanner({ notification, onDismiss }: {
-  notification: AgentNotification;
+  notification: AppNotification;
   onDismiss: () => void;
 }) {
   return (
@@ -223,16 +222,11 @@ function ShareFastPassButton() {
 
 export default function AgentDashboard() {
   const activeUser = useAuthStore((s) => s.activeUser);
-  const notifications = useNotificationStore((s) => s.notifications);
-  const dismissNotification = useNotificationStore((s) => s.dismiss);
+  const { notifications, markRead } = useNotifications();
   const unread = notifications.filter((n) => !n.read);
 
-  const addedTasksFromStore = useTaskStore((s) => s.addedTasks);
+  const { tasks: allTasks } = useAgentTasks();
   const { deals: agentDeals } = useDeals();
-
-  const allTasks = [...MOCK_TASKS, ...addedTasksFromStore].filter((t) =>
-    agentDeals.some((d) => d.id === t.dealId)
-  );
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const pipelineValue = agentDeals.reduce((sum, d) => sum + d.property.price, 0);
@@ -240,7 +234,8 @@ export default function AgentDashboard() {
 
   const today = new Date().toISOString().slice(0, 10);
   const tasksDueToday = allTasks.filter(
-    (t) => t.status !== 'completed' && (t.dueDate === today || t.status === 'overdue')
+    (t) => t.status !== 'completed' && t.status !== 'skipped' &&
+           (t.dueDate === today || t.status === 'overdue')
   ).length;
 
   // ── Needs Your Action ───────────────────────────────────────────────────
@@ -280,7 +275,7 @@ export default function AgentDashboard() {
     <div className="max-w-4xl space-y-6">
       {/* Notification banners */}
       {unread.map((n) => (
-        <NotificationBanner key={n.id} notification={n} onDismiss={() => dismissNotification(n.id)} />
+        <NotificationBanner key={n.id} notification={n} onDismiss={() => markRead(n.id)} />
       ))}
 
       {/* Greeting */}
