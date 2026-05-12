@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { Deal, LoanMilestones } from '../../data/mockDeals';
 import { useDeals } from '../../hooks/useDeals';
-import { useContingencies, ContingencyStatus, ContingencyType, Contingency } from '../../hooks/useContingencies';
+import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType, Contingency } from '../../hooks/useContingencies';
 import { useChecklist, ChecklistAssignee } from '../../hooks/useChecklist';
 import { usePermission } from '../../permissions/usePermission';
 import { PERMISSIONS } from '../../permissions/permissions';
@@ -93,8 +93,14 @@ function DealCard({ deal }: { deal: Deal }) {
   const openTasks    = deal.openTaskCount ?? 0;
   const overdueTasks = deal.overdueTaskCount ?? 0;
 
-  const activeC: Contingency[] = [];
-  const urgentC: Contingency[] = [];
+  const { items: contingencies } = useContingencies(deal.id);
+  const activeC = contingencies.filter((c) => c.status === 'active');
+  const today = new Date();
+  const urgentC = activeC.filter((c) => {
+    if (!c.deadline) return false;
+    const d = new Date(c.deadline);
+    return (d.getTime() - today.getTime()) / 86_400_000 <= 5;
+  });
 
   const closing     = deal.timeline.closingDate;
   const closingDays = closing ? daysUntil(closing) : null;
@@ -186,7 +192,12 @@ function MyTransactions() {
 
   const overdueTasks = { length: deals.reduce((sum, d) => sum + (d.overdueTaskCount ?? 0), 0) };
 
-  const urgentC: Contingency[] = [];
+  const allContingencies = useAllContingenciesForDeals(deals.map((d) => d.id));
+  const today = new Date();
+  const urgentC = allContingencies.filter((c) => {
+    if (c.status !== 'active' || !c.deadline) return false;
+    return (new Date(c.deadline).getTime() - today.getTime()) / 86_400_000 <= 5;
+  });
   const closingThisMonth = deals.filter((d) => {
     if (!d.timeline.closingDate) return false;
     const days = daysUntil(d.timeline.closingDate);
@@ -1015,6 +1026,9 @@ const CAL_TYPE: Record<CalEvent['type'], { dot: string; label: string }> = {
 
 function CalendarSection() {
   const deals = useMyDeals();
+  const allContingencies = useAllContingenciesForDeals(deals.map((d) => d.id));
+
+  const dealMap = Object.fromEntries(deals.map((d) => [d.id, d]));
 
   const events: CalEvent[] = [];
 
@@ -1030,7 +1044,19 @@ function CalendarSection() {
     }
   });
 
-  // Contingency deadline events will be added once a bulk contingency endpoint is available
+  allContingencies
+    .filter((c) => c.status === 'active' && c.deadline)
+    .forEach((c) => {
+      const deal = dealMap[c.dealId];
+      if (!deal) return;
+      events.push({
+        id: `cont-${c.id}`,
+        date: c.deadline!,
+        title: `${c.label} — ${deal.clientName}`,
+        sub: deal.property.address,
+        type: 'contingency',
+      });
+    });
 
   events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 

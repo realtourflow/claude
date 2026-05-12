@@ -89,3 +89,20 @@ export function useContingencies(dealId: string) {
 
   return { items, loading, refresh: load, updateStatus, addItem, removeItem };
 }
+
+export function useAllContingenciesForDeals(dealIds: string[]) {
+  const [contingencies, setContingencies] = useState<Contingency[]>([]);
+  const key = dealIds.slice().sort().join(',');
+
+  useEffect(() => {
+    if (dealIds.length === 0) { setContingencies([]); return; }
+    Promise.all(
+      dealIds.map((id) => api.get<ApiContingency[]>(`/deals/${id}/contingencies`).catch(() => [] as ApiContingency[]))
+    ).then((results) => {
+      setContingencies(results.flat().map(fromApi));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  return contingencies;
+}
