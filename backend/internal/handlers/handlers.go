@@ -120,6 +120,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/deals/{dealId}/fee/waive", h.WaiveFee)
 
 		r.Post("/deals/{dealId}/fastpass", h.EnrollFastPass)
+		r.Post("/deals/{dealId}/fastpass/collect", h.CollectFastPass)
 		r.Post("/deals/{dealId}/smoothexit", h.EnrollSmoothExit)
 
 		r.Get("/deals/{dealId}/properties", h.ListProperties)

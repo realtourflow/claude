@@ -1,5 +1,6 @@
 import { useParams, Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import { api } from '../../api/client';
 import { useDeals } from '../../hooks/useDeals';
 import { useUsers, AppUser } from '../../hooks/useUsers';
 import { useSystemConfig, usePromoCodes, useAuditLog, SystemConfig, CreatePromoCodeInput } from '../../hooks/useAdmin';
@@ -631,11 +632,39 @@ const STATUS_STYLES: Record<string, { badge: string; border: string; label: stri
   },
 };
 
+const PAYMENT_OPTION_LABELS: Record<string, string> = {
+  now: 'Paid upfront',
+  at_closing: 'Collect at closing (+15%)',
+  seller_concession: 'Seller concession',
+};
+
 function ActiveFastPass({ deals }: { deals: Deal[] }) {
-  const fpDeals = deals.filter((d) => d.flags.includes('fast_pass') && d.stage !== 'post_close');
+  const [collectedIds, setCollectedIds] = useState<Set<string>>(new Set());
+
+  async function collectFastPass(dealId: string) {
+    try {
+      await api.post<{ ok: boolean }>(`/deals/${dealId}/fastpass/collect`, {});
+      setCollectedIds((prev) => new Set([...prev, dealId]));
+    } catch {
+      // Silently ignore — user can retry
+    }
+  }
+
+  const fpDeals = deals.filter((d) => {
+    if (!d.flags.includes('fast_pass') || !d.fastPass) return false;
+    if (d.fastPass.status === 'collected' || collectedIds.has(d.id)) return false;
+    if (d.stage === 'post_close' && d.fastPass.paymentOption === 'now') return false;
+    return true;
+  });
   const pendingPayment = fpDeals.filter((d) => d.fastPass?.status === 'pending_payment');
-  const active = fpDeals.filter((d) => d.fastPass?.status === 'active');
-  const noEnrollment = fpDeals.filter((d) => !d.fastPass);
+  const awaitingCollection = fpDeals.filter(
+    (d) =>
+      d.stage === 'post_close' &&
+      d.fastPass?.status === 'active' &&
+      (d.fastPass.paymentOption === 'at_closing' || d.fastPass.paymentOption === 'seller_concession'),
+  );
+  const active = fpDeals.filter((d) => d.fastPass?.status === 'active' && d.stage !== 'post_close');
+  const noEnrollment = fpDeals.filter((d) => !d.fastPass && d.stage !== 'post_close');
 
   function FPDealCard({ d }: { d: Deal }) {
     const fp = d.fastPass;
@@ -737,18 +766,64 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
         </p>
       </div>
 
-      {fpDeals.length === 0 ? (
+      {fpDeals.length === 0 && awaitingCollection.length === 0 ? (
         <div className="rounded-xl bg-white px-5 py-10 text-center text-gray-400 shadow-sm">
           No active Fast Pass deals
         </div>
       ) : (
         <>
+          {awaitingCollection.length > 0 && (
+            <section>
+              <div className="mb-3 flex items-center gap-2">
+                <DollarSign size={14} className="text-green-600" />
+                <h2 className="text-xs font-bold uppercase tracking-wider text-green-600">
+                  Awaiting Collection at Closing ({awaitingCollection.length})
+                </h2>
+              </div>
+              <div className="space-y-3">
+                {awaitingCollection.map((d) => (
+                  <div key={d.id} className="rounded-xl bg-white shadow-sm border-l-4 border-l-green-400 overflow-hidden">
+                    <div className="flex items-center gap-3 px-5 py-4">
+                      <Zap size={18} className="text-green-500 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-brand-navy text-sm">{d.clientName}</span>
+                          <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-green-700">
+                            Post-Close
+                          </span>
+                          <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">
+                            {PAYMENT_OPTION_LABELS[d.fastPass?.paymentOption ?? 'at_closing']}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-400 truncate">
+                          {d.property.address}, {d.property.city}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-sm font-black text-brand-navy">
+                          ${d.fastPass?.totalPaid.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-gray-400">due</div>
+                      </div>
+                      <button
+                        onClick={() => collectFastPass(d.id)}
+                        className="ml-2 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition-colors"
+                      >
+                        Mark Collected
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {pendingPayment.length > 0 && (
             <section>
               <div className="mb-3 flex items-center gap-2">
                 <AlertTriangle size={14} className="text-amber-500" />
                 <h2 className="text-xs font-bold uppercase tracking-wider text-amber-600">
-                  Awaiting Payment ({pendingPayment.length})
+                  Awaiting Stripe Payment ({pendingPayment.length})
                 </h2>
               </div>
               <div className="space-y-3">

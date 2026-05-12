@@ -130,6 +130,37 @@ func (h *Handler) EnrollFastPass(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// CollectFastPass marks a deferred (at_closing or seller_concession) Fast Pass as collected.
+// POST /deals/:dealId/fastpass/collect — admin only.
+func (h *Handler) CollectFastPass(w http.ResponseWriter, r *http.Request) {
+	if !adminOnly(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	dealID := chi.URLParam(r, "dealId")
+	res, err := h.db.ExecContext(r.Context(), `
+		UPDATE deals
+		SET fast_pass = jsonb_set(
+			jsonb_set(fast_pass, '{status}', '"collected"'),
+			'{collected_at}', to_jsonb(NOW()::text)
+		)
+		WHERE id = $1
+		  AND fast_pass IS NOT NULL
+		  AND fast_pass->>'status' = 'active'
+		  AND fast_pass->>'payment_option' IN ('at_closing', 'seller_concession')
+	`, dealID)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "deal not found or not eligible for collection", http.StatusNotFound)
+		return
+	}
+	respond(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // EnrollSmoothExit — POST /deals/:dealId/smoothexit
 // Stores Smooth Exit enrollment JSONB on the deal. No immediate Stripe payment
 // (both payment options — from_proceeds and buyer_concession — settle at closing).

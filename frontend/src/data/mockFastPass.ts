@@ -144,7 +144,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
   },
 ];
 
-export type FastPassEnrollmentStatus = 'pending_payment' | 'active' | 'complete';
+export type FastPassEnrollmentStatus = 'pending_payment' | 'active' | 'complete' | 'collected';
 
 export type FastPassPaymentOption = 'now' | 'at_closing' | 'seller_concession';
 
