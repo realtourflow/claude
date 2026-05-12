@@ -17,7 +17,7 @@ import MetroMap from '../../components/MetroMap';
 import VendorDirectory from '../../components/VendorDirectory';
 import { useProperties, TrackedProperty, PropertyStatus } from '../../hooks/useProperties';
 import { useAgentDocStore } from '../../store/agentDocStore';
-import { useNotificationStore } from '../../store/notificationStore';
+import ClientNotifications from '../../components/ClientNotifications';
 import { api } from '../../api/client';
 import { FAST_PASS_UPSELLS, FastPassUpsellId } from '../../data/mockFastPass';
 
@@ -1530,7 +1530,6 @@ export default function BuyerView() {
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
-  const { getClientNotifications, dismissClientNotification } = useNotificationStore();
   const { deals, loading: dealsLoading, refresh: refreshDeals } = useMyDeals();
   const deal = deals.find((d) => d.type === 'buy');
   const { tasks } = useTasks(deal?.id ?? '');
@@ -1560,28 +1559,9 @@ export default function BuyerView() {
   const firstName = activeUser?.name.split(' ')[0] ?? 'there';
   const isFallenThrough = deal.status === 'fallen_through';
 
-  const clientAlerts = deal ? getClientNotifications(deal.id) : [];
-
   return (
     <div className="mx-auto max-w-lg space-y-4 pb-10">
-      {/* Stage-change notifications from agent */}
-      {clientAlerts.map((alert) => (
-        <div key={alert.id} className="flex items-start gap-3 rounded-xl bg-brand-navy px-4 py-3.5 shadow-md">
-          <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-gold/20 mt-0.5">
-            <CheckCircle2 size={14} className="text-brand-gold" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold text-white leading-snug">{alert.title}</p>
-            <p className="mt-0.5 text-xs text-white/60 leading-relaxed">{alert.body}</p>
-          </div>
-          <button
-            onClick={() => dismissClientNotification(alert.id)}
-            className="flex-shrink-0 text-white/30 hover:text-white/70 transition-colors mt-0.5"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      ))}
+      <ClientNotifications />
 
       {/* Header */}
       <div>
@@ -1628,7 +1608,7 @@ export default function BuyerView() {
       </div>
 
       {/* Overdue alert — right after header, before journey */}
-      {!isFallenThrough && allTasks.some((t) => t.status === 'overdue') && (
+      {!isFallenThrough && buyerTasks.some((t) => t.status === 'overdue') && (
         <div className="flex items-center gap-3 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
           <AlertCircle size={18} className="text-red-500 flex-shrink-0" />
           <div>
@@ -1639,7 +1619,7 @@ export default function BuyerView() {
       )}
 
       {/* Journey tracker */}
-      <div className={!isFallenThrough && allTasks.some((t) => t.status === 'overdue') ? 'pt-6' : ''}>
+      <div className={!isFallenThrough && buyerTasks.some((t) => t.status === 'overdue') ? 'pt-6' : ''}>
         <JourneyTracker deal={deal} />
       </div>
 
@@ -1674,9 +1654,9 @@ export default function BuyerView() {
               {openTasks.filter((t) => t.status === 'overdue').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
               {openTasks.filter((t) => t.status === 'in_progress').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
               {openTasks.filter((t) => t.status === 'pending').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
-              {(allTasks.filter((t) => t.status === 'completed').length + completedIds.size) > 0 && (
+              {(buyerTasks.filter((t) => t.status === 'completed').length + completedIds.size) > 0 && (
                 <p className="text-center text-xs text-gray-300 pt-1">
-                  {allTasks.filter((t) => t.status === 'completed').length + completedIds.size} task{(allTasks.filter((t) => t.status === 'completed').length + completedIds.size) !== 1 ? 's' : ''} completed
+                  {buyerTasks.filter((t) => t.status === 'completed').length + completedIds.size} task{(buyerTasks.filter((t) => t.status === 'completed').length + completedIds.size) !== 1 ? 's' : ''} completed
                 </p>
               )}
             </div>

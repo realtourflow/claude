@@ -315,6 +315,37 @@ func (h *Handler) AdvanceStage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, http.StatusOK, deal)
+
+	// Notify participants of the stage change in background
+	go func() {
+		stageLabelMap := map[models.DealStage]string{
+			"intake":         "Getting Started",
+			"active_search":  "Property Search",
+			"offer_active":   "Offer Active",
+			"under_contract": "Under Contract",
+			"pre_close":      "Pre-Close",
+			"closing":        "Closing Day",
+			"post_close":     "Closed!",
+		}
+		label := stageLabelMap[req.Stage]
+		if label == "" {
+			label = string(req.Stage)
+		}
+		title := "Your deal has moved forward"
+		body := "New stage: " + label
+		rows, err := h.db.QueryContext(context.Background(),
+			`SELECT user_id FROM deal_participants WHERE deal_id = $1`, dealID)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var pUID string
+			if rows.Scan(&pUID) == nil {
+				h.createNotification(pUID, title, body, "stage_change", &dealID, nil)
+			}
+		}
+	}()
 }
 
 // UpdateDealNotes — PATCH /deals/:dealId/notes — saves internal notes on a deal.

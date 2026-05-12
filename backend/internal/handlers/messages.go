@@ -1,13 +1,32 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"realtourflow/internal/middleware"
 	"realtourflow/internal/models"
 )
+
+// dealAccessForMessages returns (isAgent, hasAccess, agentID, error).
+// Agents and deal participants can read/write client_thread messages.
+// Only agents can access the internal channel.
+func (h *Handler) dealAccessForMessages(r *http.Request, dealID, userID string) (isAgent bool, hasAccess bool, agentID string, err error) {
+	err = h.db.QueryRowContext(r.Context(), `
+		SELECT
+			agent_id,
+			agent_id = $2 AS is_agent,
+			(agent_id = $2 OR EXISTS (
+				SELECT 1 FROM deal_participants dp
+				WHERE dp.deal_id = $1 AND dp.user_id = $2
+			)) AS has_access
+		FROM deals WHERE id = $1
+	`, dealID, userID).Scan(&agentID, &isAgent, &hasAccess)
+	return
+}
 
 func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetClaims(r)
@@ -23,11 +42,8 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists bool
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT EXISTS(SELECT 1 FROM deals WHERE id = $1 AND agent_id = $2)`,
-		dealID, userID,
-	).Scan(&exists); err != nil || !exists {
+	isAgent, hasAccess, _, err := h.dealAccessForMessages(r, dealID, userID)
+	if err != nil || !hasAccess {
 		http.Error(w, "deal not found", http.StatusNotFound)
 		return
 	}
@@ -35,6 +51,11 @@ func (h *Handler) ListMessages(w http.ResponseWriter, r *http.Request) {
 	channel := r.URL.Query().Get("channel")
 	if channel != "client_thread" && channel != "internal" {
 		channel = "client_thread"
+	}
+	// Non-agents can only see client_thread
+	if !isAgent && channel == "internal" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
@@ -77,11 +98,8 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists bool
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT EXISTS(SELECT 1 FROM deals WHERE id = $1 AND agent_id = $2)`,
-		dealID, userID,
-	).Scan(&exists); err != nil || !exists {
+	isAgent, hasAccess, agentID, err := h.dealAccessForMessages(r, dealID, userID)
+	if err != nil || !hasAccess {
 		http.Error(w, "deal not found", http.StatusNotFound)
 		return
 	}
@@ -99,6 +117,10 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Channel != "client_thread" && req.Channel != "internal" {
+		req.Channel = "client_thread"
+	}
+	// Participants (non-agent) can only post to client_thread
+	if !isAgent && req.Channel == "internal" {
 		req.Channel = "client_thread"
 	}
 
@@ -121,4 +143,31 @@ func (h *Handler) CreateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, http.StatusCreated, m)
+
+	// Fire message notifications in background
+	go func() {
+		title := fmt.Sprintf("New message on your deal")
+		body := m.Body
+		if len(body) > 80 {
+			body = body[:80] + "…"
+		}
+		if isAgent {
+			// Agent sent → notify all deal participants (buyer/seller)
+			rows, err := h.db.QueryContext(context.Background(),
+				`SELECT user_id FROM deal_participants WHERE deal_id = $1`, dealID)
+			if err != nil {
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var pUID string
+				if rows.Scan(&pUID) == nil {
+					h.createNotification(pUID, title, body, "new_message", &dealID, nil)
+				}
+			}
+		} else {
+			// Participant sent → notify the agent
+			h.createNotification(agentID, title, body, "new_message", &dealID, nil)
+		}
+	}()
 }
