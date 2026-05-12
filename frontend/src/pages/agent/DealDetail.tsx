@@ -533,7 +533,7 @@ function SellerOffersCard({ dealId }: { dealId: string }) {
                   )}
                 </div>
                 <button
-                  onClick={() => removeOffer(offer.id, dealId)}
+                  onClick={() => removeOffer(offer.id)}
                   className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0"
                 >
                   <X size={14} />

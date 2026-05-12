@@ -1932,7 +1932,7 @@ function OutstandingItems({ deals }: { deals: Deal[] }) {
         (d) => d.stage === 'post_close' && (d.feeStatus === 'unpaid' || d.feeStatus === 'pending'),
       ),
     },
-  ].filter((g) => g.deals.length > 0);
+  ].filter((g) => g.deals.length > 0) as OutstandingGroup[];
 
   const totalDeals = new Set(groups.flatMap((g) => g.deals.map((d) => d.id))).size;
 

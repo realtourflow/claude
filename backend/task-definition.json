@@ -48,6 +48,14 @@
         {
           "name": "STRIPE_WEBHOOK_SECRET",
           "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/stripe-webhook-secret-IsHu6R"
+        },
+        {
+          "name": "DOCUSIGN_INTEGRATION_KEY",
+          "valueFrom": "REPLACE_WITH_INTEGRATION_KEY_ARN"
+        },
+        {
+          "name": "DOCUSIGN_PRIVATE_KEY",
+          "valueFrom": "REPLACE_WITH_PRIVATE_KEY_ARN"
         }
       ],
       "environment": [
@@ -78,6 +86,18 @@
         {
           "name": "STRIPE_PUBLISHABLE_KEY",
           "value": "pk_live_51Q9pr1LWgVKrzBhA3jklNlfoB6M8F4JFxGVx2REOZuNMm32z0VAEYf3Of0LGRbWxelN8sPdZgTnYvq710GPCtMgk00xsojl9F2"
+        },
+        {
+          "name": "DOCUSIGN_ACCOUNT_ID",
+          "value": "4eda7db3-6c37-40d9-8afe-affd6d8f014e"
+        },
+        {
+          "name": "DOCUSIGN_USER_ID",
+          "value": "09178183-128f-40ff-a899-150544b24323"
+        },
+        {
+          "name": "DOCUSIGN_BASE_URL",
+          "value": "https://demo.docusign.net"
         }
       ],
       "logConfiguration": {

@@ -234,7 +234,7 @@ export default function AgentDashboard() {
 
   const today = new Date().toISOString().slice(0, 10);
   const tasksDueToday = allTasks.filter(
-    (t) => t.status !== 'completed' && t.status !== 'skipped' &&
+    (t) => t.status !== 'completed' &&
            (t.dueDate === today || t.status === 'overdue')
   ).length;
 
