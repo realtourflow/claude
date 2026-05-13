@@ -108,7 +108,19 @@ func runMigrations(db *sql.DB) error {
 		return fmt.Errorf("create migrator: %w", err)
 	}
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		return fmt.Errorf("run migrations: %w", err)
+		// If a previous deploy crashed mid-migration, golang-migrate marks the version dirty.
+		// Recover by forcing back to the last clean version and retrying.
+		if merr, ok := err.(migrate.ErrDirty); ok {
+			log.Printf("dirty migration at version %d — forcing back to %d and retrying", merr.Version, merr.Version-1)
+			if ferr := m.Force(merr.Version - 1); ferr != nil {
+				return fmt.Errorf("force migration version: %w", ferr)
+			}
+			if rerr := m.Up(); rerr != nil && rerr != migrate.ErrNoChange {
+				return fmt.Errorf("run migrations after dirty recovery: %w", rerr)
+			}
+		} else {
+			return fmt.Errorf("run migrations: %w", err)
+		}
 	}
 	log.Println("migrations up to date")
 	return nil
