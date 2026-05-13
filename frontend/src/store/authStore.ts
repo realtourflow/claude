@@ -29,6 +29,7 @@ type AuthStore = {
   setFromAuth0: (id: string, name: string, email: string, role: string, onboardingComplete: boolean, avatar?: string) => void;
   setActiveUser: (userId: string) => void;
   setSyncError: (err: string) => void;
+  markOnboardingComplete: () => void;
 };
 
 export const useAuthStore = create<AuthStore>((set) => ({
@@ -56,4 +57,6 @@ export const useAuthStore = create<AuthStore>((set) => ({
     if (user) set({ activeUser: user, isLoaded: true });
   },
   setSyncError: (err: string) => set({ syncError: err, isLoaded: true }),
+  markOnboardingComplete: () =>
+    set((s) => s.activeUser ? { activeUser: { ...s.activeUser, onboardingComplete: true } } : {}),
 }));

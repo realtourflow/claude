@@ -255,6 +255,11 @@ func (c *Client) GetEnvelopeStatus(envelopeID string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("get envelope status %d: %s", resp.StatusCode, string(b))
+	}
+
 	var result struct {
 		Status string `json:"status"`
 	}

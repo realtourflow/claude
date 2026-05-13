@@ -985,6 +985,7 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
   const navigate = useNavigate();
   const { docsByAgent } = useAgentDocStore();
   const activeUser = useAuthStore((s) => s.activeUser);
+  const markOnboardingComplete = useAuthStore((s) => s.markOnboardingComplete);
   const docCount = (docsByAgent[activeUser?.id ?? 'agent-sarah'] ?? []).length;
   const isSolo = !data.tcName;
 
@@ -992,9 +993,9 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
     const profileUpdate: Record<string, string> = {};
     if (data.name) profileUpdate.name = data.name;
     if (data.phone) profileUpdate.phone = data.phone;
-    if (Object.keys(profileUpdate).length > 0) {
-      api.patch('/me/profile', profileUpdate).catch(() => {});
-    }
+    api.patch('/me/profile', Object.keys(profileUpdate).length > 0 ? profileUpdate : {})
+      .then(() => markOnboardingComplete())
+      .catch(() => markOnboardingComplete());
 
     const settings = {
       title: data.title,
@@ -1096,6 +1097,7 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
 export default function AgentOnboarding() {
   const navigate = useNavigate();
   const { dismissBanner } = useAgentSetupStore();
+  const markOnboardingComplete = useAuthStore((s) => s.markOnboardingComplete);
   const [screen, setScreen] = useState(0);
   const [data, setData] = useState<AgentSetupData>(EMPTY);
 
@@ -1112,6 +1114,8 @@ export default function AgentOnboarding() {
 
   function skipToEnd() {
     dismissBanner();
+    api.patch('/me/profile', {}).catch(() => {});
+    markOnboardingComplete();
     navigate('/agent');
   }
 

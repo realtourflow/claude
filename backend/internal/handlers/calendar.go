@@ -92,10 +92,15 @@ func (h *Handler) CalendarFeed(w http.ResponseWriter, r *http.Request) {
 		    OR d.arive_key_dates->>'closingContingency' IS NOT NULL
 		  )
 		UNION
-		SELECT d2.id, d2.title, d2.address, null
+		SELECT d2.id, d2.title, d2.address,
+		       COALESCE(
+		         d2.arive_key_dates->>'estimatedFundingDate',
+		         d2.arive_key_dates->>'closingContingency'
+		       )
 		FROM deals d2
 		JOIN deal_participants dp ON dp.deal_id = d2.id AND dp.user_id = $1
-		WHERE false
+		WHERE d2.arive_key_dates->>'estimatedFundingDate' IS NOT NULL
+		   OR d2.arive_key_dates->>'closingContingency' IS NOT NULL
 	`, userID)
 	if err == nil {
 		defer rows.Close()
@@ -163,6 +168,7 @@ func (h *Handler) CalendarFeed(w http.ResponseWriter, r *http.Request) {
 		sb.WriteString("BEGIN:VEVENT\r\n")
 		sb.WriteString(fmt.Sprintf("UID:%s\r\n", e.uid))
 		sb.WriteString(fmt.Sprintf("DTSTART;VALUE=DATE:%s\r\n", e.dtstart))
+		sb.WriteString(fmt.Sprintf("DTEND;VALUE=DATE:%s\r\n", nextDay(e.dtstart)))
 		sb.WriteString(fmt.Sprintf("SUMMARY:%s\r\n", icalEscape(e.summary)))
 		if e.desc != "" {
 			sb.WriteString(fmt.Sprintf("DESCRIPTION:%s\r\n", icalEscape(e.desc)))
@@ -177,6 +183,15 @@ func (h *Handler) CalendarFeed(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="realtourflow.ics"`)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(sb.String()))
+}
+
+// nextDay advances an iCal date string (YYYYMMDD) by one day.
+func nextDay(dateStr string) string {
+	t, err := time.Parse("20060102", dateStr)
+	if err != nil {
+		return dateStr
+	}
+	return t.AddDate(0, 0, 1).Format("20060102")
 }
 
 func icalEscape(s string) string {
