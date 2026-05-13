@@ -80,6 +80,10 @@
           "value": "https://claude-pi-lime.vercel.app"
         },
         {
+          "name": "RESEND_API_KEY",
+          "value": "re_g69vHd7q_LmVzMfk9icCtYHuwtDonaevH"
+        },
+        {
           "name": "ARIVE_API_URL",
           "value": "https://2720886.myarive.com"
         },
