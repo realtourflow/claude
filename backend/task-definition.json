@@ -51,11 +51,11 @@
         },
         {
           "name": "DOCUSIGN_INTEGRATION_KEY",
-          "valueFrom": "REPLACE_WITH_INTEGRATION_KEY_ARN"
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/docusign-integration-key-ZzIRnI"
         },
         {
           "name": "DOCUSIGN_PRIVATE_KEY",
-          "valueFrom": "REPLACE_WITH_PRIVATE_KEY_ARN"
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/docusign-private-key-DNm6I6"
         }
       ],
       "environment": [
