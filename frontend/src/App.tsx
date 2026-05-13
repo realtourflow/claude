@@ -67,6 +67,7 @@ function RootRedirect() {
   if (groupId === 'buyer') return <Navigate to={`/buyer/${activeUser?.id}`} replace />;
   if (groupId === 'seller') return <Navigate to={`/seller/${activeUser?.id}`} replace />;
   if (groupId === 'tc') return <Navigate to="/tc" replace />;
+  if (!activeUser?.onboardingComplete) return <Navigate to="/onboard/agent" replace />;
   return <Navigate to="/agent" replace />;
 }
 

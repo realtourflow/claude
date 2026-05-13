@@ -8,6 +8,7 @@ type SyncUserResponse = {
   name: string;
   email: string;
   role: string;
+  onboarding_complete: boolean;
 };
 
 export function AuthSetup({ children }: { children: React.ReactNode }) {
@@ -25,7 +26,7 @@ export function AuthSetup({ children }: { children: React.ReactNode }) {
       email: user.email ?? '',
       name: user.name ?? '',
     }).then((dbUser) => {
-      setFromAuth0(dbUser.id, dbUser.name, dbUser.email, dbUser.role, user.picture);
+      setFromAuth0(dbUser.id, dbUser.name, dbUser.email, dbUser.role, dbUser.onboarding_complete, user.picture);
       const pendingToken = localStorage.getItem('pendingInvite');
       const pendingEmail = localStorage.getItem('pendingInviteEmail');
       if (pendingToken && pendingEmail) {

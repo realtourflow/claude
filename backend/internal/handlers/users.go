@@ -185,12 +185,12 @@ func upsertUser(ctx context.Context, db *sql.DB, auth0ID, email, name string, ro
 		SET email      = EXCLUDED.email,
 		    name       = EXCLUDED.name,
 		    updated_at = NOW()
-		RETURNING id, auth0_id, email, name, role, phone, created_at, updated_at
+		RETURNING id, auth0_id, email, name, role, phone, onboarding_complete, created_at, updated_at
 	`
 	user := &models.User{}
 	err := db.QueryRowContext(ctx, q, auth0ID, email, name, role).Scan(
 		&user.ID, &user.Auth0ID, &user.Email, &user.Name, &user.Role,
-		&user.Phone, &user.CreatedAt, &user.UpdatedAt,
+		&user.Phone, &user.OnboardingComplete, &user.CreatedAt, &user.UpdatedAt,
 	)
 	return user, err
 }

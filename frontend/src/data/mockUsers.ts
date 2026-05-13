@@ -8,6 +8,7 @@ export type MockUser = {
   groupId: GroupId;
   role: string;
   dealIds: string[];
+  onboardingComplete: boolean;
 };
 
 export const MOCK_USERS: MockUser[] = [
@@ -19,6 +20,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'agent',
     role: 'Agent',
     dealIds: ['deal-smith', 'deal-garcia', 'deal-williams', 'deal-johnson', 'deal-chen', 'deal-davis'],
+    onboardingComplete: true,
   },
   {
     id: 'admin-paul',
@@ -28,6 +30,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'admin',
     role: 'Admin',
     dealIds: ['deal-smith', 'deal-garcia', 'deal-williams', 'deal-johnson', 'deal-chen', 'deal-davis'],
+    onboardingComplete: true,
   },
   {
     id: 'buyer-smith',
@@ -37,6 +40,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'buyer',
     role: 'Buyer',
     dealIds: ['deal-smith'],
+    onboardingComplete: true,
   },
   {
     id: 'buyer-garcia',
@@ -46,6 +50,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'buyer',
     role: 'Buyer',
     dealIds: ['deal-garcia'],
+    onboardingComplete: true,
   },
   {
     id: 'seller-williams',
@@ -55,6 +60,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'seller',
     role: 'Seller',
     dealIds: ['deal-williams'],
+    onboardingComplete: true,
   },
   {
     id: 'seller-johnson',
@@ -64,6 +70,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'seller',
     role: 'Seller',
     dealIds: ['deal-johnson'],
+    onboardingComplete: true,
   },
   {
     id: 'buyer-chen',
@@ -73,6 +80,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'buyer',
     role: 'Buyer',
     dealIds: ['deal-chen'],
+    onboardingComplete: true,
   },
   {
     id: 'buyer-davis',
@@ -82,6 +90,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'buyer',
     role: 'Buyer',
     dealIds: ['deal-davis'],
+    onboardingComplete: true,
   },
   {
     id: 'tc-taylor',
@@ -91,6 +100,7 @@ export const MOCK_USERS: MockUser[] = [
     groupId: 'tc',
     role: 'Transaction Coordinator',
     dealIds: ['deal-smith', 'deal-williams'],
+    onboardingComplete: true,
   },
 ];
 

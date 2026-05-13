@@ -26,7 +26,7 @@ type AuthStore = {
   activeUser: AppUser | undefined;
   isLoaded: boolean;
   syncError: string | null;
-  setFromAuth0: (id: string, name: string, email: string, role: string, avatar?: string) => void;
+  setFromAuth0: (id: string, name: string, email: string, role: string, onboardingComplete: boolean, avatar?: string) => void;
   setActiveUser: (userId: string) => void;
   setSyncError: (err: string) => void;
 };
@@ -35,7 +35,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   activeUser: undefined,
   isLoaded: false,
   syncError: null,
-  setFromAuth0: (id, name, email, role, avatar) => {
+  setFromAuth0: (id, name, email, role, onboardingComplete, avatar) => {
     const groupId = ROLE_TO_GROUP[role] ?? 'agent';
     set({
       isLoaded: true,
@@ -47,6 +47,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
         groupId,
         role: ROLE_DISPLAY[role] ?? role,
         dealIds: [],
+        onboardingComplete,
       },
     });
   },

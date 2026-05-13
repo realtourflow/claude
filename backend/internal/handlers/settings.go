@@ -36,6 +36,7 @@ func (h *Handler) PatchProfile(w http.ResponseWriter, r *http.Request) {
 	if req.Phone != nil {
 		_, _ = h.db.ExecContext(r.Context(), `UPDATE users SET phone = $1, updated_at = NOW() WHERE id = $2`, *req.Phone, userID)
 	}
+	_, _ = h.db.ExecContext(r.Context(), `UPDATE users SET onboarding_complete = TRUE, updated_at = NOW() WHERE id = $1`, userID)
 
 	respond(w, http.StatusOK, map[string]bool{"ok": true})
 }
