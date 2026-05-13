@@ -40,7 +40,7 @@ func (h *Handler) ListAgentInvites(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT id, email, name, token, invited_by::TEXT, claimed_at, expires_at, created_at
+		SELECT id, email, name, token::TEXT, invited_by::TEXT, claimed_at, expires_at, created_at
 		FROM agent_invites
 		ORDER BY created_at DESC
 		LIMIT 100
@@ -108,7 +108,7 @@ func (h *Handler) GetAgentInvite(w http.ResponseWriter, r *http.Request) {
 	var expiresAt, createdAt time.Time
 
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT ai.id, ai.email, ai.name, ai.token, ai.invited_by::TEXT,
+		SELECT ai.id, ai.email, ai.name, ai.token::TEXT, ai.invited_by::TEXT,
 		       ai.claimed_at, ai.expires_at, ai.created_at
 		FROM agent_invites ai
 		WHERE ai.token = $1
@@ -168,7 +168,7 @@ func (h *Handler) CreateAgentInvite(w http.ResponseWriter, r *http.Request) {
 	err = h.db.QueryRowContext(r.Context(), `
 		INSERT INTO agent_invites (email, name, invited_by)
 		VALUES ($1, $2, $3)
-		RETURNING id, email, name, token, invited_by::TEXT, expires_at, created_at
+		RETURNING id, email, name, token::TEXT, invited_by::TEXT, expires_at, created_at
 	`, req.Email, req.Name, adminID).Scan(
 		&inv.ID, &inv.Email, &inv.Name, &inv.Token, &inv.InvitedBy, &expiresAt, &createdAt,
 	)
