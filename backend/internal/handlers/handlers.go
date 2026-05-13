@@ -46,6 +46,7 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 	// Public — no auth required
 	r.Get("/invites/role", h.GetInviteRole)
 	r.Get("/invites/{token}", h.GetInvite)
+	r.Get("/agent-invites/{token}", h.GetAgentInvite)
 	r.Get("/calendar/{token}/feed.ics", h.CalendarFeed)
 	r.Post("/arive/webhook", h.AriveWebhook)
 	r.Post("/stripe/webhook", h.StripeWebhook)
@@ -164,6 +165,10 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 		r.Post("/admin/promo-codes", h.CreatePromoCode)
 		r.Delete("/admin/promo-codes/{codeId}", h.DeletePromoCode)
 		r.Get("/admin/audit-log", h.ListAuditLog)
+		r.Get("/admin/agent-invites", h.ListAgentInvites)
+		r.Post("/admin/agent-invites", h.CreateAgentInvite)
+		r.Delete("/admin/agent-invites/{inviteId}", h.DeleteAgentInvite)
+		r.Post("/agent-invites/{token}/claim", h.ClaimAgentInvite)
 	})
 
 	return r

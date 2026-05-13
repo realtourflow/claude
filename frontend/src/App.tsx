@@ -18,6 +18,7 @@ import PermissionsDebug from './pages/PermissionsDebug';
 import ComingSoon from './pages/ComingSoon';
 import SettingsPage from './pages/settings/SettingsPage';
 import InvitePage from './pages/invite/InvitePage';
+import AgentSignupPage from './pages/agent-signup/AgentSignupPage';
 import AgentOnboarding from './pages/onboarding/AgentOnboarding';
 import BuyerOnboarding from './pages/onboarding/BuyerOnboarding';
 import SellerOnboarding from './pages/onboarding/SellerOnboarding';
@@ -171,6 +172,7 @@ export default function App() {
 
         {/* Invite — no layout wrapper */}
         <Route path="/invite/:token" element={<InvitePage />} />
+        <Route path="/agent-signup/:token" element={<AgentSignupPage />} />
 
         {/* Onboarding — no layout wrapper */}
         <Route path="/onboard/agent" element={<AgentOnboarding />} />

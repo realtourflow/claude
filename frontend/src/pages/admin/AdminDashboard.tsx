@@ -18,6 +18,7 @@ import {
   Mail,
   ShieldCheck,
   UserX,
+  UserPlus,
   Settings,
   Tag,
   Plus,
@@ -25,6 +26,9 @@ import {
   Save,
   ScrollText,
   Clock,
+  X,
+  Copy,
+  CheckCheck,
 } from 'lucide-react';
 import { FAST_PASS_UPSELLS } from '../../data/mockFastPass';
 import { NEXT_STEP_LABELS, SMOOTH_EXIT_UPSELLS, nextStepQualifiesForBridge } from '../../data/mockSmoothExit';
@@ -1123,8 +1127,120 @@ const ROLE_STYLES: Record<string, { badge: string; label: string }> = {
   lending_partner: { badge: 'bg-blue-100 text-blue-700',    label: 'Lending Partner' },
 };
 
+function InviteAgentModal({ onClose }: { onClose: () => void }) {
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSubmitting(true);
+    try {
+      const result = await api.post<{ token: string }>('/admin/agent-invites', { email: email.trim(), name: name.trim() });
+      setInviteLink(`${window.location.origin}/agent-signup/${result.token}`);
+    } catch {
+      // silent — link still usable if email fails
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function copyLink() {
+    if (!inviteLink) return;
+    navigator.clipboard.writeText(inviteLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <UserPlus size={18} className="text-brand-navy" />
+            <h2 className="text-base font-bold text-brand-navy">Invite Agent</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        {!inviteLink ? (
+          <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
+            <p className="text-sm text-gray-500">
+              Enter the agent's email and we'll send them a signup link. They'll create their account and land directly in onboarding.
+            </p>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-gray-600">Email address *</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="agent@example.com"
+                required
+                className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-sm outline-none focus:border-brand-navy focus:ring-1 focus:ring-brand-navy/20"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-gray-600">Name (optional)</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Jane Smith"
+                className="w-full rounded-xl border border-gray-200 px-3.5 py-2.5 text-sm outline-none focus:border-brand-navy focus:ring-1 focus:ring-brand-navy/20"
+              />
+            </div>
+            <div className="flex gap-2.5 pt-1">
+              <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={submitting || !email.trim()} className="flex-1 rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/80 disabled:opacity-50 transition-colors">
+                {submitting ? 'Sending…' : 'Send Invite'}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="px-6 py-5 space-y-4">
+            <div className="flex items-start gap-3 rounded-xl bg-green-50 p-3.5">
+              <CheckCheck size={18} className="mt-0.5 flex-shrink-0 text-green-600" />
+              <div>
+                <p className="text-sm font-semibold text-green-800">Invite sent to {email}</p>
+                <p className="text-xs text-green-600 mt-0.5">They'll receive an email with a signup link. You can also copy the link below to share directly.</p>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-gray-600">Signup link</label>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={inviteLink}
+                  className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-2.5 text-xs text-gray-600 outline-none"
+                />
+                <button
+                  onClick={copyLink}
+                  className="flex-shrink-0 flex items-center gap-1.5 rounded-xl border border-gray-200 px-3.5 py-2.5 text-xs font-semibold text-brand-navy hover:bg-gray-50 transition-colors"
+                >
+                  {copied ? <><CheckCheck size={13} className="text-green-600" /> Copied</> : <><Copy size={13} /> Copy</>}
+                </button>
+              </div>
+            </div>
+            <button onClick={onClose} className="w-full rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/80 transition-colors">
+              Done
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function UserManagement() {
   const { users, loading, deactivateUser, activateUser } = useUsers();
+  const [showInviteModal, setShowInviteModal] = useState(false);
 
   const groups = [
     { id: 'agent',  label: 'Agents' },
@@ -1263,12 +1379,17 @@ function UserManagement() {
       })}
 
       <div className="rounded-xl border-2 border-dashed border-gray-200 px-5 py-6 text-center">
-        <Users size={20} className="mx-auto mb-2 text-gray-300" />
-        <p className="text-sm font-medium text-gray-500 mb-3">Need to add a new agent or TC?</p>
-        <button className="rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy/80 transition-colors">
-          Invite User
+        <UserPlus size={20} className="mx-auto mb-2 text-gray-300" />
+        <p className="text-sm font-medium text-gray-500 mb-3">Invite a new agent to join RealTour Flow</p>
+        <button
+          onClick={() => setShowInviteModal(true)}
+          className="inline-flex items-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy/80 transition-colors"
+        >
+          <UserPlus size={14} /> Invite Agent
         </button>
       </div>
+
+      {showInviteModal && <InviteAgentModal onClose={() => setShowInviteModal(false)} />}
     </div>
   );
 }

@@ -76,6 +76,10 @@
           "value": "us-east-1"
         },
         {
+          "name": "FRONTEND_URL",
+          "value": "https://claude-pi-lime.vercel.app"
+        },
+        {
           "name": "ARIVE_API_URL",
           "value": "https://2720886.myarive.com"
         },

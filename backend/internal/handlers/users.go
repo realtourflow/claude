@@ -26,10 +26,10 @@ func (h *Handler) SyncUser(w http.ResponseWriter, r *http.Request) {
 
 	auth0ID := claims.RegisteredClaims.Subject
 
-	custom, ok := claims.CustomClaims.(*middleware.CustomClaims)
-	if !ok || len(custom.Roles) == 0 {
-		http.Error(w, "no role assigned — assign a role in Auth0 dashboard first", http.StatusForbidden)
-		return
+	custom, _ := claims.CustomClaims.(*middleware.CustomClaims)
+	jwtRole := ""
+	if custom != nil && len(custom.Roles) > 0 {
+		jwtRole = custom.Roles[0]
 	}
 
 	var req syncUserRequest
@@ -38,7 +38,20 @@ func (h *Handler) SyncUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	role := models.UserRole(custom.Roles[0])
+	var role models.UserRole
+	if jwtRole != "" {
+		role = models.UserRole(jwtRole)
+	} else {
+		// No role in JWT — check if user was pre-created via agent invite claim
+		var dbRole string
+		err := h.db.QueryRowContext(r.Context(),
+			`SELECT role FROM users WHERE auth0_id = $1`, auth0ID).Scan(&dbRole)
+		if err != nil {
+			http.Error(w, "no role assigned — request an invite from your administrator", http.StatusForbidden)
+			return
+		}
+		role = models.UserRole(dbRole)
+	}
 
 	user, err := upsertUser(r.Context(), h.db, auth0ID, req.Email, req.Name, role)
 	if err != nil {

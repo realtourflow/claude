@@ -22,22 +22,38 @@ export function AuthSetup({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isAuthenticated || !user) return;
-    api.post<SyncUserResponse>('/users/sync', {
-      email: user.email ?? '',
-      name: user.name ?? '',
-    }).then((dbUser) => {
-      setFromAuth0(dbUser.id, dbUser.name, dbUser.email, dbUser.role, dbUser.onboarding_complete, user.picture);
-      const pendingToken = localStorage.getItem('pendingInvite');
-      const pendingEmail = localStorage.getItem('pendingInviteEmail');
-      if (pendingToken && pendingEmail) {
-        localStorage.removeItem('pendingInvite');
-        localStorage.removeItem('pendingInviteEmail');
-        api.post(`/invites/${pendingToken}/claim`, { email: pendingEmail, name: dbUser.name }).catch(() => {});
-      }
-    }).catch((err) => {
-      console.error('users/sync failed:', err);
-      setSyncError(String(err));
-    });
+
+    const agentInviteToken = localStorage.getItem('pendingAgentInvite');
+    const agentInviteEmail = localStorage.getItem('pendingAgentInviteEmail');
+
+    const doSync = () =>
+      api.post<SyncUserResponse>('/users/sync', {
+        email: user.email ?? '',
+        name: user.name ?? '',
+      }).then((dbUser) => {
+        setFromAuth0(dbUser.id, dbUser.name, dbUser.email, dbUser.role, dbUser.onboarding_complete, user.picture);
+        const pendingToken = localStorage.getItem('pendingInvite');
+        const pendingEmail = localStorage.getItem('pendingInviteEmail');
+        if (pendingToken && pendingEmail) {
+          localStorage.removeItem('pendingInvite');
+          localStorage.removeItem('pendingInviteEmail');
+          api.post(`/invites/${pendingToken}/claim`, { email: pendingEmail, name: dbUser.name }).catch(() => {});
+        }
+      }).catch((err) => {
+        console.error('users/sync failed:', err);
+        setSyncError(String(err));
+      });
+
+    if (agentInviteToken && agentInviteEmail) {
+      localStorage.removeItem('pendingAgentInvite');
+      localStorage.removeItem('pendingAgentInviteEmail');
+      api.post(`/agent-invites/${agentInviteToken}/claim`, {
+        email: agentInviteEmail,
+        name: user.name ?? '',
+      }).catch(() => {}).finally(doSync);
+    } else {
+      doSync();
+    }
   }, [isAuthenticated, user, setFromAuth0, setSyncError]);
 
   return <>{children}</>;
