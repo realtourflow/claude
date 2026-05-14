@@ -197,6 +197,7 @@ func upsertUser(ctx context.Context, db *sql.DB, auth0ID, email, name string, ro
 		ON CONFLICT (auth0_id) DO UPDATE
 		SET email      = EXCLUDED.email,
 		    name       = EXCLUDED.name,
+		    role       = EXCLUDED.role,
 		    updated_at = NOW()
 		RETURNING id, auth0_id, email, name, role, phone, onboarding_complete, created_at, updated_at
 	`
