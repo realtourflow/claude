@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Deal, DealStage, LoanMilestones } from '../../data/mockDeals';
 import { useDeal, patchStage } from '../../hooks/useDeals';
 import { ApiError } from '../../api/client';
@@ -3806,15 +3806,22 @@ function DealHeader({ deal, onFlagChange }: { deal: Deal; onFlagChange?: (flags:
 export default function DealDetail() {
   const { dealId } = useParams<{ dealId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const activeUser = useAuthStore((s) => s.activeUser);
-  const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const initialTab = (() => {
+    const t = searchParams.get('tab');
+    const valid: TabId[] = ['overview', 'tasks', 'messages', 'documents', 'timeline', 'vendors'];
+    return (valid as string[]).includes(t ?? '') ? (t as TabId) : 'overview';
+  })();
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab);
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
   const [stageGateError, setStageGateError] = useState<{ blockingTasks: { id: string; title: string }[] } | null>(null);
 
-  const { deal: apiDeal, loading: dealLoading, refresh: refreshDeal } = useDeal(dealId);
+  const { deal: apiDeal, loading: dealLoading, error: dealError, refresh: refreshDeal } = useDeal(dealId);
   const { tasks: dealTasks, refresh: refreshTasks } = useTasks(dealId ?? '');
   const { stageByDeal, setStage } = useDealStageStore();
   const addClientNotification = useNotificationStore((s) => s.addClientNotification);
+  const { docs: dealDocs, loading: docsLoading, refresh: refreshDocs } = useDocuments(dealId ?? '');
 
   if (dealLoading) {
     return (
@@ -3842,7 +3849,15 @@ export default function DealDetail() {
           <ArrowLeft size={14} /> Back
         </button>
         <div className="rounded-xl bg-white p-10 text-center shadow-sm">
-          <p className="text-gray-400">Deal not found.</p>
+          <p className="text-sm text-gray-500">
+            {dealError ? "We couldn't load this deal — it may have been removed, or you may not have access." : 'Deal not found.'}
+          </p>
+          <button
+            onClick={() => refreshDeal()}
+            className="mt-4 rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy/90 transition-colors"
+          >
+            Try again
+          </button>
         </div>
       </div>
     );
@@ -3945,7 +3960,6 @@ export default function DealDetail() {
     }
   }
 
-  const { docs: dealDocs, loading: docsLoading, refresh: refreshDocs } = useDocuments(deal.id ?? '');
   const tabCounts: Partial<Record<TabId, number>> = {
     tasks: dealTasks.filter((t) => t.status !== 'completed').length,
     documents: dealDocs.length,

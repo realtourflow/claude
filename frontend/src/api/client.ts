@@ -11,8 +11,14 @@ export class ApiError extends Error {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(status: number, statusText: string, body: any) {
-    super(`${status} ${statusText}`);
+  constructor(status: number, statusText: string, body: any, bodyText?: string) {
+    const bodyMsg =
+      (body && typeof body === 'object' && typeof body.message === 'string' && body.message) ||
+      (body && typeof body === 'object' && typeof body.error === 'string' && body.error) ||
+      (typeof bodyText === 'string' && bodyText.trim()) ||
+      '';
+    const parts = [String(status), statusText, bodyMsg].filter(Boolean);
+    super(parts.join(' — '));
     this.status = status;
     this.body = body;
   }
@@ -32,10 +38,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
   if (!res.ok) {
     let body: unknown = null;
-    try { body = await res.json(); } catch { /* ignore */ }
-    throw new ApiError(res.status, res.statusText, body);
+    let bodyText: string | undefined;
+    try {
+      bodyText = await res.text();
+      if (bodyText) {
+        try { body = JSON.parse(bodyText); } catch { /* not JSON, keep text */ }
+      }
+    } catch { /* ignore */ }
+    throw new ApiError(res.status, res.statusText, body, bodyText);
   }
-  return res.json() as Promise<T>;
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {

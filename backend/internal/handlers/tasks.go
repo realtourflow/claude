@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
@@ -187,6 +188,10 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, http.StatusCreated, task)
+
+	if req.DueDate != nil && *req.DueDate != "" {
+		go h.pushTaskDueEvent(context.Background(), task.ID)
+	}
 }
 
 func (h *Handler) UpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
@@ -232,4 +237,8 @@ func (h *Handler) UpdateTaskStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, http.StatusOK, task)
+
+	// On completion/skip the calendar event should disappear; on any other
+	// status change we re-push so the event reflects the latest due date.
+	go h.pushTaskDueEvent(context.Background(), task.ID)
 }

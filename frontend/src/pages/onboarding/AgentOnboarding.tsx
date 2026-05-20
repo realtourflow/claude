@@ -5,11 +5,13 @@ import {
   User, Building2, Users, MessageSquare, Zap,
   FileText, Upload, Trash2,
 } from 'lucide-react';
-import { useAgentDocStore, DocType, DOC_TYPE_LABELS } from '../../store/agentDocStore';
+import { DocType, DOC_TYPE_LABELS } from '../../hooks/useAgentDocs';
 import OnboardingLayout from './OnboardingLayout';
 import { useAgentSetupStore } from '../../store/agentSetupStore';
 import { api } from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
+import { uploadAgentPhoto } from '../../hooks/useAgentPhoto';
+import { useAgentDocs } from '../../hooks/useAgentDocs';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -99,18 +101,6 @@ const BROKERAGE_OPTIONS = [
   'Keller Williams', 'RE/MAX', 'Coldwell Banker', 'eXp Realty',
   'Compass', 'Century 21', 'Berkshire Hathaway HomeServices',
   'Independent', 'Other',
-];
-
-// Sample avatars for the photo picker (demo only)
-const AVATAR_OPTIONS = [
-  'https://i.pravatar.cc/150?img=47',
-  'https://i.pravatar.cc/150?img=32',
-  'https://i.pravatar.cc/150?img=9',
-  'https://i.pravatar.cc/150?img=15',
-  'https://i.pravatar.cc/150?img=22',
-  'https://i.pravatar.cc/150?img=55',
-  'https://i.pravatar.cc/150?img=44',
-  'https://i.pravatar.cc/150?img=60',
 ];
 
 const INTEGRATION_TOOLS: {
@@ -326,46 +316,82 @@ function PhoneLicenseScreen({
 // ─── Screen 4: Profile Photo ──────────────────────────────────────────────────
 
 function PhotoScreen({
-  selected, onSelect, onContinue, onSkip,
+  selected, name, onSelect, onContinue, onSkip,
 }: {
-  selected: string; onSelect: (url: string) => void;
+  selected: string; name: string; onSelect: (url: string) => void;
   onContinue: () => void; onSkip: () => void;
 }) {
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const initials = (name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]?.toUpperCase() ?? '')
+    .join('') || '?';
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setErr('Image is too large — max 5 MB.');
+      return;
+    }
+    setErr('');
+    setUploading(true);
+    try {
+      const url = await uploadAgentPhoto(file);
+      onSelect(url);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not process that image.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   return (
     <div className="flex flex-col items-center">
       <Question
         text="Add your headshot"
-        note="Clients see this in their portal. Pick one below or upload your own."
+        note="Clients see this in their portal. Upload a photo from your device."
       />
-      <div className="w-full max-w-sm">
-        <div className="grid grid-cols-4 gap-3 mb-5">
-          {AVATAR_OPTIONS.map((url) => (
-            <button
-              key={url}
-              onClick={() => onSelect(url)}
-              className={[
-                'relative aspect-square rounded-xl overflow-hidden ring-offset-2 transition-all',
-                selected === url ? 'ring-2 ring-brand-navy scale-105' : 'ring-1 ring-gray-200 hover:ring-gray-300',
-              ].join(' ')}
-            >
-              <img src={url} alt="avatar" className="h-full w-full object-cover" />
-              {selected === url && (
-                <div className="absolute inset-0 flex items-center justify-center bg-brand-navy/30">
-                  <CheckCircle2 size={20} className="text-white drop-shadow" />
-                </div>
-              )}
-            </button>
-          ))}
+      <div className="w-full max-w-sm flex flex-col items-center">
+        {/* Preview */}
+        <div className="mb-5 flex h-32 w-32 items-center justify-center">
+          {selected ? (
+            <img
+              src={selected}
+              alt="Your headshot"
+              className="h-32 w-32 rounded-2xl object-cover ring-2 ring-brand-navy/10 shadow-sm"
+            />
+          ) : (
+            <div className="flex h-32 w-32 items-center justify-center rounded-2xl bg-brand-navy/10 ring-2 ring-brand-navy/10 text-3xl font-bold text-brand-navy">
+              {initials}
+            </div>
+          )}
         </div>
 
-        {/* Upload placeholder */}
-        <div className="mb-4 rounded-xl border-2 border-dashed border-gray-200 px-4 py-3 text-center">
-          <p className="text-xs font-semibold text-gray-400">Upload from your device</p>
-          <p className="text-[11px] text-gray-300 mt-0.5">Photo upload coming in v1.1</p>
-        </div>
+        {/* Upload */}
+        <label className="mb-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-4 py-4 text-sm font-semibold text-brand-navy hover:border-brand-navy/30 hover:bg-white transition-colors">
+          <Upload size={16} />
+          {uploading ? 'Uploading…' : selected ? 'Choose a different photo' : 'Upload from your device'}
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFile}
+            disabled={uploading}
+          />
+        </label>
+        <p className="mb-4 text-[11px] text-gray-400">JPG or PNG · up to 5 MB</p>
+        {err && <p className="mb-3 text-xs text-red-500 text-center">{err}</p>}
 
-        <ContinueBtn onClick={onContinue} disabled={!selected} />
-        <SkipLink onClick={onSkip} />
+        <div className="w-full">
+          <ContinueBtn onClick={onContinue} disabled={!selected} />
+          <SkipLink onClick={onSkip} />
+        </div>
       </div>
     </div>
   );
@@ -758,7 +784,7 @@ function IntegrationsScreen({
           })}
         </div>
         <p className="mb-4 text-center text-[11px] text-gray-300">
-          We'll notify you when each integration goes live — no action needed now.
+          You can connect any of these from Settings → Integrations later.
         </p>
         <ContinueBtn onClick={onContinue} label="Almost done!" />
         <SkipLink onClick={onContinue} label="None of these — skip" />
@@ -777,19 +803,23 @@ const ONBOARDING_DOC_TYPES: { docType: DocType; desc: string }[] = [
 ];
 
 function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
-  const { addDoc, removeDoc, docsByAgent } = useAgentDocStore();
-  const docs = docsByAgent['agent-sarah'] ?? [];
+  const { docs, uploadDoc, removeDoc } = useAgentDocs();
+  const [pendingType, setPendingType] = useState<DocType | null>(null);
+  const [err, setErr] = useState<string>('');
 
-  function simulateUpload(docType: DocType) {
-    if (docs.some((d) => d.docType === docType)) return;
-    addDoc({
-      id: `doc-${docType}-${Date.now()}`,
-      agentId: 'agent-sarah',
-      name: DOC_TYPE_LABELS[docType],
-      docType,
-      fileName: `${DOC_TYPE_LABELS[docType].replace(/ /g, '_')}_Template.pdf`,
-      uploadedAt: new Date().toISOString(),
-    });
+  async function handleFile(docType: DocType, e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setErr('');
+    setPendingType(docType);
+    try {
+      await uploadDoc(file, docType, DOC_TYPE_LABELS[docType], '');
+    } catch (uploadErr) {
+      setErr(uploadErr instanceof Error ? uploadErr.message : 'Upload failed. Please try again.');
+    } finally {
+      setPendingType(null);
+    }
   }
 
   return (
@@ -804,10 +834,11 @@ function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
         </p>
       </div>
 
-      <div className="space-y-2 mb-6">
+      <div className="space-y-2 mb-4">
         {ONBOARDING_DOC_TYPES.map(({ docType, desc }) => {
-          const added = docs.some((d) => d.docType === docType);
           const doc = docs.find((d) => d.docType === docType);
+          const added = !!doc;
+          const isUploading = pendingType === docType;
           return (
             <div key={docType} className={`flex items-center gap-3 rounded-xl border px-4 py-3.5 transition-all ${
               added ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-white'
@@ -829,21 +860,34 @@ function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
                 <button
                   onClick={() => removeDoc(doc!.id)}
                   className="flex-shrink-0 text-gray-300 hover:text-red-400 transition-colors"
+                  aria-label={`Remove ${DOC_TYPE_LABELS[docType]}`}
                 >
                   <Trash2 size={14} />
                 </button>
               ) : (
-                <button
-                  onClick={() => simulateUpload(docType)}
-                  className="flex-shrink-0 flex items-center gap-1.5 rounded-lg border border-brand-navy/20 bg-brand-navy/5 px-3 py-1.5 text-xs font-bold text-brand-navy hover:bg-brand-navy/10 transition-colors"
-                >
-                  <Upload size={11} /> Upload
-                </button>
+                <label className={[
+                  'flex-shrink-0 flex items-center gap-1.5 rounded-lg border border-brand-navy/20 bg-brand-navy/5 px-3 py-1.5 text-xs font-bold text-brand-navy transition-colors',
+                  isUploading ? 'opacity-60 cursor-progress' : 'cursor-pointer hover:bg-brand-navy/10',
+                ].join(' ')}>
+                  <Upload size={11} />
+                  {isUploading ? 'Uploading…' : 'Upload'}
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    className="hidden"
+                    disabled={isUploading}
+                    onChange={(e) => handleFile(docType, e)}
+                  />
+                </label>
               )}
             </div>
           );
         })}
       </div>
+
+      {err && (
+        <p className="mb-3 text-xs text-red-500 text-center">{err}</p>
+      )}
 
       <button
         onClick={onContinue}
@@ -864,6 +908,105 @@ function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
 
 // ─── Screen 13: Commission Defaults ───────────────────────────────────────────
 
+function CommissionInput({
+  label, isPct, pct, amount, onToggle, onPctChange, onAmountChange, salePreview,
+}: {
+  label: string;
+  isPct: boolean;
+  pct: number;
+  amount: number;
+  onToggle: () => void;
+  onPctChange: (v: number) => void;
+  onAmountChange: (v: number) => void;
+  salePreview?: number;
+}) {
+  // Local string buffer for the visible input so typing "2." or clearing the
+  // field doesn't snap back to 0 on every keystroke. We commit to the parent
+  // numeric state on each valid change.
+  const [pctStr, setPctStr] = useState<string>(String(pct ?? ''));
+  const [amountStr, setAmountStr] = useState<string>(String(amount ?? ''));
+
+  useEffect(() => {
+    setPctStr(String(pct ?? ''));
+  }, [pct]);
+  useEffect(() => {
+    setAmountStr(String(amount ?? ''));
+  }, [amount]);
+
+  const dollarEquiv = salePreview && isPct ? Math.round(salePreview * pct / 100) : null;
+  const pctEquiv = salePreview && !isPct && salePreview > 0 ? ((amount / salePreview) * 100).toFixed(2) : null;
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+      <p className="text-sm font-bold text-brand-navy">{label}</p>
+      {/* Toggle */}
+      <div className="flex rounded-xl overflow-hidden border border-gray-200">
+        <button
+          onClick={() => !isPct && onToggle()}
+          className={`flex-1 py-2 text-xs font-bold transition-colors ${isPct ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
+        >
+          Percentage %
+        </button>
+        <button
+          onClick={() => isPct && onToggle()}
+          className={`flex-1 py-2 text-xs font-bold transition-colors ${!isPct ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
+        >
+          Fixed Amount $
+        </button>
+      </div>
+      {/* Input */}
+      {isPct ? (
+        <div className="flex items-center gap-2 rounded-xl border border-brand-navy/20 bg-white px-4 py-3">
+          <input
+            type="text"
+            inputMode="decimal"
+            value={pctStr}
+            onChange={(e) => {
+              const v = e.target.value;
+              // Allow empty, digits, and one decimal point.
+              if (v === '' || /^\d*\.?\d*$/.test(v)) {
+                setPctStr(v);
+                const n = parseFloat(v);
+                onPctChange(isNaN(n) ? 0 : n);
+              }
+            }}
+            className="flex-1 text-xl font-black text-brand-navy outline-none bg-transparent"
+          />
+          <span className="text-lg font-bold text-gray-400">%</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-xl border border-brand-navy/20 bg-white px-4 py-3">
+          <span className="text-lg font-bold text-gray-400">$</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={amountStr}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '' || /^\d+$/.test(v)) {
+                setAmountStr(v);
+                const n = parseInt(v, 10);
+                onAmountChange(isNaN(n) ? 0 : n);
+              }
+            }}
+            className="flex-1 text-xl font-black text-brand-navy outline-none bg-transparent"
+          />
+        </div>
+      )}
+      {/* Equivalent */}
+      {salePreview && (
+        <p className="text-xs text-gray-400 text-center">
+          {isPct && dollarEquiv !== null
+            ? `≈ $${dollarEquiv.toLocaleString()} on a $${salePreview.toLocaleString()} sale`
+            : !isPct && pctEquiv !== null
+            ? `≈ ${pctEquiv}% of a $${salePreview.toLocaleString()} sale`
+            : null}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function CommissionScreen({
   data, onChange, onContinue, onSkip,
 }: {
@@ -872,79 +1015,6 @@ function CommissionScreen({
   onContinue: () => void;
   onSkip: () => void;
 }) {
-  function CommissionInput({
-    label, isPct, pct, amount, onToggle, onPctChange, onAmountChange, salePreview,
-  }: {
-    label: string;
-    isPct: boolean;
-    pct: number;
-    amount: number;
-    onToggle: () => void;
-    onPctChange: (v: number) => void;
-    onAmountChange: (v: number) => void;
-    salePreview?: number;
-  }) {
-    const dollarEquiv = salePreview && isPct ? Math.round(salePreview * pct / 100) : null;
-    const pctEquiv = salePreview && !isPct && salePreview > 0 ? ((amount / salePreview) * 100).toFixed(2) : null;
-    return (
-      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
-        <p className="text-sm font-bold text-brand-navy">{label}</p>
-        {/* Toggle */}
-        <div className="flex rounded-xl overflow-hidden border border-gray-200">
-          <button
-            onClick={() => !isPct && onToggle()}
-            className={`flex-1 py-2 text-xs font-bold transition-colors ${isPct ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
-          >
-            Percentage %
-          </button>
-          <button
-            onClick={() => isPct && onToggle()}
-            className={`flex-1 py-2 text-xs font-bold transition-colors ${!isPct ? 'bg-brand-navy text-white' : 'bg-white text-gray-500 hover:bg-gray-100'}`}
-          >
-            Fixed Amount $
-          </button>
-        </div>
-        {/* Input */}
-        {isPct ? (
-          <div className="flex items-center gap-2 rounded-xl border border-brand-navy/20 bg-white px-4 py-3">
-            <input
-              type="number"
-              step="0.25"
-              min="0"
-              max="10"
-              value={pct}
-              onChange={(e) => onPctChange(parseFloat(e.target.value) || 0)}
-              className="flex-1 text-xl font-black text-brand-navy outline-none bg-transparent"
-            />
-            <span className="text-lg font-bold text-gray-400">%</span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 rounded-xl border border-brand-navy/20 bg-white px-4 py-3">
-            <span className="text-lg font-bold text-gray-400">$</span>
-            <input
-              type="number"
-              step="100"
-              min="0"
-              value={amount}
-              onChange={(e) => onAmountChange(parseFloat(e.target.value) || 0)}
-              className="flex-1 text-xl font-black text-brand-navy outline-none bg-transparent"
-            />
-          </div>
-        )}
-        {/* Equivalent */}
-        {salePreview && (
-          <p className="text-xs text-gray-400 text-center">
-            {isPct && dollarEquiv !== null
-              ? `≈ $${dollarEquiv.toLocaleString()} on a $${salePreview.toLocaleString()} sale`
-              : !isPct && pctEquiv !== null
-              ? `≈ ${pctEquiv}% of a $${salePreview.toLocaleString()} sale`
-              : null}
-          </p>
-        )}
-      </div>
-    );
-  }
-
   return (
     <div>
       <Question
@@ -983,10 +1053,9 @@ function CommissionScreen({
 
 function DoneScreen({ data }: { data: AgentSetupData }) {
   const navigate = useNavigate();
-  const { docsByAgent } = useAgentDocStore();
-  const activeUser = useAuthStore((s) => s.activeUser);
+  const { docs } = useAgentDocs();
   const markOnboardingComplete = useAuthStore((s) => s.markOnboardingComplete);
-  const docCount = (docsByAgent[activeUser?.id ?? 'agent-sarah'] ?? []).length;
+  const docCount = docs.length;
   const isSolo = !data.tcName;
 
   useEffect(() => {
@@ -997,16 +1066,19 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
       .then(() => markOnboardingComplete())
       .catch(() => markOnboardingComplete());
 
+    // Keys here mirror what `ProfileSection` in SettingsPage reads, so the
+    // onboarding answers are visible the moment the agent lands in Settings.
     const settings = {
       title: data.title,
-      license_number: data.licenseNumber,
+      phone: data.phone,
+      licenseNumber: data.licenseNumber,
       brokerage: data.brokerage,
-      brokerage_address: data.brokerageAddress,
+      brokerageAddress: data.brokerageAddress,
       bio: data.bio,
-      photo_url: data.photoUrl,
-      lender_choice: data.lenderChoice,
-      buyer_welcome_message: data.buyerMessage,
-      seller_welcome_message: data.sellerMessage,
+      photoUrl: data.photoUrl,
+      lenderChoice: data.lenderChoice,
+      buyerWelcomeMessage: data.buyerMessage,
+      sellerWelcomeMessage: data.sellerMessage,
       tc: data.tcName ? { name: data.tcName, email: data.tcEmail, phone: data.tcPhone } : null,
       notifications: {
         deal_stage: data.notifDealStage,
@@ -1023,17 +1095,17 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
         skyslope: data.toolSkyslope,
         zapier: data.toolZapier,
       },
-      buyer_commission: {
-        is_pct: data.buyerCommissionIsPct,
+      buyerCommission: {
+        isPct: data.buyerCommissionIsPct,
         pct: data.buyerCommissionIsPct ? data.buyerCommissionPct : null,
         amount: data.buyerCommissionIsPct ? null : data.buyerCommissionAmount,
       },
-      seller_commission: {
-        is_pct: data.sellerCommissionIsPct,
+      sellerCommission: {
+        isPct: data.sellerCommissionIsPct,
         pct: data.sellerCommissionIsPct ? data.sellerCommissionPct : null,
         amount: data.sellerCommissionIsPct ? null : data.sellerCommissionAmount,
       },
-      setup_complete: true,
+      setupComplete: true,
     };
     api.put('/me/settings', settings).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1152,6 +1224,7 @@ export default function AgentOnboarding() {
       case 4: return (
         <PhotoScreen
           selected={data.photoUrl}
+          name={data.name}
           onSelect={(v) => set('photoUrl', v)}
           onContinue={advance}
           onSkip={advance}

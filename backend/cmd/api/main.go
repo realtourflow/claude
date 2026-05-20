@@ -19,6 +19,7 @@ import (
 
 	appconfig "realtourflow/internal/config"
 	"realtourflow/internal/arive"
+	"realtourflow/internal/calendar"
 	"realtourflow/internal/db"
 	"realtourflow/internal/docusign"
 	"realtourflow/internal/handlers"
@@ -77,7 +78,28 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
-	h := handlers.New(database, s3Client, cfg.S3Bucket, ariveClient, cfg.StripeSecretKey, cfg.StripeWebhookSecret, cfg.ResendAPIKey, cfg.FrontendURL, dsClient)
+	h := handlers.New(handlers.Deps{
+		DB:                  database,
+		S3Client:            s3Client,
+		S3Bucket:            cfg.S3Bucket,
+		AriveClient:         ariveClient,
+		StripeKey:           cfg.StripeSecretKey,
+		StripeWebhookSecret: cfg.StripeWebhookSecret,
+		ResendKey:           cfg.ResendAPIKey,
+		FrontendURL:         cfg.FrontendURL,
+		DocuSignClient:      dsClient,
+		GoogleOAuth: calendar.GoogleConfig(
+			cfg.GoogleOAuthClientID,
+			cfg.GoogleOAuthClientSecret,
+			cfg.GoogleOAuthRedirectURL,
+		),
+		MicrosoftOAuth: calendar.MicrosoftConfig(
+			cfg.MicrosoftOAuthClientID,
+			cfg.MicrosoftOAuthClientSecret,
+			cfg.MicrosoftOAuthRedirectURL,
+			cfg.MicrosoftOAuthTenant,
+		),
+	})
 	r.Mount("/api", h.Routes(middleware.Auth0(cfg.Auth0Domain, cfg.Auth0Audience)))
 
 	srv := &http.Server{

@@ -27,6 +27,13 @@ type Config struct {
 	DocuSignUserID         string
 	DocuSignPrivateKey     string
 	DocuSignBaseURL        string
+	GoogleOAuthClientID     string
+	GoogleOAuthClientSecret string
+	GoogleOAuthRedirectURL  string
+	MicrosoftOAuthClientID     string
+	MicrosoftOAuthClientSecret string
+	MicrosoftOAuthRedirectURL  string
+	MicrosoftOAuthTenant       string // 'common' (multi-tenant + personal) or specific tenant ID
 }
 
 func Load() *Config {
@@ -52,6 +59,15 @@ func Load() *Config {
 		DocuSignUserID:         getEnv("DOCUSIGN_USER_ID", ""),
 		DocuSignPrivateKey:     getEnv("DOCUSIGN_PRIVATE_KEY", ""),
 		DocuSignBaseURL:        getEnv("DOCUSIGN_BASE_URL", "https://demo.docusign.net"),
+
+		GoogleOAuthClientID:     getEnv("GOOGLE_OAUTH_CLIENT_ID", ""),
+		GoogleOAuthClientSecret: getEnv("GOOGLE_OAUTH_CLIENT_SECRET", ""),
+		GoogleOAuthRedirectURL:  getEnv("GOOGLE_OAUTH_REDIRECT_URL", ""),
+
+		MicrosoftOAuthClientID:     getEnv("MICROSOFT_OAUTH_CLIENT_ID", ""),
+		MicrosoftOAuthClientSecret: getEnv("MICROSOFT_OAUTH_CLIENT_SECRET", ""),
+		MicrosoftOAuthRedirectURL:  getEnv("MICROSOFT_OAUTH_REDIRECT_URL", ""),
+		MicrosoftOAuthTenant:       getEnv("MICROSOFT_OAUTH_TENANT", "common"),
 	}
 }
 

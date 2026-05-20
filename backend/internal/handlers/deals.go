@@ -365,6 +365,12 @@ func (h *Handler) AdvanceStage(w http.ResponseWriter, r *http.Request) {
 		"to_stage":   string(req.Stage),
 	})
 
+	// Push to the agent's connected calendars (Google / Outlook) in the
+	// background. Calendar push must never block the API response or fail
+	// the stage advance — see pushDealClosingEvent for the best-effort
+	// error handling.
+	go h.pushDealClosingEvent(context.Background(), dealID)
+
 	// Notify participants of the stage change in background
 	go func() {
 		stageLabelMap := map[models.DealStage]string{

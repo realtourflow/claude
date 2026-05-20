@@ -15,6 +15,8 @@ import {
 import { useVendors, Vendor, VendorInput } from '../../hooks/useVendors';
 import { useSettings } from '../../hooks/useSettings';
 import { useMLSConnection } from '../../hooks/useMLS';
+import { uploadAgentPhoto } from '../../hooks/useAgentPhoto';
+import { useIntegrations } from '../../hooks/useIntegrations';
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
@@ -39,23 +41,43 @@ const EMPTY_FORM = (): VendorFormData => ({
 
 function VendorModal({
   initial,
+  defaultCategory,
   onSave,
   onClose,
 }: {
   initial?: Vendor;
-  onSave: (data: VendorFormData) => void;
+  defaultCategory?: VendorCategory;
+  onSave: (data: VendorFormData) => Promise<void> | void;
   onClose: () => void;
 }) {
-  const [form, setForm] = useState<VendorFormData>(
-    initial ? { ...initial } : EMPTY_FORM()
-  );
+  const [form, setForm] = useState<VendorFormData>(() => {
+    if (initial) return { ...initial };
+    const base = EMPTY_FORM();
+    if (defaultCategory) base.category = defaultCategory;
+    return base;
+  });
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState('');
 
   function set<K extends keyof VendorFormData>(k: K, v: VendorFormData[K]) {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
   const isEdit = !!initial;
-  const canSave = form.company.trim().length > 0;
+  const canSave = form.company.trim().length > 0 && !saving;
+
+  async function handleClick() {
+    if (!canSave) return;
+    setSaving(true);
+    setSaveErr('');
+    try {
+      await onSave(form);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : 'Failed to save vendor. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
@@ -195,25 +217,31 @@ function VendorModal({
         </div>
 
         {/* Footer */}
-        <div className="border-t px-5 py-4 flex gap-3 flex-shrink-0">
-          <button
-            onClick={onClose}
-            className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={() => canSave && onSave(form)}
-            disabled={!canSave}
-            className={[
-              'flex-1 rounded-xl py-2.5 text-sm font-bold transition-all',
-              canSave
-                ? 'bg-brand-navy text-white hover:bg-brand-navy/90'
-                : 'cursor-not-allowed bg-gray-100 text-gray-300',
-            ].join(' ')}
-          >
-            {isEdit ? 'Save changes' : 'Add vendor'}
-          </button>
+        <div className="border-t px-5 py-4 flex flex-col gap-2 flex-shrink-0">
+          {saveErr && (
+            <p className="text-xs text-red-600 text-center">{saveErr}</p>
+          )}
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              disabled={saving}
+              className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleClick}
+              disabled={!canSave}
+              className={[
+                'flex-1 rounded-xl py-2.5 text-sm font-bold transition-all',
+                canSave
+                  ? 'bg-brand-navy text-white hover:bg-brand-navy/90'
+                  : 'cursor-not-allowed bg-gray-100 text-gray-300',
+              ].join(' ')}
+            >
+              {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Add vendor'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -239,6 +267,11 @@ function VendorsSection({ agentId }: { agentId: string }) {
     }
     setModal(null);
   }
+
+  const modalCategory =
+    modal?.mode === 'add' ? modal.category :
+    modal?.mode === 'edit' ? modal.vendor.category :
+    undefined;
 
   return (
     <div className="space-y-1">
@@ -381,6 +414,7 @@ function VendorsSection({ agentId }: { agentId: string }) {
       {modal && (
         <VendorModal
           initial={modal.mode === 'edit' ? modal.vendor : undefined}
+          defaultCategory={modalCategory}
           onSave={handleSave}
           onClose={() => setModal(null)}
         />
@@ -407,6 +441,9 @@ function ProfileSection() {
     licenseNumber: '',
     bio: '',
   });
+  const [photoUrl, setPhotoUrl] = useState<string>('');
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoErr, setPhotoErr] = useState('');
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -414,11 +451,15 @@ function ProfileSection() {
     if (!settingsLoading) {
       setForm((f) => ({
         ...f,
+        // The onboarding flow writes these into the settings JSONB, so we
+        // prefer those values over the empty initial form state.
+        name: (settings.name as string) ?? f.name,
         phone: (settings.phone as string) ?? '',
         title: (settings.title as string) ?? '',
         licenseNumber: (settings.licenseNumber as string) ?? '',
         bio: (settings.bio as string) ?? '',
       }));
+      setPhotoUrl((settings.photoUrl as string) ?? '');
     }
   }, [settingsLoading, settings]);
 
@@ -427,7 +468,13 @@ function ProfileSection() {
     try {
       await Promise.all([
         saveProfile(form.name, form.phone),
-        saveSettings({ title: form.title, licenseNumber: form.licenseNumber, bio: form.bio }),
+        saveSettings({
+          name: form.name,
+          phone: form.phone,
+          title: form.title,
+          licenseNumber: form.licenseNumber,
+          bio: form.bio,
+        }),
       ]);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -438,21 +485,76 @@ function ProfileSection() {
     }
   }
 
+  async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setPhotoErr('Please choose an image file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPhotoErr('Image is too large — max 5 MB.');
+      return;
+    }
+    setPhotoErr('');
+    setPhotoUploading(true);
+    try {
+      const url = await uploadAgentPhoto(file);
+      setPhotoUrl(url);
+      await saveSettings({ photoUrl: url });
+    } catch (err) {
+      setPhotoErr(err instanceof Error ? err.message : 'Upload failed.');
+    } finally {
+      setPhotoUploading(false);
+    }
+  }
+
+  const initials = (form.name || activeUser?.email || '?')
+    .split(/[\s@]/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]?.toUpperCase() ?? '')
+    .join('');
+
   return (
     <div className="space-y-5 max-w-lg">
       {/* Avatar */}
       <div className="flex items-center gap-4">
-        <img
-          src={activeUser?.avatar}
-          alt={activeUser?.name}
-          className="h-16 w-16 rounded-2xl ring-2 ring-brand-navy/10 object-cover"
-        />
-        <div>
-          <div className="text-sm font-bold text-brand-navy">{activeUser?.name}</div>
-          <div className="text-xs text-gray-400">{activeUser?.email}</div>
+        <div className="relative h-16 w-16 flex-shrink-0">
+          {photoUrl ? (
+            <img
+              src={photoUrl}
+              alt={form.name || 'Headshot'}
+              className="h-16 w-16 rounded-2xl ring-2 ring-brand-navy/10 object-cover"
+            />
+          ) : (
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-navy/10 ring-2 ring-brand-navy/10 text-lg font-bold text-brand-navy">
+              {initials || '?'}
+            </div>
+          )}
+          <label className="absolute -bottom-1 -right-1 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-brand-navy text-white shadow-sm hover:bg-brand-navy/90 transition-colors">
+            {photoUploading ? (
+              <span className="text-[10px] font-bold">…</span>
+            ) : (
+              <Upload size={12} />
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handlePhotoChange}
+              disabled={photoUploading}
+            />
+          </label>
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-bold text-brand-navy truncate">{form.name || activeUser?.email}</div>
+          <div className="text-xs text-gray-400 truncate">{activeUser?.email}</div>
           <div className="mt-1 rounded-full bg-brand-navy/5 px-2 py-0.5 text-xs font-semibold text-brand-navy inline-block">
             {activeUser?.role}
           </div>
+          {photoErr && <p className="mt-1 text-xs text-red-500">{photoErr}</p>}
         </div>
       </div>
 
@@ -754,111 +856,245 @@ function MLSCard() {
   );
 }
 
+// Compact card layout used for every integration row so the section reads
+// consistently regardless of whether the integration is platform-wide or
+// per-agent.
+function IntegrationCard({
+  logo, name, description, statusBadge, primaryAction, secondaryAction, footnote,
+}: {
+  logo: string;
+  name: string;
+  description: string;
+  statusBadge?: { label: string; color: 'green' | 'amber' | 'gray' };
+  primaryAction?: { label: string; onClick: () => void; disabled?: boolean };
+  secondaryAction?: { label: string; onClick: () => void };
+  footnote?: string;
+}) {
+  const badgeColor =
+    statusBadge?.color === 'green' ? 'bg-green-100 text-green-700'
+    : statusBadge?.color === 'amber' ? 'bg-amber-100 text-amber-800'
+    : 'bg-gray-100 text-gray-500';
+
+  return (
+    <div className="rounded-2xl bg-white shadow-sm overflow-hidden">
+      <div className="flex items-start gap-4 p-5">
+        <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-gray-50 text-2xl">
+          {logo}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-brand-navy text-sm">{name}</span>
+            {statusBadge && (
+              <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${badgeColor}`}>
+                {statusBadge.label}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-gray-400 leading-relaxed">{description}</p>
+          {footnote && (
+            <p className="mt-1 text-xs text-gray-500">{footnote}</p>
+          )}
+        </div>
+      </div>
+      {(primaryAction || secondaryAction) && (
+        <div className="border-t border-gray-50 px-5 py-3 flex items-center gap-3">
+          {primaryAction && (
+            <button
+              onClick={primaryAction.onClick}
+              disabled={primaryAction.disabled}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-40"
+            >
+              <ExternalLink size={11} />
+              {primaryAction.label}
+            </button>
+          )}
+          {secondaryAction && (
+            <button
+              onClick={secondaryAction.onClick}
+              className="text-xs font-semibold text-gray-400 hover:text-red-500 transition-colors"
+            >
+              {secondaryAction.label}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IntegrationsSection() {
   const { activeUser } = useAuthStore();
-  const isMountainMortgage = activeUser?.groupId === 'admin' || activeUser?.id === 'agent-sarah';
   const isAgent = activeUser?.groupId === 'agent' || activeUser?.groupId === 'admin';
+  const { status, loading, error, startOAuth, disconnect, refresh } = useIntegrations();
+  const [actionError, setActionError] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
 
-  const integrations = [
-    {
-      name: 'DocuSign',
-      logo: '📄',
-      description: 'Send, sign, and track documents directly from the deal file. Connect your DocuSign account to enable envelope sending from within RealTour Flow.',
-      status: 'not_connected' as const,
-      cta: 'Connect DocuSign',
-      ctaStyle: 'primary',
-    },
-    {
-      name: 'Google Calendar',
-      logo: '📅',
-      description: 'Sync closing dates, inspection appointments, and task deadlines to your Google Calendar automatically.',
-      status: 'not_connected' as const,
-      cta: 'Connect Google Calendar',
-      ctaStyle: 'primary',
-    },
-    {
-      name: 'Outlook / Office 365',
-      logo: '📆',
-      description: 'Sync deal milestones and appointments to your Outlook calendar.',
-      status: 'not_connected' as const,
-      cta: 'Connect Outlook',
-      ctaStyle: 'secondary',
-    },
-    {
-      name: 'ARIVE (Mountain Mortgage)',
-      logo: '🏔️',
-      description: 'Real-time loan milestone sync from Mountain Mortgage. Disclosures, underwriting status, and clear-to-close update automatically.',
-      status: isMountainMortgage ? ('connected' as const) : ('not_connected' as const),
-      cta: isMountainMortgage ? 'Connected' : 'Contact admin to enable',
-      ctaStyle: isMountainMortgage ? 'connected' : 'disabled',
-      connectedNote: 'Syncing live data for all Mountain Mortgage deals',
-    },
-  ];
+  // After the OAuth callback bounces the user back to /agent/settings?integrations=...
+  // we surface a one-time toast so the agent sees that the connection landed
+  // (or that it failed). This mirrors the redirect query param the backend sets.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const flag = params.get('integrations');
+    if (!flag) return;
+    if (flag.endsWith('_connected')) {
+      // Refresh status so the new "Connected" badge appears.
+      refresh();
+    } else if (flag.endsWith('_error')) {
+      const reason = params.get('reason') ?? 'unknown';
+      setActionError(`Calendar connection failed: ${reason}`);
+    }
+    // Clean the query string so a refresh doesn't keep showing the toast.
+    params.delete('integrations');
+    params.delete('reason');
+    const newSearch = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (newSearch ? `?${newSearch}` : ''));
+  }, [refresh]);
+
+  async function handleConnect(provider: 'google_calendar' | 'microsoft_calendar') {
+    setBusy(provider);
+    setActionError('');
+    try {
+      await startOAuth(provider);
+      // startOAuth navigates away; we won't typically reach here.
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not start connection.');
+      setBusy(null);
+    }
+  }
+
+  async function handleDisconnect(provider: 'google_calendar' | 'microsoft_calendar', label: string) {
+    if (!window.confirm(`Disconnect ${label}? Existing calendar events stay in place; new milestones won't be pushed.`)) return;
+    setBusy(provider);
+    setActionError('');
+    try {
+      await disconnect(provider);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Could not disconnect.');
+    } finally {
+      setBusy(null);
+    }
+  }
 
   return (
     <div className="space-y-3 max-w-lg">
+      {error && (
+        <div className="rounded-xl bg-red-50 px-4 py-3 text-xs text-red-700">{error}</div>
+      )}
+      {actionError && (
+        <div className="rounded-xl bg-red-50 px-4 py-3 text-xs text-red-700">{actionError}</div>
+      )}
+
       {/* SimplyRETS MLS — agents only, real connection */}
       {isAgent && <MLSCard />}
 
-      {integrations.map(({ name, logo, description, status, cta, ctaStyle, connectedNote }) => (
-        <div key={name} className="rounded-2xl bg-white shadow-sm overflow-hidden">
-          <div className="flex items-start gap-4 p-5">
-            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-gray-50 text-2xl">
-              {logo}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-brand-navy text-sm">{name}</span>
-                {status === 'connected' && (
-                  <span className="flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
-                    <Check size={9} strokeWidth={3} /> Connected
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 text-xs text-gray-400 leading-relaxed">{description}</p>
-              {connectedNote && status === 'connected' && (
-                <p className="mt-1 text-xs text-green-600 font-medium">{connectedNote}</p>
-              )}
-            </div>
-          </div>
-          <div className="border-t border-gray-50 px-5 py-3 flex items-center justify-between">
-            <button
-              disabled={ctaStyle === 'connected' || ctaStyle === 'disabled'}
-              className={[
-                'flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
-                ctaStyle === 'primary'
-                  ? 'bg-brand-navy text-white hover:bg-brand-navy/90'
-                  : ctaStyle === 'connected'
-                  ? 'bg-green-50 text-green-700 cursor-default'
-                  : ctaStyle === 'secondary'
-                  ? 'border border-gray-200 text-gray-500 hover:bg-gray-50'
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed',
-              ].join(' ')}
-            >
-              {ctaStyle !== 'connected' && ctaStyle !== 'disabled' && <ExternalLink size={11} />}
-              {cta}
-            </button>
-            {(ctaStyle === 'primary' || ctaStyle === 'secondary') && (
-              <span className="text-xs text-gray-300">Coming in a future update</span>
-            )}
-          </div>
-        </div>
-      ))}
+      {/* Google Calendar — per-user OAuth */}
+      <IntegrationCard
+        logo="📅"
+        name="Google Calendar"
+        description="Push closing dates and task deadlines from RealTourFlow into your Google Calendar. Events update automatically when stages advance or due dates change."
+        statusBadge={
+          !status.google_calendar.configured
+            ? { label: 'Not configured on server', color: 'gray' }
+            : status.google_calendar.connected
+            ? { label: status.google_calendar.account_email || 'Connected', color: 'green' }
+            : { label: 'Not connected', color: 'amber' }
+        }
+        primaryAction={
+          status.google_calendar.configured && !status.google_calendar.connected
+            ? { label: busy === 'google_calendar' ? 'Opening…' : 'Connect Google Calendar', onClick: () => handleConnect('google_calendar'), disabled: busy === 'google_calendar' || loading }
+            : undefined
+        }
+        secondaryAction={
+          status.google_calendar.connected
+            ? { label: busy === 'google_calendar' ? 'Disconnecting…' : 'Disconnect', onClick: () => handleDisconnect('google_calendar', 'Google Calendar') }
+            : undefined
+        }
+        footnote={
+          !status.google_calendar.configured
+            ? 'Admin: set GOOGLE_OAUTH_CLIENT_ID / SECRET / REDIRECT_URL to enable.'
+            : undefined
+        }
+      />
 
-      {/* Stripe teaser */}
-      <div className="rounded-2xl border-2 border-dashed border-gray-200 p-5">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-gray-50 text-2xl">
-            💳
-          </div>
-          <div>
-            <div className="text-sm font-bold text-gray-400">Stripe Payments</div>
-            <div className="text-xs text-gray-300 mt-0.5">
-              In-app Fast Pass payment, split payments, and seller concession tracking — coming in v2.
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Microsoft Calendar — per-user OAuth */}
+      <IntegrationCard
+        logo="📆"
+        name="Outlook / Office 365"
+        description="Push deal milestones into Outlook via Microsoft Graph. Works with personal Microsoft accounts and Office 365 work accounts."
+        statusBadge={
+          !status.microsoft_calendar.configured
+            ? { label: 'Not configured on server', color: 'gray' }
+            : status.microsoft_calendar.connected
+            ? { label: status.microsoft_calendar.account_email || 'Connected', color: 'green' }
+            : { label: 'Not connected', color: 'amber' }
+        }
+        primaryAction={
+          status.microsoft_calendar.configured && !status.microsoft_calendar.connected
+            ? { label: busy === 'microsoft_calendar' ? 'Opening…' : 'Connect Outlook', onClick: () => handleConnect('microsoft_calendar'), disabled: busy === 'microsoft_calendar' || loading }
+            : undefined
+        }
+        secondaryAction={
+          status.microsoft_calendar.connected
+            ? { label: busy === 'microsoft_calendar' ? 'Disconnecting…' : 'Disconnect', onClick: () => handleDisconnect('microsoft_calendar', 'Outlook') }
+            : undefined
+        }
+        footnote={
+          !status.microsoft_calendar.configured
+            ? 'Admin: set MICROSOFT_OAUTH_CLIENT_ID / SECRET / REDIRECT_URL to enable.'
+            : undefined
+        }
+      />
+
+      {/* DocuSign — platform-wide service */}
+      <IntegrationCard
+        logo="📄"
+        name="DocuSign"
+        description="Send any deal document for signature directly from the Documents tab on a deal. Signed envelopes sync back automatically."
+        statusBadge={
+          status.docusign.configured
+            ? { label: 'Enabled platform-wide', color: 'green' }
+            : { label: 'Not configured on server', color: 'gray' }
+        }
+        footnote={
+          status.docusign.configured
+            ? 'Open any deal → Documents tab → "Send for signature" to use DocuSign.'
+            : 'Admin: set DOCUSIGN_INTEGRATION_KEY / USER_ID / ACCOUNT_ID / PRIVATE_KEY.'
+        }
+      />
+
+      {/* Stripe — platform-wide payments */}
+      <IntegrationCard
+        logo="💳"
+        name="Stripe Payments"
+        description="Fast Pass enrollment fees, Smooth Exit fees, and the $75 closing fee are processed through Stripe Checkout."
+        statusBadge={
+          status.stripe.configured
+            ? { label: 'Enabled platform-wide', color: 'green' }
+            : { label: 'Not configured on server', color: 'gray' }
+        }
+        footnote={
+          status.stripe.configured
+            ? 'Buyers see a Stripe Checkout link in their Fast Pass / Smooth Exit flow.'
+            : 'Admin: set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET.'
+        }
+      />
+
+      {/* ARIVE — per-deal, Mountain Mortgage scope */}
+      <IntegrationCard
+        logo="🏔️"
+        name="ARIVE (Mountain Mortgage)"
+        description="Real-time loan milestone sync for Mountain Mortgage / Fast Pass buyers. Disclosures, underwriting status, and clear-to-close update automatically once a loan ID is linked to the deal."
+        statusBadge={
+          status.arive.configured
+            ? { label: 'Enabled platform-wide', color: 'green' }
+            : { label: 'Not configured on server', color: 'gray' }
+        }
+        footnote={
+          status.arive.configured
+            ? 'Link a buyer\'s ARIVE loan from the deal\'s Overview tab. Fast Pass enrollments auto-link.'
+            : 'Admin: set ARIVE_API_URL / ARIVE_API_KEY / ARIVE_CLIENT_ID / ARIVE_CLIENT_SECRET.'
+        }
+      />
     </div>
   );
 }
@@ -1118,14 +1354,25 @@ function DocumentsSection({ agentId: _agentId }: { agentId: string }) {
 
   async function handleAdd() {
     if (!selectedFile || uploading) return;
+    // Reject obviously bad files early.
+    const ALLOWED = ['.pdf', '.doc', '.docx'];
+    const ext = selectedFile.name.toLowerCase().slice(selectedFile.name.lastIndexOf('.'));
+    if (!ALLOWED.includes(ext)) {
+      setUploadErr(`Unsupported file type "${ext}". Use PDF, DOC, or DOCX.`);
+      return;
+    }
+    if (selectedFile.size > 25 * 1024 * 1024) {
+      setUploadErr('File is too large — max 25 MB.');
+      return;
+    }
     setUploading(true);
     setUploadErr('');
     try {
       await uploadDoc(selectedFile, formDocType, formName, formNotes);
       setShowAddForm(false);
       setFormName(''); setFormNotes(''); setFormDocType('baa'); setSelectedFile(null);
-    } catch {
-      setUploadErr('Upload failed — please try again.');
+    } catch (e) {
+      setUploadErr(e instanceof Error ? `Upload failed — ${e.message}` : 'Upload failed — please try again.');
     }
     setUploading(false);
   }

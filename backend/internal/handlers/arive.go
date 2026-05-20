@@ -163,13 +163,16 @@ func (h *Handler) syncAriveLoan(loanID string) error {
 		keyDatesJSON = loan.KeyDates
 	}
 
-	_, err = h.db.Exec(`
+	// Capture the affected deal IDs so we can push fresh closing-date events
+	// to any connected calendars after ARIVE sync updates the key dates.
+	rows, err := h.db.Query(`
 		UPDATE deals
 		SET arive_milestones  = $1,
 		    arive_key_dates   = $2,
 		    arive_loan_status = $3,
 		    arive_synced_at   = $4
 		WHERE arive_loan_id = $5
+		RETURNING id
 	`,
 		milestonesJSON,
 		keyDatesJSON,
@@ -177,5 +180,19 @@ func (h *Handler) syncAriveLoan(loanID string) error {
 		time.Now().UTC(),
 		loanID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var affected []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			affected = append(affected, id)
+		}
+	}
+	for _, id := range affected {
+		go h.pushDealClosingEvent(context.Background(), id)
+	}
+	return nil
 }

@@ -127,6 +127,8 @@ VITE_AUTH0_AUDIENCE=https://api.realtourflow.com
 | 000005_add_vendors | Creates preferred_vendors table with sort_order and is_featured | ✅ Applied | ✅ Applied on next deploy |
 | 000006_add_tc_role | Adds 'tc' value to user_role enum | ✅ Applied | ✅ Applied on next deploy |
 | 000007_add_checklist_items | Creates checklist_items table with checklist_assignee enum | ✅ Applied | ✅ Applied on next deploy |
+| 000008-000032 | Various — see backend/migrations/ for details (deal_invites, notifications, contingencies, deal_notes, user_settings, arive_loan_data, stripe_fees, enrollment_columns, deal_flags, tracked_properties, showing_availability, offers, net_sheets, tc_assignment, agent_doc_templates, user_deactivated, system_config, promo_codes, audit_log, commission_pct, calendar_token, mls_creds, docusign, onboarding_complete, agent_invites) | ✅ Applied | ✅ Applied on next deploy |
+| 000033_add_oauth_tokens | Creates `oauth_tokens` + `calendar_event_map` tables for per-agent Google Calendar / Microsoft Graph OAuth | ⏳ Pending | ⏳ Pending |
 
 ---
 
@@ -314,6 +316,65 @@ In rough priority order:
 7. **Deal health computation** — server-side scoring: green/yellow/red based on task status + days in stage
 8. **Buyer/Seller user accounts** — invite flow, onboarding writes to DB, client portal reads real data
 9. **ARIVE integration** — webhook or polling for Mountain Mortgage loan milestones (only for arive_linked=true deals)
+
+---
+
+## Calendar OAuth Setup (Google + Microsoft)
+
+The Settings → Integrations page lets agents connect their Google Calendar and/or Outlook so RealTourFlow pushes closing dates and task deadlines into their personal calendar. The full code path is built — `oauth_tokens` table, refresh-on-expiry, FanOut into Google Calendar API and Microsoft Graph from `AdvanceStage` / `SyncAriveLoan` / `CreateTask` / `UpdateTaskStatus`. What's left is registering OAuth apps with each provider and adding the credentials.
+
+### Google Cloud — OAuth client
+1. Go to https://console.cloud.google.com/apis/credentials
+2. Create OAuth 2.0 Client ID, type **Web application**
+3. Authorized redirect URIs:
+   - Production: `https://api.realtourflow.com/api/integrations/google-calendar/callback`
+   - Local: `http://localhost:8080/api/integrations/google-calendar/callback`
+4. Enable the **Google Calendar API** for the project
+5. Add OAuth consent screen scopes: `auth/calendar.events`, `auth/userinfo.email`, `openid`
+6. Copy the Client ID and Client Secret
+
+### Microsoft Azure — App registration
+1. Go to https://portal.azure.com → Azure Active Directory → App registrations → New registration
+2. Supported account types: **Accounts in any organizational directory and personal Microsoft accounts** (= `common` tenant)
+3. Redirect URI (Web):
+   - Production: `https://api.realtourflow.com/api/integrations/microsoft-calendar/callback`
+   - Local: `http://localhost:8080/api/integrations/microsoft-calendar/callback`
+4. API permissions → Add → Microsoft Graph → **Delegated**: `Calendars.ReadWrite`, `User.Read`, `offline_access`
+5. Certificates & secrets → New client secret
+6. Copy the Application (client) ID and client secret value
+
+### Backend env vars
+Add to local `.env`:
+```
+GOOGLE_OAUTH_CLIENT_ID=...
+GOOGLE_OAUTH_CLIENT_SECRET=...
+GOOGLE_OAUTH_REDIRECT_URL=http://localhost:8080/api/integrations/google-calendar/callback
+MICROSOFT_OAUTH_CLIENT_ID=...
+MICROSOFT_OAUTH_CLIENT_SECRET=...
+MICROSOFT_OAUTH_REDIRECT_URL=http://localhost:8080/api/integrations/microsoft-calendar/callback
+MICROSOFT_OAUTH_TENANT=common
+```
+
+For production:
+1. Create AWS Secrets Manager secrets:
+   - `realtourflow/google-oauth-client-id`
+   - `realtourflow/google-oauth-client-secret`
+   - `realtourflow/microsoft-oauth-client-id`
+   - `realtourflow/microsoft-oauth-client-secret`
+2. Add each to `backend/task-definition.json` under `secrets`, mirroring the existing ARIVE entries
+3. Add the redirect URLs and tenant under `environment`:
+```
+GOOGLE_OAUTH_REDIRECT_URL = https://api.realtourflow.com/api/integrations/google-calendar/callback
+MICROSOFT_OAUTH_REDIRECT_URL = https://api.realtourflow.com/api/integrations/microsoft-calendar/callback
+MICROSOFT_OAUTH_TENANT = common
+```
+4. Redeploy. The `GET /me/integrations` endpoint will now report `configured: true` for both calendars and the Settings UI Connect buttons go live.
+
+### How event push works
+- Tables: `oauth_tokens` stores per-agent access/refresh tokens; `calendar_event_map` records the external event ID returned by Google/Microsoft so subsequent updates patch the same event instead of duplicating.
+- Triggers: deal stage advance, ARIVE sync (when key dates update), task create/update.
+- Push is best-effort and runs in a goroutine — calendar failures never block a deal mutation. Errors land in CloudWatch.
+- Idempotent: pushing the same closing event multiple times patches one event. Marking a task complete deletes the event from both calendars.
 
 ---
 

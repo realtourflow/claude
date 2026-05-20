@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
+import { useSettings } from '../../hooks/useSettings';
 import { Deal } from '../../data/mockDeals';
 import { Task } from '../../data/mockTasks';
 import { useDeals } from '../../hooks/useDeals';
@@ -220,8 +221,24 @@ function ShareFastPassButton() {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
+function firstNameFor(activeUser: { name?: string; email?: string } | undefined, settingsName: string | undefined): string {
+  const candidates = [settingsName, activeUser?.name]
+    .map((n) => (n ?? '').trim())
+    .filter(Boolean)
+    .filter((n) => n !== activeUser?.email && !/@/.test(n));
+  const fullName = candidates[0];
+  if (fullName) return fullName.split(/\s+/)[0];
+  // Fall back to the local-part of the email so we never greet someone with their full email.
+  const email = (activeUser?.email ?? '').split('@')[0];
+  if (!email) return 'there';
+  // Strip dots/underscores, capitalize.
+  const cleaned = email.replace(/[._-]/g, ' ').split(/\s+/)[0];
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
 export default function AgentDashboard() {
   const activeUser = useAuthStore((s) => s.activeUser);
+  const { settings } = useSettings();
   const { notifications, markRead } = useNotifications();
   const unread = notifications.filter((n) => !n.read);
 
@@ -282,7 +299,7 @@ export default function AgentDashboard() {
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-brand-navy">
-            Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {activeUser?.name?.split(' ')[0]}
+            Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {firstNameFor(activeUser, settings.name as string | undefined)}
           </h1>
           <p className="mt-0.5 text-sm text-gray-500">
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}

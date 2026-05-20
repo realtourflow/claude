@@ -230,8 +230,9 @@ function TopHeader({
 // Agent Layout
 
 function SetupBanner() {
-  const { setupComplete, bannerDismissed, dismissBanner } = useAgentSetupStore();
-  if (setupComplete || bannerDismissed) return null;
+  const { bannerDismissed, dismissBanner } = useAgentSetupStore();
+  const onboardingComplete = useAuthStore((s) => s.activeUser?.onboardingComplete);
+  if (onboardingComplete || bannerDismissed) return null;
   return (
     <div className="flex items-center justify-between gap-3 bg-amber-50 border-b border-amber-200 px-5 py-2.5">
       <div className="flex items-center gap-2 text-sm text-amber-800">
@@ -355,7 +356,18 @@ type AppLayoutProps = {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const activeUser = useAuthStore((s) => s.activeUser);
+  const isLoaded = useAuthStore((s) => s.isLoaded);
   const groupId = activeUser?.groupId as GroupId | undefined;
+
+  // Hold rendering of protected pages until /users/sync completes so child
+  // components don't fire API calls before the auth token is wired up.
+  if (!isLoaded) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-brand-bg">
+        <div className="text-sm text-gray-400">Loading…</div>
+      </div>
+    );
+  }
 
   if (groupId === 'agent') {
     return <AgentLayout>{children}</AgentLayout>;

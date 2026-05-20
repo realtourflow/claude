@@ -76,18 +76,23 @@ export function useAgentDocs() {
     name: string,
     notes: string,
   ): Promise<AgentDocTemplate> {
+    const mimeType = file.type || 'application/octet-stream';
+
     // Step 1: get presigned URL
     const { upload_url, s3_key } = await api.post<{ upload_url: string; s3_key: string }>(
       '/me/doc-templates/upload-url',
-      { file_name: file.name, mime_type: file.type || 'application/octet-stream' },
+      { file_name: file.name, mime_type: mimeType },
     );
 
     // Step 2: PUT file directly to S3
-    await fetch(upload_url, {
+    const s3Res = await fetch(upload_url, {
       method: 'PUT',
       body: file,
-      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      headers: { 'Content-Type': mimeType },
     });
+    if (!s3Res.ok) {
+      throw new Error(`S3 upload failed (${s3Res.status} ${s3Res.statusText})`);
+    }
 
     // Step 3: confirm in DB
     const raw = await api.post<ApiDoc>('/me/doc-templates', {
@@ -95,7 +100,7 @@ export function useAgentDocs() {
       doc_type: docType,
       file_name: file.name,
       s3_key,
-      mime_type: file.type || 'application/octet-stream',
+      mime_type: mimeType,
       file_size: file.size,
       notes: notes.trim() || null,
     });

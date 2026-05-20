@@ -191,12 +191,19 @@ func (h *Handler) ActivateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func upsertUser(ctx context.Context, db *sql.DB, auth0ID, email, name string, role models.UserRole) (*models.User, error) {
+	// Preserve the existing name if the user has already set one in onboarding/profile.
+	// Auth0 often defaults user.name to the email address, so overwriting on every
+	// sync would clobber the real name the agent saved during onboarding.
 	const q = `
 		INSERT INTO users (auth0_id, email, name, role)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (auth0_id) DO UPDATE
 		SET email      = EXCLUDED.email,
-		    name       = EXCLUDED.name,
+		    name       = CASE
+		                   WHEN users.name IS NULL OR users.name = '' OR users.name = users.email
+		                   THEN EXCLUDED.name
+		                   ELSE users.name
+		                 END,
 		    role       = EXCLUDED.role,
 		    updated_at = NOW()
 		RETURNING id, auth0_id, email, name, role, phone, onboarding_complete, created_at, updated_at

@@ -8,6 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-chi/chi/v5"
 	"realtourflow/internal/arive"
+	"realtourflow/internal/calendar"
 	"realtourflow/internal/docusign"
 	"realtourflow/internal/email"
 )
@@ -22,20 +23,49 @@ type Handler struct {
 	emailClient         *email.Client
 	frontendURL         string
 	docusignClient      *docusign.Client
+	googleOAuth         calendar.ProviderConfig
+	microsoftOAuth      calendar.ProviderConfig
+	googlePusher        *calendar.GooglePusher
+	microsoftPusher     *calendar.MicrosoftPusher
 }
 
-func New(db *sql.DB, s3Client *s3.Client, s3Bucket string, ariveClient *arive.Client, stripeKey, stripeWebhookSecret, resendKey, frontendURL string, dsClient *docusign.Client) *Handler {
-	return &Handler{
-		db:                  db,
-		s3Client:            s3Client,
-		s3Bucket:            s3Bucket,
-		ariveClient:         ariveClient,
-		stripeKey:           stripeKey,
-		stripeWebhookSecret: stripeWebhookSecret,
-		emailClient:         email.New(resendKey),
-		frontendURL:         frontendURL,
-		docusignClient:      dsClient,
+// Deps groups the optional service dependencies for New so the constructor
+// signature doesn't explode every time a new integration is added.
+type Deps struct {
+	DB                  *sql.DB
+	S3Client            *s3.Client
+	S3Bucket            string
+	AriveClient         *arive.Client
+	StripeKey           string
+	StripeWebhookSecret string
+	ResendKey           string
+	FrontendURL         string
+	DocuSignClient      *docusign.Client
+	GoogleOAuth         calendar.ProviderConfig
+	MicrosoftOAuth      calendar.ProviderConfig
+}
+
+func New(deps Deps) *Handler {
+	h := &Handler{
+		db:                  deps.DB,
+		s3Client:            deps.S3Client,
+		s3Bucket:            deps.S3Bucket,
+		ariveClient:         deps.AriveClient,
+		stripeKey:           deps.StripeKey,
+		stripeWebhookSecret: deps.StripeWebhookSecret,
+		emailClient:         email.New(deps.ResendKey),
+		frontendURL:         deps.FrontendURL,
+		docusignClient:      deps.DocuSignClient,
+		googleOAuth:         deps.GoogleOAuth,
+		microsoftOAuth:      deps.MicrosoftOAuth,
 	}
+	if deps.GoogleOAuth.ClientID != "" {
+		h.googlePusher = &calendar.GooglePusher{Config: deps.GoogleOAuth}
+	}
+	if deps.MicrosoftOAuth.ClientID != "" {
+		h.microsoftPusher = &calendar.MicrosoftPusher{Config: deps.MicrosoftOAuth}
+	}
+	return h
 }
 
 func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
@@ -51,6 +81,10 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 	r.Post("/arive/webhook", h.AriveWebhook)
 	r.Post("/stripe/webhook", h.StripeWebhook)
 	r.Post("/docusign/webhook", h.DocuSignWebhook)
+	// OAuth callbacks must be public — they're hit by the user's browser
+	// after the consent screen and do not have a JWT.
+	r.Get("/integrations/google-calendar/callback", h.GoogleCalendarCallback)
+	r.Get("/integrations/microsoft-calendar/callback", h.MicrosoftCalendarCallback)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth)
@@ -102,6 +136,12 @@ func (h *Handler) Routes(auth func(http.Handler) http.Handler) http.Handler {
 
 		r.Get("/me/mls", h.GetMyMLS)
 		r.Patch("/me/mls", h.PatchMyMLS)
+
+		r.Get("/me/integrations", h.GetIntegrations)
+		r.Get("/me/integrations/google-calendar/start", h.StartGoogleCalendarOAuth)
+		r.Delete("/me/integrations/google-calendar", h.DisconnectGoogleCalendar)
+		r.Get("/me/integrations/microsoft-calendar/start", h.StartMicrosoftCalendarOAuth)
+		r.Delete("/me/integrations/microsoft-calendar", h.DisconnectMicrosoftCalendar)
 
 		r.Get("/deals/{dealId}/listings/search", h.SearchListings)
 

@@ -7,6 +7,8 @@ import { AppLayout } from './components/layout/AppLayout';
 import { RoleSwitcher } from './components/RoleSwitcher';
 
 import AgentDashboard from './pages/agent/AgentDashboard';
+import AgentMessages from './pages/agent/AgentMessages';
+import AgentDocuments from './pages/agent/AgentDocuments';
 import CalendarPage from './pages/CalendarPage';
 import Pipeline from './pages/agent/Pipeline';
 import DealDetail from './pages/agent/DealDetail';
@@ -15,7 +17,6 @@ import SellerView from './pages/seller/SellerView';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import TCDashboard from './pages/tc/TCDashboard';
 import PermissionsDebug from './pages/PermissionsDebug';
-import ComingSoon from './pages/ComingSoon';
 import SettingsPage from './pages/settings/SettingsPage';
 import InvitePage from './pages/invite/InvitePage';
 import AgentSignupPage from './pages/agent-signup/AgentSignupPage';
@@ -106,8 +107,8 @@ export default function App() {
         />
         <Route path="/agent/deals" element={<AppLayout><Pipeline /></AppLayout>} />
         <Route path="/agent/calendar" element={<AppLayout><CalendarPage /></AppLayout>} />
-        <Route path="/agent/messages" element={<AppLayout><ComingSoon title="Messages" /></AppLayout>} />
-        <Route path="/agent/documents" element={<AppLayout><ComingSoon title="Documents" /></AppLayout>} />
+        <Route path="/agent/messages" element={<AppLayout><AgentMessages /></AppLayout>} />
+        <Route path="/agent/documents" element={<AppLayout><AgentDocuments /></AppLayout>} />
         <Route path="/agent/settings" element={<AppLayout><SettingsPage /></AppLayout>} />
 
         {/* Buyer routes */}

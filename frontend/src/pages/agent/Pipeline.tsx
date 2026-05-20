@@ -527,7 +527,14 @@ export default function Pipeline() {
       {/* Deals grouped by stage */}
       {error ? (
         <div className="rounded-xl bg-red-50 p-6 text-center shadow-sm">
-          <p className="text-sm text-red-600">{error}</p>
+          <p className="text-sm text-red-700 font-semibold">We couldn't load your pipeline.</p>
+          <p className="mt-1 text-xs text-red-500">{error}</p>
+          <button
+            onClick={refresh}
+            className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700 transition-colors"
+          >
+            Try again
+          </button>
         </div>
       ) : loading ? (
         <div className="rounded-xl bg-white p-10 text-center shadow-sm">
