@@ -56,22 +56,6 @@
         {
           "name": "DOCUSIGN_PRIVATE_KEY",
           "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/docusign-private-key-DNm6I6"
-        },
-        {
-          "name": "GOOGLE_OAUTH_CLIENT_ID",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/google-oauth-client-id"
-        },
-        {
-          "name": "GOOGLE_OAUTH_CLIENT_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/google-oauth-client-secret"
-        },
-        {
-          "name": "MICROSOFT_OAUTH_CLIENT_ID",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/microsoft-oauth-client-id"
-        },
-        {
-          "name": "MICROSOFT_OAUTH_CLIENT_SECRET",
-          "valueFrom": "arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/microsoft-oauth-client-secret"
         }
       ],
       "environment": [
