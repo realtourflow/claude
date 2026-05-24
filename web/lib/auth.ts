@@ -41,6 +41,15 @@ function getDefaultOpts(): VerifyOptions {
   return defaultOpts;
 }
 
+/**
+ * Test-only: override the JWKS / issuer / audience the default verifier uses.
+ * Production code never calls this. Tests set up a local JWKSet so they don't
+ * have to hit Auth0.
+ */
+export function setVerifyOptionsForTesting(opts: VerifyOptions | undefined): void {
+  defaultOpts = opts;
+}
+
 function extractRoles(payload: JWTPayload): string[] {
   const raw = (payload as Record<string, unknown>)[ROLE_CLAIM];
   if (!Array.isArray(raw)) return [];
