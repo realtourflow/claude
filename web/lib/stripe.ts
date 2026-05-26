@@ -41,7 +41,7 @@ function client(): StripeLike {
   if (!real) {
     const key = env().STRIPE_SECRET_KEY;
     if (!key) throw new Error("STRIPE_SECRET_KEY not configured");
-    real = new Stripe(key, { apiVersion: "2025-08-27.basil" });
+    real = new Stripe(key, { apiVersion: "2026-04-22.dahlia" });
   }
   return real as unknown as StripeLike;
 }
