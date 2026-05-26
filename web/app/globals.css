@@ -1,26 +1,99 @@
 @import "tailwindcss";
 
+/* Tailwind 4 theme tokens — these make `bg-brand-navy`, `text-brand-gold`, etc.
+   work as utility classes. Matches the colors used throughout the original
+   Vite frontend (see frontend/tailwind.config.js for the legacy v3 config). */
+@theme {
+  --color-brand-navy: #00163b;
+  --color-brand-navy-light: #002855;
+  --color-brand-gold: #d6bf8d;
+  --color-brand-gold-dark: #c5ae7c;
+  --color-brand-bg: #f8f6f3;
+}
+
+/* CSS variables kept for any inline `var(--brand-…)` usages in legacy code. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --brand-navy: #00163b;
+  --brand-navy-light: #002855;
+  --brand-gold: #d6bf8d;
+  --brand-gold-dark: #c5ae7c;
+  --brand-bg: #f8f6f3;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--brand-bg);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--brand-navy);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-navy-light);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--brand-navy) #f1f1f1;
+}
+
+/* Onboarding screen transition */
+@keyframes screenEnter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.screen-enter {
+  animation: screenEnter 0.22s ease forwards;
+}
+
+/* Range input styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: #e5e7eb;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #00163b;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #00163b;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
