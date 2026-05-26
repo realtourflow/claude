@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell, X } from 'lucide-react';
-import { useNotifications } from '../hooks/useNotifications';
+import { useNotifications } from "@/hooks/useNotifications";
 
 export default function ClientNotifications() {
   const { notifications, markRead } = useNotifications();

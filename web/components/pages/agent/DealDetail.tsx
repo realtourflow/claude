@@ -2,20 +2,20 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Deal, DealStage, LoanMilestones } from '../../data/mockDeals';
-import { useDeal, patchStage } from '../../hooks/useDeals';
-import { ApiError } from '../../api/client';
-import { api } from '../../api/client';
-import { useAuthStore } from '../../store/authStore';
-import { usePermission } from '../../permissions/usePermission';
-import { PERMISSIONS } from '../../permissions/permissions';
-import { useTaskStore } from '../../store/taskStore';
-import { useNotificationStore } from '../../store/notificationStore';
-import { Task } from '../../data/mockTasks';
-import { useTasks, patchTaskStatus, postTask } from '../../hooks/useTasks';
-import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignature, refreshDocuSignStatus, Document as ApiDocument } from '../../hooks/useDocuments';
-import { useMessages, postMessage, MessageChannel } from '../../hooks/useMessages';
-import { useVendors } from '../../hooks/useVendors';
+import { Deal, DealStage, LoanMilestones } from "@/lib/data/mockDeals";
+import { useDeal, patchStage } from "@/hooks/useDeals";
+import { ApiError } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
+import { useAuthStore } from "@/lib/store/authStore";
+import { usePermission } from "@/permissions/usePermission";
+import { PERMISSIONS } from "@/permissions/permissions";
+import { useTaskStore } from "@/lib/store/taskStore";
+import { useNotificationStore } from "@/lib/store/notificationStore";
+import { Task } from "@/lib/data/mockTasks";
+import { useTasks, patchTaskStatus, postTask } from "@/hooks/useTasks";
+import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignature, refreshDocuSignStatus, Document as ApiDocument } from "@/hooks/useDocuments";
+import { useMessages, postMessage, MessageChannel } from "@/hooks/useMessages";
+import { useVendors } from "@/hooks/useVendors";
 import {
   ArrowLeft,
   MapPin,
@@ -54,19 +54,19 @@ import {
   PenLine,
   Send,
 } from 'lucide-react';
-import MetroMap from '../../components/MetroMap';
-import { MOCK_USERS } from '../../data/mockUsers';
-import { useDealStageStore } from '../../store/dealStageStore';
-import { useParticipants } from '../../hooks/useParticipants';
-import { useProperties, TrackedProperty, PropertyStatus } from '../../hooks/useProperties';
-import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from '../../hooks/useShowingAvailability';
-import { useOffers, Offer } from '../../hooks/useOffers';
-import { useNetSheet, NetSheetLine, recalcLines, calcNetProceeds } from '../../hooks/useNetSheet';
+import MetroMap from "@/components/MetroMap";
+import { MOCK_USERS } from "@/lib/data/mockUsers";
+import { useDealStageStore } from "@/lib/store/dealStageStore";
+import { useParticipants } from "@/hooks/useParticipants";
+import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
+import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
+import { useOffers, Offer } from "@/hooks/useOffers";
+import { useNetSheet, NetSheetLine, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
 import {
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
   VendorCategory,
-} from '../../data/mockVendors';
+} from "@/lib/data/mockVendors";
 
 // ─── Types & Helpers ────────────────────────────────────────────────────────
 
@@ -632,7 +632,7 @@ function printNetSheet(deal: { clientName: string; property: { address: string }
   w.onload = () => w.print();
 }
 
-function SellerNetSheetCard({ deal }: { deal: import('../../data/mockDeals').Deal }) {
+function SellerNetSheetCard({ deal }: { deal: import("@/lib/data/mockDeals").Deal }) {
   const { sheet, loading, saveSheet, markReady } = useNetSheet(deal.id);
   const [lines, setLines] = useState<NetSheetLine[]>([]);
   const [salePrice, setSalePrice] = useState(deal.property.price);
@@ -3808,7 +3808,7 @@ function DealHeader({ deal, onFlagChange }: { deal: Deal; onFlagChange?: (flags:
 export default function DealDetail() {
   const { dealId } = useParams<{ dealId: string }>();
   const router = useRouter();
-  const [searchParams] = useSearchParams();
+  const searchParams = useSearchParams();
   const activeUser = useAuthStore((s) => s.activeUser);
   const initialTab = (() => {
     const t = searchParams.get('tab');

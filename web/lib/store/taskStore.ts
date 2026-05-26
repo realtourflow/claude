@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from 'zustand';
-import { Task } from '../data/mockTasks';
+import { Task } from "@/lib/data/mockTasks";
 
 type TaskStore = {
   assigneeOverrides: Record<string, Task['assignedTo']>;

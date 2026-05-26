@@ -2,8 +2,8 @@
 
 import { useEffect } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { setTokenGetter, api } from '@/lib/api-client';
-import { useAuthStore } from '@/lib/store/authStore';
+import { setTokenGetter, api } from "@/lib/api-client";
+import { useAuthStore } from "@/lib/store/authStore";
 
 type SyncUserResponse = {
   id: string;

@@ -7,6 +7,12 @@ export const metadata: Metadata = {
   description: "Stage-based real estate deal operating system",
 };
 
+// SPA pages all depend on Auth0 client state, so static prerendering at build
+// time fails. Force dynamic rendering across the whole app — same behavior as
+// the original Vite SPA. Server Components / partial prerendering can be opted
+// back in later on specific routes when we add data fetching.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{

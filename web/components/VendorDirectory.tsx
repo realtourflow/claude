@@ -6,8 +6,8 @@ import {
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
   VendorCategory,
-} from '../data/mockVendors';
-import { useVendors, Vendor } from '../hooks/useVendors';
+} from "@/lib/data/mockVendors";
+import { useVendors, Vendor } from "@/hooks/useVendors";
 
 function CategorySection({ category, vendors }: { category: VendorCategory; vendors: Vendor[] }) {
   const [open, setOpen] = useState(false);

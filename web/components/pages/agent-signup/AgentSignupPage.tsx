@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from "next/navigation";
 import { useAuth0 } from '@auth0/auth0-react';
-import { api } from '../../api/client';
+import { api } from "@/lib/api-client";
 import { Briefcase, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 
 type AgentInviteDetails = {

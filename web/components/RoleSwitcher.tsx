@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import { useRouter } from "next/navigation";
-import { useAuthStore } from '../store/authStore';
-import { MOCK_USERS } from '../data/mockUsers';
-import { GroupId } from '../permissions/groups';
+import { useAuthStore } from "@/lib/store/authStore";
+import { MOCK_USERS } from "@/lib/data/mockUsers";
+import { GroupId } from "@/permissions/groups";
 
 const GROUP_DOT_COLORS: Record<GroupId, string> = {
   agent: 'bg-blue-400',

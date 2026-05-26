@@ -2,12 +2,12 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from "next/navigation";
-import { useAuthStore } from '../../store/authStore';
-import { Deal, DealStage } from '../../data/mockDeals';
-import { Task } from '../../data/mockTasks';
-import { useMyDeals } from '../../hooks/useMyDeals';
-import { useTasks } from '../../hooks/useTasks';
-import { useMessages, postMessage } from '../../hooks/useMessages';
+import { useAuthStore } from "@/lib/store/authStore";
+import { Deal, DealStage } from "@/lib/data/mockDeals";
+import { Task } from "@/lib/data/mockTasks";
+import { useMyDeals } from "@/hooks/useMyDeals";
+import { useTasks } from "@/hooks/useTasks";
+import { useMessages, postMessage } from "@/hooks/useMessages";
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
@@ -15,16 +15,16 @@ import {
   ClipboardList, Clock, Building2, Star, ExternalLink,
   Plus, X, Link as LinkIcon, MessageCircle, Pencil, Send, Upload,
 } from 'lucide-react';
-import MetroMap from '../../components/MetroMap';
-import VendorDirectory from '../../components/VendorDirectory';
-import { useProperties, TrackedProperty, PropertyStatus } from '../../hooks/useProperties';
-import { useMLSListings, MLSListing } from '../../hooks/useMLS';
-import { useAgentDocStore } from '../../store/agentDocStore';
-import { useAgentDocTemplatesForDeal, DOC_TYPE_LABELS } from '../../hooks/useAgentDocs';
-import { useDocuments, getDownloadUrl as getDealDocDownloadUrl } from '../../hooks/useDocuments';
-import ClientNotifications from '../../components/ClientNotifications';
-import { api } from '../../api/client';
-import { FAST_PASS_UPSELLS, FastPassUpsellId } from '../../data/mockFastPass';
+import MetroMap from "@/components/MetroMap";
+import VendorDirectory from "@/components/VendorDirectory";
+import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
+import { useMLSListings, MLSListing } from "@/hooks/useMLS";
+import { useAgentDocStore } from "@/lib/store/agentDocStore";
+import { useAgentDocTemplatesForDeal, DOC_TYPE_LABELS } from "@/hooks/useAgentDocs";
+import { useDocuments, getDownloadUrl as getDealDocDownloadUrl } from "@/hooks/useDocuments";
+import ClientNotifications from "@/components/ClientNotifications";
+import { api } from "@/lib/api-client";
+import { FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/data/mockFastPass";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

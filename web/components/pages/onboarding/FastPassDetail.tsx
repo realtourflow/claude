@@ -9,7 +9,7 @@ import {
   FAST_PASS_UPSELLS,
   FastPassUpsellId,
   calcFastPassTotal,
-} from '../../data/mockFastPass';
+} from "@/lib/data/mockFastPass";
 
 const BENEFITS = [
   {
@@ -52,7 +52,7 @@ const BENEFITS = [
 
 export default function FastPassDetail() {
   const router = useRouter();
-  const [searchParams] = useSearchParams();
+  const searchParams = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
   const dealId = searchParams.get('dealId');
   const [selectedUpsells, setSelectedUpsells] = useState<FastPassUpsellId[]>([]);

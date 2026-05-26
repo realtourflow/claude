@@ -1,8 +1,8 @@
 "use client";
 
 import { create } from 'zustand';
-import { GroupId } from '../permissions/groups';
-import { MockUser, MOCK_USERS } from '../data/mockUsers';
+import { GroupId } from "@/permissions/groups";
+import { MockUser, MOCK_USERS } from "@/lib/data/mockUsers";
 
 export type AppUser = MockUser;
 

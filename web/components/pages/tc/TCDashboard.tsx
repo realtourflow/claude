@@ -3,14 +3,14 @@
 import React, { useState } from 'react';
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useAuthStore } from '../../store/authStore';
-import { Deal, LoanMilestones } from '../../data/mockDeals';
-import { useDeals } from '../../hooks/useDeals';
-import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType, Contingency } from '../../hooks/useContingencies';
-import { useChecklist, ChecklistAssignee } from '../../hooks/useChecklist';
-import { useAgentTasks } from '../../hooks/useTasks';
-import { usePermission } from '../../permissions/usePermission';
-import { PERMISSIONS } from '../../permissions/permissions';
+import { useAuthStore } from "@/lib/store/authStore";
+import { Deal, LoanMilestones } from "@/lib/data/mockDeals";
+import { useDeals } from "@/hooks/useDeals";
+import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType, Contingency } from "@/hooks/useContingencies";
+import { useChecklist, ChecklistAssignee } from "@/hooks/useChecklist";
+import { useAgentTasks } from "@/hooks/useTasks";
+import { usePermission } from "@/permissions/usePermission";
+import { PERMISSIONS } from "@/permissions/permissions";
 import {
   AlertTriangle, CheckCircle2, Circle, Clock, FileText,
   CalendarClock, ClipboardList, Loader2, AlertCircle,

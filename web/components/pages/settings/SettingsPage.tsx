@@ -6,19 +6,19 @@ import {
   ChevronUp, ChevronDown, Plus, X, Check, ExternalLink,
   Phone, Mail, Globe, Users, UserCheck, FileText, Upload,
 } from 'lucide-react';
-import { useAuthStore } from '../../store/authStore';
-import { useTC, useMyAgents } from '../../hooks/useTC';
-import { useAgentDocs, DocType, DOC_TYPE_LABELS, AgentDocTemplate } from '../../hooks/useAgentDocs';
+import { useAuthStore } from "@/lib/store/authStore";
+import { useTC, useMyAgents } from "@/hooks/useTC";
+import { useAgentDocs, DocType, DOC_TYPE_LABELS, AgentDocTemplate } from "@/hooks/useAgentDocs";
 import {
   VendorCategory,
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
-} from '../../data/mockVendors';
-import { useVendors, Vendor, VendorInput } from '../../hooks/useVendors';
-import { useSettings } from '../../hooks/useSettings';
-import { useMLSConnection } from '../../hooks/useMLS';
-import { uploadAgentPhoto } from '../../hooks/useAgentPhoto';
-import { useIntegrations } from '../../hooks/useIntegrations';
+} from "@/lib/data/mockVendors";
+import { useVendors, Vendor, VendorInput } from "@/hooks/useVendors";
+import { useSettings } from "@/hooks/useSettings";
+import { useMLSConnection } from "@/hooks/useMLS";
+import { uploadAgentPhoto } from "@/hooks/useAgentPhoto";
+import { useIntegrations } from "@/hooks/useIntegrations";
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 

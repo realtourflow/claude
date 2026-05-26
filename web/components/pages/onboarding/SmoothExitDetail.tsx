@@ -8,7 +8,7 @@ import {
   SMOOTH_EXIT_UPSELLS,
   SmoothExitUpsellId,
   calcSmoothExitUpsellTotal,
-} from '../../data/mockSmoothExit';
+} from "@/lib/data/mockSmoothExit";
 
 const BENEFITS = [
   {
@@ -51,7 +51,7 @@ const BENEFITS = [
 
 export default function SmoothExitDetail() {
   const router = useRouter();
-  const [searchParams] = useSearchParams();
+  const searchParams = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
   const dealId = searchParams.get('dealId');
   const [selectedUpsells, setSelectedUpsells] = useState<SmoothExitUpsellId[]>([]);

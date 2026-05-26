@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from 'zustand';
-import { PreferredVendor, VendorCategory, MOCK_PREFERRED_VENDORS } from '../data/mockVendors';
+import { PreferredVendor, VendorCategory, MOCK_PREFERRED_VENDORS } from "@/lib/data/mockVendors";
 
 function genId() {
   return `pv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

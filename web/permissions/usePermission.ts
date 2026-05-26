@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore } from "@/lib/store/authStore";
 import { Permission } from './permissions';
 import { GROUPS, GroupId } from './groups';
 

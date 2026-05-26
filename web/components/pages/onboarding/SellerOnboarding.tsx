@@ -5,8 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { CheckCircle2, ChevronRight, Circle } from 'lucide-react';
 import OnboardingLayout from './OnboardingLayout';
 import PitchPage, { LenderChoice } from './PitchPage';
-import { useAuthStore } from '../../store/authStore';
-import { api } from '../../api/client';
+import { useAuthStore } from "@/lib/store/authStore";
+import { api } from "@/lib/api-client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -364,7 +364,7 @@ function ConfirmationScreen({ data, agentName }: { data: SellerData; agentName: 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function SellerOnboarding() {
-  const [searchParams] = useSearchParams();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
 

@@ -7,13 +7,13 @@ import {
   User, Building2, Users, MessageSquare, Zap,
   FileText, Upload, Trash2,
 } from 'lucide-react';
-import { DocType, DOC_TYPE_LABELS } from '../../hooks/useAgentDocs';
+import { DocType, DOC_TYPE_LABELS } from "@/hooks/useAgentDocs";
 import OnboardingLayout from './OnboardingLayout';
-import { useAgentSetupStore } from '../../store/agentSetupStore';
-import { api } from '../../api/client';
-import { useAuthStore } from '../../store/authStore';
-import { uploadAgentPhoto } from '../../hooks/useAgentPhoto';
-import { useAgentDocs } from '../../hooks/useAgentDocs';
+import { useAgentSetupStore } from "@/lib/store/agentSetupStore";
+import { api } from "@/lib/api-client";
+import { useAuthStore } from "@/lib/store/authStore";
+import { uploadAgentPhoto } from "@/hooks/useAgentPhoto";
+import { useAgentDocs } from "@/hooks/useAgentDocs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

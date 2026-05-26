@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { api } from '../api/client';
-import { useDeals } from '../hooks/useDeals';
-import { useAgentTasks } from '../hooks/useTasks';
-import { useAllContingenciesForDeals } from '../hooks/useContingencies';
+import { api } from "@/lib/api-client";
+import { useDeals } from "@/hooks/useDeals";
+import { useAgentTasks } from "@/hooks/useTasks";
+import { useAllContingenciesForDeals } from "@/hooks/useContingencies";
 import { Calendar, Copy, Check, ExternalLink, CalendarClock, Clock, Shield } from 'lucide-react';
 
 type CalEntry = {

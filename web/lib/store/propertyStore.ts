@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from 'zustand';
-import { TrackedProperty, PropertyStatus, MOCK_TRACKED_PROPERTIES } from '../data/mockProperties';
+import { TrackedProperty, PropertyStatus, MOCK_TRACKED_PROPERTIES } from "@/lib/data/mockProperties";
 
 export type { TrackedProperty, PropertyStatus };
 

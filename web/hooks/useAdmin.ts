@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from 'react';
-import { api } from '../api/client';
+import { api } from "@/lib/api-client";
 
 // ─── System Config ─────────────────────────────────────────────────────────────
 

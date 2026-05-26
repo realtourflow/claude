@@ -3,9 +3,9 @@
 import { ReactNode, useState, useRef, useEffect } from 'react';
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuthStore } from '../../store/authStore';
-import { useAgentSetupStore } from '../../store/agentSetupStore';
-import { GroupId } from '../../permissions/groups';
+import { useAuthStore } from "@/lib/store/authStore";
+import { useAgentSetupStore } from "@/lib/store/agentSetupStore";
+import { GroupId } from "@/permissions/groups";
 import {
   LayoutDashboard,
   GitBranch,
@@ -32,7 +32,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import InviteModal from '../InviteModal';
-import { useNotifications } from '../../hooks/useNotifications';
+import { useNotifications } from "@/hooks/useNotifications";
 
 function NotificationBell() {
   const [open, setOpen] = useState(false);

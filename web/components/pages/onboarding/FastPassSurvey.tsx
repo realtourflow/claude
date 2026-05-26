@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { useAuthStore } from '../../store/authStore';
+import { useAuthStore } from "@/lib/store/authStore";
 import { CheckCircle2, ChevronRight, ChevronLeft, Check } from 'lucide-react';
 import {
   FastPassUpsellId,
@@ -10,8 +10,8 @@ import {
   FAST_PASS_UPSELLS,
   calcFastPassTotal,
   FAST_PASS_BASE_PRICE,
-} from '../../data/mockFastPass';
-import { api } from '../../api/client';
+} from "@/lib/data/mockFastPass";
+import { api } from "@/lib/api-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

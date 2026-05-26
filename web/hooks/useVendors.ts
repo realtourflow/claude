@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
-import { VendorCategory } from '../data/mockVendors';
+import { api } from "@/lib/api-client";
+import { VendorCategory } from "@/lib/data/mockVendors";
 
 export type Vendor = {
   id: string;

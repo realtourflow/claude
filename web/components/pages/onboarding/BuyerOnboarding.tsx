@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from "next/navigation";
-import { useAuthStore } from '../../store/authStore';
-import { api } from '../../api/client';
+import { useAuthStore } from "@/lib/store/authStore";
+import { api } from "@/lib/api-client";
 import { CheckCircle2, ChevronRight, ArrowRight } from 'lucide-react';
 import OnboardingLayout from './OnboardingLayout';
 import PitchPage, { LenderChoice } from './PitchPage';
@@ -582,7 +582,7 @@ function DoneScreen({ agentName }: { agentName: string }) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function BuyerOnboarding() {
-  const [searchParams] = useSearchParams();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const token = searchParams.get('token');
 

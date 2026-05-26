@@ -2,25 +2,25 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from "next/navigation";
-import { useAuthStore } from '../../store/authStore';
-import { Deal, DealStage } from '../../data/mockDeals';
-import { Task } from '../../data/mockTasks';
-import ClientNotifications from '../../components/ClientNotifications';
-import { useDealStageStore } from '../../store/dealStageStore';
-import { useMyDeals } from '../../hooks/useMyDeals';
-import { useTasks } from '../../hooks/useTasks';
-import { useMessages, postMessage } from '../../hooks/useMessages';
-import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from '../../hooks/useShowingAvailability';
-import { useOffers } from '../../hooks/useOffers';
-import { useNetSheet, recalcLines, calcNetProceeds } from '../../hooks/useNetSheet';
+import { useAuthStore } from "@/lib/store/authStore";
+import { Deal, DealStage } from "@/lib/data/mockDeals";
+import { Task } from "@/lib/data/mockTasks";
+import ClientNotifications from "@/components/ClientNotifications";
+import { useDealStageStore } from "@/lib/store/dealStageStore";
+import { useMyDeals } from "@/hooks/useMyDeals";
+import { useTasks } from "@/hooks/useTasks";
+import { useMessages, postMessage } from "@/hooks/useMessages";
+import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
+import { useOffers } from "@/hooks/useOffers";
+import { useNetSheet, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
   ChevronRight, Phone, Mail, Home, Star,
   TrendingUp, Clock, DollarSign, Eye, Wrench, X, Send,
 } from 'lucide-react';
-import MetroMap from '../../components/MetroMap';
-import VendorDirectory from '../../components/VendorDirectory';
+import MetroMap from "@/components/MetroMap";
+import VendorDirectory from "@/components/VendorDirectory";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 

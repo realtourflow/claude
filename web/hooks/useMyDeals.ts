@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
-import { Deal } from '../data/mockDeals';
+import { api } from "@/lib/api-client";
+import { Deal } from "@/lib/data/mockDeals";
 import { apiDealToFrontend, ApiDeal } from './useDeals';
 
 type ApiMyDeal = ApiDeal & {

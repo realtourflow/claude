@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from 'zustand';
-import { DealStage, MOCK_DEALS } from '../data/mockDeals';
+import { DealStage, MOCK_DEALS } from "@/lib/data/mockDeals";
 
 type DealStageStore = {
   stageByDeal: Record<string, DealStage>;

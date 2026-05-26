@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
+import { api } from "@/lib/api-client";
 
 export type ContingencyStatus = 'active' | 'waived' | 'removed';
 export type ContingencyType = 'inspection' | 'financing' | 'appraisal' | 'hoa' | 'custom';

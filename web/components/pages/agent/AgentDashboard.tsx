@@ -2,13 +2,13 @@
 
 import { useState } from 'react';
 import Link from "next/link";
-import { useAuthStore } from '../../store/authStore';
-import { useSettings } from '../../hooks/useSettings';
-import { Deal } from '../../data/mockDeals';
-import { Task } from '../../data/mockTasks';
-import { useDeals } from '../../hooks/useDeals';
-import { useAgentTasks } from '../../hooks/useTasks';
-import { useNotifications, AppNotification } from '../../hooks/useNotifications';
+import { useAuthStore } from "@/lib/store/authStore";
+import { useSettings } from "@/hooks/useSettings";
+import { Deal } from "@/lib/data/mockDeals";
+import { Task } from "@/lib/data/mockTasks";
+import { useDeals } from "@/hooks/useDeals";
+import { useAgentTasks } from "@/hooks/useTasks";
+import { useNotifications, AppNotification } from "@/hooks/useNotifications";
 import { TrendingUp, Layers, CheckSquare, ArrowRight, Clock, AlertCircle, CheckCircle2, DollarSign, Zap, Share2, X, Phone } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

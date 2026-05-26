@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from 'zustand';
-import { MOCK_DEALS } from '../data/mockDeals';
+import { MOCK_DEALS } from "@/lib/data/mockDeals";
 
 export type ChecklistAssignee = 'tc' | 'agent' | 'buyer' | 'seller' | 'third_party';
 

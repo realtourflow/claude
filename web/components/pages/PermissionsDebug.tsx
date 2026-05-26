@@ -1,9 +1,9 @@
 "use client";
 
-import { useAuthStore } from '../store/authStore';
-import { PERMISSIONS, Permission } from '../permissions/permissions';
-import { GROUPS, GroupId } from '../permissions/groups';
-import { usePermission } from '../permissions/usePermission';
+import { useAuthStore } from "@/lib/store/authStore";
+import { PERMISSIONS, Permission } from "@/permissions/permissions";
+import { GROUPS, GroupId } from "@/permissions/groups";
+import { usePermission } from "@/permissions/usePermission";
 
 // Group permissions by domain
 type DomainMap = Record<string, { key: string; permission: Permission }[]>;

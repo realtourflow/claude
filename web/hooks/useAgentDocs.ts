@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
+import { api } from "@/lib/api-client";
 
 export type DocType = 'baa' | 'listing_agreement' | 'purchase_contract' | 'disclosure' | 'other';
 

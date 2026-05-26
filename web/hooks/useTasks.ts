@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
-import { Task } from '../data/mockTasks';
-import { DealStage } from '../data/mockDeals';
+import { api } from "@/lib/api-client";
+import { Task } from "@/lib/data/mockTasks";
+import { DealStage } from "@/lib/data/mockDeals";
 
 type ApiTask = {
   id: string;

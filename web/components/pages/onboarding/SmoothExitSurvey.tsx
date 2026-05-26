@@ -9,8 +9,8 @@ import {
   NEXT_STEP_LABELS,
   nextStepQualifiesForBridge,
   calcSmoothExitFee,
-} from '../../data/mockSmoothExit';
-import { api } from '../../api/client';
+} from "@/lib/data/mockSmoothExit";
+import { api } from "@/lib/api-client";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 

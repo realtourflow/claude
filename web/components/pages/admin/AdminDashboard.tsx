@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState, useEffect } from 'react';
-import { api } from '../../api/client';
-import { useDeals } from '../../hooks/useDeals';
-import { useUsers, AppUser } from '../../hooks/useUsers';
-import { useSystemConfig, usePromoCodes, useAuditLog, SystemConfig, CreatePromoCodeInput } from '../../hooks/useAdmin';
-import { Deal } from '../../data/mockDeals';
+import { api } from "@/lib/api-client";
+import { useDeals } from "@/hooks/useDeals";
+import { useUsers, AppUser } from "@/hooks/useUsers";
+import { useSystemConfig, usePromoCodes, useAuditLog, SystemConfig, CreatePromoCodeInput } from "@/hooks/useAdmin";
+import { Deal } from "@/lib/data/mockDeals";
 import {
   AlertTriangle,
   TrendingUp,
@@ -33,8 +33,8 @@ import {
   Copy,
   CheckCheck,
 } from 'lucide-react';
-import { FAST_PASS_UPSELLS } from '../../data/mockFastPass';
-import { NEXT_STEP_LABELS, SMOOTH_EXIT_UPSELLS, nextStepQualifiesForBridge } from '../../data/mockSmoothExit';
+import { FAST_PASS_UPSELLS } from "@/lib/data/mockFastPass";
+import { NEXT_STEP_LABELS, SMOOTH_EXIT_UPSELLS, nextStepQualifiesForBridge } from "@/lib/data/mockSmoothExit";
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
 

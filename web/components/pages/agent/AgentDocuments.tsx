@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useDeals } from '../../hooks/useDeals';
+import { useDeals } from "@/hooks/useDeals";
 import { FileText, ArrowRight, MapPin } from 'lucide-react';
 
 const STAGE_LABELS: Record<string, string> = {
