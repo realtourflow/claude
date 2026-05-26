@@ -20,9 +20,24 @@ jobs:
       run:
         working-directory: web
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/realtourflow_test?schema=public
+      # globalSetup creates `realtourflow_test` from the admin URL below.
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
       AUTH0_DOMAIN: test.auth0.com
       AUTH0_AUDIENCE: https://api.test.local
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - uses: actions/checkout@v4
 
