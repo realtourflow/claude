@@ -1,0 +1,114 @@
+import { error, json, withAuth } from "@/lib/http";
+import { prisma } from "@/lib/db";
+import { resolveUserId } from "@/lib/users";
+import { getDealForAgent } from "@/lib/deals";
+import {
+  STAGE_LABELS,
+  type DealStage,
+  isForwardAdvance,
+} from "@/lib/stages";
+import { logAudit } from "@/lib/audit";
+import { createNotification } from "@/lib/notifications";
+import { enqueuePushDealClosingEvent } from "@/lib/jobs";
+
+type Ctx = { params: Promise<{ id: string }> };
+
+type AdvanceBody = { stage?: string };
+
+export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
+  const { id: dealId } = await ctx.params;
+  const url = new URL(req.url);
+  const force = url.searchParams.get("force") === "true";
+
+  return (await withAuth(req, async (claims): Promise<Response> => {
+    const userId = await resolveUserId(claims.sub);
+    if (!userId) return error("user not found", 404);
+
+    let body: AdvanceBody;
+    try {
+      body = (await req.json()) as AdvanceBody;
+    } catch {
+      return error("invalid request body", 400);
+    }
+    const newStage = body.stage as DealStage | undefined;
+    if (!newStage) return error("stage is required", 400);
+
+    // Look up current stage + ownership.
+    const current = await prisma.deals.findFirst({
+      where: { id: dealId, agent_id: userId },
+      select: { stage: true },
+    });
+    if (!current) return error("deal not found", 404);
+
+    // Blocking-task gate (skipped on force).
+    if (!force && isForwardAdvance(current.stage, newStage)) {
+      const blocking = await prisma.tasks.findMany({
+        where: {
+          deal_id: dealId,
+          priority: "high",
+          status: { not: "completed" },
+          OR: [{ stage_context: current.stage }, { stage_context: null }],
+        },
+        select: { id: true, title: true },
+      });
+      if (blocking.length > 0) {
+        return json(
+          { gate: true, blocking_tasks: blocking },
+          422
+        );
+      }
+    }
+
+    // Transaction: update stage + insert history row.
+    await prisma.$transaction([
+      prisma.deals.update({
+        where: { id: dealId },
+        data: { stage: newStage, updated_at: new Date() },
+      }),
+      prisma.deal_stage_history.create({
+        data: {
+          deal_id: dealId,
+          from_stage: current.stage,
+          to_stage: newStage,
+          changed_by: userId,
+        },
+      }),
+    ]);
+
+    // Background fan-out (fire-and-forget). Audit log + notifications +
+    // calendar push.
+    logAudit({
+      actorId: userId,
+      eventType: "stage_change",
+      dealId,
+      metadata: { from_stage: current.stage, to_stage: newStage },
+    });
+
+    void (async () => {
+      try {
+        const participants = await prisma.deal_participants.findMany({
+          where: { deal_id: dealId },
+          select: { user_id: true },
+        });
+        const label = STAGE_LABELS[newStage] ?? newStage;
+        for (const p of participants) {
+          createNotification({
+            userId: p.user_id,
+            title: "Your deal has moved forward",
+            body: `New stage: ${label}`,
+            kind: "stage_change",
+            dealId,
+          });
+        }
+      } catch (err) {
+        console.error("stage notification fan-out failed", err);
+      }
+    })();
+
+    enqueuePushDealClosingEvent(dealId);
+
+    // Re-fetch with computed health.
+    const fresh = await getDealForAgent(dealId, userId);
+    return json(fresh);
+  })) as Response;
+}

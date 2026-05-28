@@ -1,32 +1,34 @@
-.PHONY: dev dev-backend dev-frontend db migrate tidy install
+.PHONY: dev db migrate install build test typecheck lint
 
-# Start both services in parallel
+# Start the Next.js app (API + UI together)
 dev:
-	@make -j2 dev-backend dev-frontend
+	cd web && npm run dev
 
-dev-backend:
-	cd backend && go run ./cmd/api
-
-dev-frontend:
-	cd frontend && npm run dev
-
-# Spin up Postgres only
+# Spin up local Postgres
 db:
 	docker compose up postgres -d
 
-# Apply all migrations (requires migrate CLI: brew install golang-migrate)
+# Apply all migrations to the database pointed at by $DATABASE_URL.
+# Keeps using golang-migrate while the migrations directory lives at
+# backend/migrations as the canonical source of truth; once we drop
+# the Go side entirely this will switch to `prisma migrate deploy`.
 migrate:
 	migrate -path backend/migrations -database "$(DATABASE_URL)" up
 
-# Tidy Go dependencies
-tidy:
-	cd backend && go mod tidy
-
-# Install frontend dependencies
+# Install web dependencies
 install:
-	cd frontend && npm install
+	cd web && npm install
 
-# Build for production
+# Production build
 build:
-	cd backend && go build -o bin/api ./cmd/api
-	cd frontend && npm run build
+	cd web && npm run build
+
+# Tests
+test:
+	cd web && npm test
+
+typecheck:
+	cd web && npm run typecheck
+
+lint:
+	cd web && npm run lint

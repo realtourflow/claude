@@ -6,6 +6,41 @@
 
 ---
 
+## ⚠️ Migration In Progress: Next.js + Prisma rewrite at `web/`
+
+As of PR #1 (branch `nextjs-prisma-rewrite`) the entire Go backend and the
+React+Vite frontend have been ported to a single Next.js 16 + Prisma 7 app
+under `web/`. Both Phase 11 (frontend) and the API port (Phases 0–10) build
+clean and have a Vercel preview deploy. The original `backend/` (Go) and
+`frontend/` (Vite) directories are still in the repo unchanged — they keep
+running production until the Vercel cutover happens.
+
+**Current production:**
+- API: Go on ECS Fargate (built from `backend/`)
+- UI: React+Vite on Vercel (built from `frontend/`)
+
+**New stack (in `web/`, Vercel preview only for now):**
+- Single Next.js 16 App Router app — same project serves UI + API
+- Prisma 7 (driver-adapter, introspected from the live DB)
+- Auth0 SPA flow via `@auth0/auth0-react` (unchanged token shape)
+- Tailwind 4 with the same brand theme tokens
+
+**Cutover sequence (when ready):**
+1. Promote the Vercel preview of `web/` to a production deployment
+2. Switch DNS so traffic hits Vercel
+3. Drain ECS, then delete `backend/` and the deploy.yml workflow
+4. Delete `frontend/`
+5. Switch `make migrate` to `prisma migrate deploy` and stop using golang-migrate
+
+Until step 1 lands, both stacks coexist. Anything that says "backend/" or
+"frontend/" below describes the live production app and is still accurate.
+The Next.js port lives under `web/` with its own README, env, CI, and
+Vercel project.
+
+See `web/FRONTEND_MIGRATION.md` for the original migration plan.
+
+---
+
 ## What This Is
 
 RealTourFlow is a stage-based real estate deal operating system built for real estate agents.

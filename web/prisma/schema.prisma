@@ -1,0 +1,455 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../app/generated/prisma"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model agent_doc_templates {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id   String   @db.Uuid
+  name       String
+  doc_type   String
+  file_name  String
+  s3_key     String
+  mime_type  String   @default("application/octet-stream")
+  file_size  BigInt   @default(0)
+  notes      String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  users      users    @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([agent_id], map: "idx_agent_doc_templates_agent_id")
+}
+
+model agent_invites {
+  id                                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                                 String
+  name                                  String    @default("")
+  token                                 String    @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invited_by                            String    @db.Uuid
+  claimed_at                            DateTime? @db.Timestamptz(6)
+  claimed_by                            String?   @db.Uuid
+  expires_at                            DateTime  @default(dbgenerated("(now() + '7 days'::interval)")) @db.Timestamptz(6)
+  created_at                            DateTime  @default(now()) @db.Timestamptz(6)
+  users_agent_invites_claimed_byTousers users?    @relation("agent_invites_claimed_byTousers", fields: [claimed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_agent_invites_invited_byTousers users     @relation("agent_invites_invited_byTousers", fields: [invited_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model audit_log {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actor_id   String?  @db.Uuid
+  event_type String
+  deal_id    String?  @db.Uuid
+  target_id  String?
+  metadata   Json?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  users      users?   @relation(fields: [actor_id], references: [id], onUpdate: NoAction)
+  deals      deals?   @relation(fields: [deal_id], references: [id], onUpdate: NoAction)
+
+  @@index([created_at(sort: Desc)], map: "idx_audit_log_created_at")
+  @@index([deal_id], map: "idx_audit_log_deal_id")
+  @@index([event_type], map: "idx_audit_log_event_type")
+}
+
+model calendar_event_map {
+  user_id           String   @db.Uuid
+  provider          String
+  internal_uid      String
+  external_event_id String
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime @default(now()) @db.Timestamptz(6)
+  users             users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([user_id, provider, internal_uid])
+}
+
+model checklist_items {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id     String             @db.Uuid
+  label       String
+  category    String             @default("Contract")
+  checked     Boolean            @default(false)
+  assigned_to checklist_assignee @default(tc)
+  due_date    DateTime?          @db.Date
+  is_custom   Boolean            @default(false)
+  sort_order  Int                @default(0)
+  created_at  DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime           @default(now()) @db.Timestamptz(6)
+  deals       deals              @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([deal_id], map: "idx_checklist_items_deal_id")
+}
+
+model deal_contingencies {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id          String    @db.Uuid
+  label            String
+  contingency_type String    @default("custom")
+  deadline         DateTime? @db.Date
+  waived_at        DateTime? @db.Timestamptz(6)
+  met_at           DateTime? @db.Timestamptz(6)
+  notes            String?
+  sort_order       Int       @default(0)
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime  @default(now()) @db.Timestamptz(6)
+  deals            deals     @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([deal_id, sort_order])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model deal_invites {
+  id                                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id                              String    @db.Uuid
+  email                                String
+  name                                 String
+  role                                 String
+  token                                String    @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invited_by                           String    @db.Uuid
+  claimed_at                           DateTime? @db.Timestamptz(6)
+  claimed_by                           String?   @db.Uuid
+  expires_at                           DateTime  @default(dbgenerated("(now() + '7 days'::interval)")) @db.Timestamptz(6)
+  created_at                           DateTime  @default(now()) @db.Timestamptz(6)
+  users_deal_invites_claimed_byTousers users?    @relation("deal_invites_claimed_byTousers", fields: [claimed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deals                                deals     @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_deal_invites_invited_byTousers users     @relation("deal_invites_invited_byTousers", fields: [invited_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([email], where: raw("(claimed_at IS NULL)"))
+  @@index([token])
+}
+
+model deal_participants {
+  deal_id String    @db.Uuid
+  user_id String    @db.Uuid
+  role    user_role
+  deals   deals     @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users   users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([deal_id, user_id])
+  @@index([user_id], map: "idx_participants_user_id")
+}
+
+model deal_stage_history {
+  id         String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id    String      @db.Uuid
+  from_stage deal_stage?
+  to_stage   deal_stage
+  changed_by String      @db.Uuid
+  changed_at DateTime    @default(now()) @db.Timestamptz(6)
+  users      users       @relation(fields: [changed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deals      deals       @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model deals {
+  id                      String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id                String               @db.Uuid
+  type                    deal_type
+  stage                   deal_stage           @default(intake)
+  title                   String
+  address                 String?
+  price                   Decimal?             @db.Decimal(12, 2)
+  arive_linked            Boolean              @default(false)
+  created_at              DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime             @default(now()) @db.Timestamptz(6)
+  notes                   String?
+  arive_loan_id           String?              @unique(map: "idx_deals_arive_loan_id", where: raw("(arive_loan_id IS NOT NULL)"))
+  arive_milestones        Json?
+  arive_key_dates         Json?
+  arive_loan_status       String?
+  arive_synced_at         DateTime?            @db.Timestamptz(6)
+  fee_status              String               @default("unpaid")
+  fee_amount_cents        Int                  @default(7500)
+  fee_checkout_session_id String?
+  fee_paid_at             DateTime?            @db.Timestamptz(6)
+  fast_pass               Json?
+  smooth_exit             Json?
+  pre_approved            Boolean              @default(false)
+  baa_signed              Boolean              @default(false)
+  showing_availability    Json?
+  commission_pct          Decimal              @default(3.0) @db.Decimal
+  audit_log               audit_log[]
+  checklist_items         checklist_items[]
+  deal_contingencies      deal_contingencies[]
+  deal_invites            deal_invites[]
+  deal_participants       deal_participants[]
+  deal_stage_history      deal_stage_history[]
+  users                   users                @relation(fields: [agent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  documents               documents[]
+  messages                messages[]
+  net_sheets              net_sheets?
+  notifications           notifications[]
+  offers                  offers[]
+  tasks                   tasks[]
+  tracked_properties      tracked_properties[]
+
+  @@index([agent_id], map: "idx_deals_agent_id")
+  @@index([stage], map: "idx_deals_stage")
+}
+
+model documents {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id              String    @db.Uuid
+  uploaded_by          String    @db.Uuid
+  name                 String
+  s3_key               String
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+  mime_type            String    @default("")
+  file_size            BigInt    @default(0)
+  docusign_envelope_id String?
+  docusign_status      String?
+  docusign_sent_at     DateTime? @db.Timestamptz(6)
+  deals                deals     @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                users     @relation(fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model messages {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id    String   @db.Uuid
+  sender_id  String   @db.Uuid
+  body       String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  channel    String   @default("client_thread") @db.VarChar(20)
+  deals      deals    @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users      users    @relation(fields: [sender_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([deal_id], map: "idx_messages_deal_id")
+}
+
+model net_sheets {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id      String    @unique @db.Uuid
+  sale_price   Int       @default(0)
+  closing_date DateTime? @db.Date
+  annual_taxes Int       @default(0)
+  lines        Json      @default("[]")
+  status       String    @default("draft")
+  ready_at     DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @db.Timestamptz(6)
+  deals        deals     @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model notifications {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String    @db.Uuid
+  title      String
+  body       String?
+  type       String    @default("info")
+  deal_id    String?   @db.Uuid
+  href       String?
+  read_at    DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  deals      deals?    @relation(fields: [deal_id], references: [id], onUpdate: NoAction)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id, created_at(sort: Desc)])
+}
+
+model oauth_tokens {
+  user_id       String   @db.Uuid
+  provider      String
+  access_token  String
+  refresh_token String?
+  expires_at    DateTime @db.Timestamptz(6)
+  scope         String   @default("")
+  account_email String?
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
+  users         users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([user_id, provider])
+  @@index([provider], map: "idx_oauth_tokens_provider")
+}
+
+model offers {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id       String    @db.Uuid
+  buyer_name    String    @default("")
+  offer_price   Int       @default(0)
+  close_date    DateTime? @db.Date
+  contingencies String[]  @default([])
+  agent_notes   String    @default("")
+  submitted_at  DateTime  @default(now()) @db.Timestamptz(6)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  deals         deals     @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model preferred_vendors {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id     String   @db.Uuid
+  category     String   @db.VarChar(50)
+  company      String
+  contact_name String?
+  phone        String?
+  email        String?
+  website      String?
+  notes        String?
+  is_featured  Boolean  @default(false)
+  sort_order   Int      @default(0)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  users        users    @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([agent_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model promo_codes {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code           String    @unique
+  discount_type  String
+  discount_value Decimal   @db.Decimal
+  applies_to     String[]  @default([])
+  max_uses       Int?
+  uses_count     Int       @default(0)
+  expires_at     DateTime? @db.Timestamptz(6)
+  created_by     String?   @db.Uuid
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  users          users?    @relation(fields: [created_by], references: [id], onUpdate: NoAction)
+}
+
+model schema_migrations {
+  version BigInt  @id
+  dirty   Boolean
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model system_config {
+  id         Int      @id @default(1)
+  config     Json     @default("{}")
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_by String?  @db.Uuid
+  users      users?   @relation(fields: [updated_by], references: [id], onUpdate: NoAction)
+}
+
+model tasks {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id       String      @db.Uuid
+  assigned_to   String?     @db.Uuid
+  title         String
+  description   String?
+  status        task_status @default(pending)
+  due_date      DateTime?   @db.Date
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime    @default(now()) @db.Timestamptz(6)
+  priority      String      @default("medium") @db.VarChar(10)
+  source        String      @default("manual") @db.VarChar(20)
+  stage_context String?     @db.VarChar(50)
+  role          String      @default("agent") @db.VarChar(30)
+  users         users?      @relation(fields: [assigned_to], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  deals         deals       @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([assigned_to], map: "idx_tasks_assigned_to")
+  @@index([deal_id], map: "idx_tasks_deal_id")
+}
+
+model tracked_properties {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id            String   @db.Uuid
+  address            String
+  city               String   @default("")
+  state              String   @default("")
+  price              Int      @default(0)
+  beds               Decimal  @default(0) @db.Decimal(4, 1)
+  baths              Decimal  @default(0) @db.Decimal(4, 1)
+  sqft               Int      @default(0)
+  thumbnail_url      String   @default("")
+  source_url         String   @default("")
+  status             String   @default("interested")
+  added_by           String   @default("agent")
+  agent_note         String?
+  buyer_note         String?
+  agent_private_note String?
+  offer_requested    Boolean  @default(false)
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @db.Timestamptz(6)
+  deals              deals    @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model user_settings {
+  user_id    String   @id @db.Uuid
+  settings   Json     @default("{}")
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  users      users    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model users {
+  id                                            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auth0_id                                      String                @unique
+  email                                         String                @unique
+  name                                          String
+  role                                          user_role
+  phone                                         String?
+  created_at                                    DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at                                    DateTime              @default(now()) @db.Timestamptz(6)
+  tc_user_id                                    String?               @db.Uuid
+  tc_contact                                    Json?
+  deactivated_at                                DateTime?             @db.Timestamptz(6)
+  calendar_token                                String?
+  mls_key                                       String?
+  mls_secret                                    String?
+  onboarding_complete                           Boolean               @default(false)
+  agent_doc_templates                           agent_doc_templates[]
+  agent_invites_agent_invites_claimed_byTousers agent_invites[]       @relation("agent_invites_claimed_byTousers")
+  agent_invites_agent_invites_invited_byTousers agent_invites[]       @relation("agent_invites_invited_byTousers")
+  audit_log                                     audit_log[]
+  calendar_event_map                            calendar_event_map[]
+  deal_invites_deal_invites_claimed_byTousers   deal_invites[]        @relation("deal_invites_claimed_byTousers")
+  deal_invites_deal_invites_invited_byTousers   deal_invites[]        @relation("deal_invites_invited_byTousers")
+  deal_participants                             deal_participants[]
+  deal_stage_history                            deal_stage_history[]
+  deals                                         deals[]
+  documents                                     documents[]
+  messages                                      messages[]
+  notifications                                 notifications[]
+  oauth_tokens                                  oauth_tokens[]
+  preferred_vendors                             preferred_vendors[]
+  promo_codes                                   promo_codes[]
+  system_config                                 system_config[]
+  tasks                                         tasks[]
+  user_settings                                 user_settings?
+  users                                         users?                @relation("usersTousers", fields: [tc_user_id], references: [id], onUpdate: NoAction)
+  other_users                                   users[]               @relation("usersTousers")
+}
+
+enum checklist_assignee {
+  tc
+  agent
+  buyer
+  seller
+  third_party
+}
+
+enum deal_stage {
+  intake
+  active_search
+  offer_active
+  under_contract
+  pre_close
+  closing
+  post_close
+}
+
+enum deal_type {
+  buy
+  sell
+}
+
+enum task_status {
+  pending
+  in_progress
+  completed
+  skipped
+}
+
+enum user_role {
+  agent
+  buyer
+  seller
+  admin
+  lending_partner
+  tc
+}
