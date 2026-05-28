@@ -72,7 +72,7 @@ export default function FastPassDetail() {
       {/* Back nav */}
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-white/10 bg-brand-navy px-4 py-3">
         <button
-          onClick={() => fromOnboarding ? router.push('/onboard/buyer') : router.push(-1)}
+          onClick={() => fromOnboarding ? router.push('/onboard/buyer') : router.back()}
           className="flex items-center gap-1 text-sm text-white/60 hover:text-white transition-colors"
         >
           <ArrowLeft size={15} />
@@ -329,14 +329,22 @@ export default function FastPassDetail() {
             )}
           </div>
           <button
-            onClick={() =>
+            onClick={() => {
+              // Next.js's router.push doesn't accept React Router's
+              // `{ state }` second arg. Stash payload in sessionStorage
+              // so the destination survey page can read it.
+              if (typeof window !== "undefined") {
+                sessionStorage.setItem(
+                  "fastPassSurveyState",
+                  JSON.stringify({ selectedUpsells, total, dealId })
+                );
+              }
               router.push(
                 fromOnboarding
-                  ? '/fast-pass/survey?fromOnboarding=true'
-                  : '/fast-pass/survey',
-                { state: { selectedUpsells, total, dealId } }
-              )
-            }
+                  ? "/fast-pass/survey?fromOnboarding=true"
+                  : "/fast-pass/survey"
+              );
+            }}
             className="flex items-center gap-2 rounded-xl bg-brand-navy px-6 py-3.5 text-sm font-bold text-white hover:bg-brand-navy/90 transition-all active:scale-[0.98]"
           >
             {fromOnboarding ? 'Continue →' : 'Get Started'} <ArrowRight size={16} />

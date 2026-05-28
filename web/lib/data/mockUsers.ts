@@ -1,4 +1,4 @@
-import { GroupId } from '../permissions/groups';
+import { GroupId } from '@/permissions/groups';
 
 export type MockUser = {
   id: string;

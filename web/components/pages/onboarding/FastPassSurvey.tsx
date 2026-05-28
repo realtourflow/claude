@@ -683,7 +683,7 @@ export default function FastPassSurvey() {
 
   function back() {
     if (screen === 0) {
-      router.push(-1);
+      router.back();
     } else {
       setScreen((s) => Math.max(s - 1, 0));
     }

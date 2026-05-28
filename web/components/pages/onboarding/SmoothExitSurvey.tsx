@@ -516,7 +516,7 @@ export default function SmoothExitSurvey() {
   function back() {
     if (screen === 0) {
       if (fromOnboarding) router.push('/smooth-exit?fromOnboarding=true');
-      else router.push(-1);
+      else router.back();
     } else {
       setScreen((s) => Math.max(s - 1, 0));
     }
