@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type MessageChannel = 'client_thread' | 'internal';
@@ -42,37 +42,28 @@ function apiMessageToFrontend(m: ApiMessage): Message {
   };
 }
 
-export function useMessages(dealId: string, channel: MessageChannel) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchMessages = useCallback(async () => {
-    if (!dealId) return;
-    try {
+export function useMessages(dealId: string, channel: MessageChannel): {
+  messages: Message[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+} {
+  const query = useQuery({
+    queryKey: ['messages', dealId, channel],
+    queryFn: async () => {
       const data = await api.get<ApiMessage[]>(`/deals/${dealId}/messages?channel=${channel}`);
-      setMessages(data.map(apiMessageToFrontend));
-      setError(null);
-    } catch {
-      setError('Failed to load messages');
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId, channel]);
+      return data.map(apiMessageToFrontend);
+    },
+    enabled: Boolean(dealId),
+    refetchInterval: 10_000, // Poll every 10s — replaces manual setInterval
+  });
 
-  useEffect(() => {
-    setLoading(true);
-    fetchMessages();
-  }, [fetchMessages]);
-
-  // Poll every 10 seconds for new messages
-  useEffect(() => {
-    if (!dealId) return;
-    const id = setInterval(fetchMessages, 10_000);
-    return () => clearInterval(id);
-  }, [fetchMessages, dealId]);
-
-  return { messages, loading, error, refresh: fetchMessages };
+  return {
+    messages: query.data ?? [],
+    loading: query.isLoading,
+    error: query.error instanceof Error ? 'Failed to load messages' : null,
+    refresh: () => { void query.refetch(); },
+  };
 }
 
 export async function postMessage(

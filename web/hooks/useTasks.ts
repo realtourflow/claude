@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { Task } from "@/lib/data/mockTasks";
 import { DealStage } from "@/lib/data/mockDeals";
@@ -41,54 +41,37 @@ function apiTaskToFrontend(t: ApiTask): Task {
   };
 }
 
-export function useAgentTasks() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
+export function useAgentTasks(): { tasks: Task[]; loading: boolean; refresh: () => void } {
+  const query = useQuery({
+    queryKey: ['agent-tasks'],
+    queryFn: async () => {
       const raw = await api.get<ApiTask[]>('/tasks');
-      setTasks(raw.map(apiTaskToFrontend));
-    } catch {
-      setTasks([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return raw.map(apiTaskToFrontend);
+    },
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { tasks, loading, refresh: load };
+  return {
+    tasks: query.data ?? [],
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+  };
 }
 
-export function useTasks(dealId: string) {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(async () => {
-    if (!dealId) {
-      setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
+export function useTasks(dealId: string): { tasks: Task[]; loading: boolean; refresh: () => void } {
+  const query = useQuery({
+    queryKey: ['tasks', dealId],
+    queryFn: async () => {
       const raw = await api.get<ApiTask[]>(`/deals/${dealId}/tasks`);
-      setTasks(raw.map(apiTaskToFrontend));
-    } catch {
-      setTasks([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId]);
+      return raw.map(apiTaskToFrontend);
+    },
+    enabled: Boolean(dealId),
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { tasks, loading, refresh: load };
+  return {
+    tasks: query.data ?? [],
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+  };
 }
 
 export async function patchTaskStatus(taskId: string, status: string): Promise<void> {

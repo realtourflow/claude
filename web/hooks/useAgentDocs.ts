@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type DocType = 'baa' | 'listing_agreement' | 'purchase_contract' | 'disclosure' | 'other';
@@ -55,22 +55,16 @@ function fromApi(d: ApiDoc): AgentDocTemplate {
 }
 
 export function useAgentDocs() {
-  const [docs, setDocs] = useState<AgentDocTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['me-doc-templates'];
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
       const raw = await api.get<ApiDoc[]>('/me/doc-templates');
-      setDocs(raw.map(fromApi));
-    } catch {
-      setDocs([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+      return raw.map(fromApi);
+    },
+  });
 
   async function uploadDoc(
     file: File,
@@ -108,19 +102,23 @@ export function useAgentDocs() {
     });
 
     const doc = fromApi(raw);
-    setDocs((prev) => [doc, ...prev]);
+    queryClient.setQueryData<AgentDocTemplate[]>(queryKey, (prev) => [doc, ...(prev ?? [])]);
     return doc;
   }
 
   async function updateDoc(id: string, patch: { name?: string; notes?: string | null }): Promise<void> {
     const raw = await api.patch<ApiDoc>(`/me/doc-templates/${id}`, patch);
     const updated = fromApi(raw);
-    setDocs((prev) => prev.map((d) => (d.id === id ? updated : d)));
+    queryClient.setQueryData<AgentDocTemplate[]>(queryKey, (prev) =>
+      (prev ?? []).map((d) => (d.id === id ? updated : d)),
+    );
   }
 
   async function removeDoc(id: string): Promise<void> {
     await api.delete(`/me/doc-templates/${id}`);
-    setDocs((prev) => prev.filter((d) => d.id !== id));
+    queryClient.setQueryData<AgentDocTemplate[]>(queryKey, (prev) =>
+      (prev ?? []).filter((d) => d.id !== id),
+    );
   }
 
   async function getDownloadUrl(id: string): Promise<string> {
@@ -130,21 +128,30 @@ export function useAgentDocs() {
     return download_url;
   }
 
-  return { docs, loading, refresh: load, uploadDoc, updateDoc, removeDoc, getDownloadUrl };
+  return {
+    docs: query.data ?? [],
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+    uploadDoc,
+    updateDoc,
+    removeDoc,
+    getDownloadUrl,
+  };
 }
 
 export function useAgentDocTemplatesForDeal(dealId: string | undefined) {
-  const [templates, setTemplates] = useState<AgentDocTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!dealId) { setLoading(false); return; }
-    setLoading(true);
-    api.get<ApiDoc[]>(`/deals/${dealId}/agent-doc-templates`)
-      .then((raw) => setTemplates(raw.map(fromApi)))
-      .catch(() => setTemplates([]))
-      .finally(() => setLoading(false));
-  }, [dealId]);
+  const query = useQuery({
+    queryKey: ['agent-doc-templates', dealId ?? ''],
+    queryFn: async () => {
+      try {
+        const raw = await api.get<ApiDoc[]>(`/deals/${dealId}/agent-doc-templates`);
+        return raw.map(fromApi);
+      } catch {
+        return [] as AgentDocTemplate[];
+      }
+    },
+    enabled: Boolean(dealId),
+  });
 
   async function getDownloadUrl(id: string): Promise<string> {
     const { download_url } = await api.get<{ download_url: string }>(
@@ -153,5 +160,5 @@ export function useAgentDocTemplatesForDeal(dealId: string | undefined) {
     return download_url;
   }
 
-  return { templates, loading, getDownloadUrl };
+  return { templates: query.data ?? [], loading: query.isLoading, getDownloadUrl };
 }

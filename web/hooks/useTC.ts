@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type TCInfo = {
@@ -22,36 +22,40 @@ function fromApi(t: ApiTCInfo): TCInfo {
 }
 
 export function useTC() {
-  const [tc, setTC] = useState<TCInfo | null>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['me-tc'];
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      const raw = await api.get<ApiTCInfo>('/me/tc');
-      setTC(fromApi(raw));
-    } catch {
-      setTC(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
+      try {
+        const raw = await api.get<ApiTCInfo>('/me/tc');
+        return fromApi(raw);
+      } catch {
+        return null;
+      }
+    },
+  });
 
   async function saveTC(name: string, email: string, phone: string): Promise<TCInfo> {
     const raw = await api.put<ApiTCInfo>('/me/tc', { name, email, phone });
     const info = fromApi(raw);
-    setTC(info);
+    queryClient.setQueryData(queryKey, info);
     return info;
   }
 
   async function removeTC(): Promise<void> {
     await api.delete('/me/tc');
-    setTC(null);
+    queryClient.setQueryData(queryKey, null);
   }
 
-  return { tc, loading, refresh: load, saveTC, removeTC };
+  return {
+    tc: query.data ?? null,
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+    saveTC,
+    removeTC,
+  };
 }
 
 export type AgentSummary = {
@@ -71,21 +75,23 @@ type ApiAgentSummary = {
 };
 
 export function useMyAgents() {
-  const [agents, setAgents] = useState<AgentSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const query = useQuery({
+    queryKey: ['me-agents'],
+    queryFn: async () => {
+      try {
+        const rows = await api.get<ApiAgentSummary[]>('/me/agents');
+        return rows.map((a) => ({
+          id: a.id,
+          name: a.name,
+          email: a.email,
+          phone: a.phone,
+          activeDealCount: a.active_deal_count,
+        }));
+      } catch {
+        return [] as AgentSummary[];
+      }
+    },
+  });
 
-  useEffect(() => {
-    api.get<ApiAgentSummary[]>('/me/agents')
-      .then((rows) => setAgents(rows.map((a) => ({
-        id: a.id,
-        name: a.name,
-        email: a.email,
-        phone: a.phone,
-        activeDealCount: a.active_deal_count,
-      }))))
-      .catch(() => setAgents([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  return { agents, loading };
+  return { agents: query.data ?? [], loading: query.isLoading };
 }

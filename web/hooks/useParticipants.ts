@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type Participant = {
@@ -12,23 +12,15 @@ export type Participant = {
 };
 
 export function useParticipants(dealId: string) {
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [loading, setLoading] = useState(true);
+  const query = useQuery({
+    queryKey: ['participants', dealId],
+    queryFn: () => api.get<Participant[]>(`/deals/${dealId}/participants`),
+    enabled: Boolean(dealId),
+  });
 
-  const load = useCallback(async () => {
-    if (!dealId) { setLoading(false); return; }
-    try {
-      setLoading(true);
-      const data = await api.get<Participant[]>(`/deals/${dealId}/participants`);
-      setParticipants(data);
-    } catch {
-      setParticipants([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId]);
-
-  useEffect(() => { load(); }, [load]);
-
-  return { participants, loading, refresh: load };
+  return {
+    participants: query.data ?? [],
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+  };
 }

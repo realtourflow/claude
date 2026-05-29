@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type ChecklistAssignee = 'tc' | 'agent' | 'buyer' | 'seller' | 'third_party';
@@ -44,68 +44,77 @@ function fromApi(a: ApiItem): ChecklistItem {
 }
 
 export function useChecklist(dealId: string) {
-  const [items, setItems] = useState<ChecklistItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['checklist', dealId];
 
-  const load = useCallback(async () => {
-    if (!dealId) { setLoading(false); return; }
-    try {
-      setLoading(true);
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
       const raw = await api.get<ApiItem[]>(`/deals/${dealId}/checklist`);
-      setItems(raw.map(fromApi));
-    } catch {
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId]);
+      return raw.map(fromApi);
+    },
+    enabled: Boolean(dealId),
+  });
 
-  useEffect(() => { load(); }, [load]);
+  const items = query.data ?? [];
+
+  const update = (mut: (prev: ChecklistItem[]) => ChecklistItem[]) => {
+    queryClient.setQueryData<ChecklistItem[]>(queryKey, (prev) => mut(prev ?? []));
+  };
 
   async function toggle(itemId: string) {
     const item = items.find((i) => i.id === itemId);
     if (!item) return;
-    setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, checked: !i.checked } : i));
+    update((prev) => prev.map((i) => (i.id === itemId ? { ...i, checked: !i.checked } : i)));
     try {
       await api.patch(`/deals/${dealId}/checklist/${itemId}`, { checked: !item.checked });
     } catch {
-      setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, checked: item.checked } : i));
+      update((prev) => prev.map((i) => (i.id === itemId ? { ...i, checked: item.checked } : i)));
     }
   }
 
   async function assign(itemId: string, assignedTo: ChecklistAssignee) {
-    setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, assignedTo } : i));
+    update((prev) => prev.map((i) => (i.id === itemId ? { ...i, assignedTo } : i)));
     try {
       await api.patch(`/deals/${dealId}/checklist/${itemId}`, { assigned_to: assignedTo });
     } catch {
-      load();
+      void query.refetch();
     }
   }
 
   async function setDueDate(itemId: string, dueDate: string | undefined) {
-    setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, dueDate } : i));
+    update((prev) => prev.map((i) => (i.id === itemId ? { ...i, dueDate } : i)));
     try {
       await api.patch(`/deals/${dealId}/checklist/${itemId}`, { due_date: dueDate ?? '' });
     } catch {
-      load();
+      void query.refetch();
     }
   }
 
   async function addItem(label: string, category: string) {
     try {
       const raw = await api.post<ApiItem>(`/deals/${dealId}/checklist`, { label, category, assigned_to: 'tc' });
-      setItems((prev) => [...prev, fromApi(raw)]);
+      update((prev) => [...prev, fromApi(raw)]);
     } catch {}
   }
 
   async function removeItem(itemId: string) {
-    setItems((prev) => prev.filter((i) => i.id !== itemId));
+    update((prev) => prev.filter((i) => i.id !== itemId));
     try {
       await api.delete(`/deals/${dealId}/checklist/${itemId}`);
     } catch {
-      load();
+      void query.refetch();
     }
   }
 
-  return { items, loading, refresh: load, toggle, assign, setDueDate, addItem, removeItem };
+  return {
+    items,
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+    toggle,
+    assign,
+    setDueDate,
+    addItem,
+    removeItem,
+  };
 }

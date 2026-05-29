@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type Offer = {
@@ -39,23 +39,17 @@ function fromApi(o: ApiOffer): Offer {
 }
 
 export function useOffers(dealId: string | undefined) {
-  const [offers, setOffers] = useState<Offer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['offers', dealId ?? ''];
 
-  const load = useCallback(async () => {
-    if (!dealId) { setLoading(false); return; }
-    try {
-      setLoading(true);
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
       const raw = await api.get<ApiOffer[]>(`/deals/${dealId}/offers`);
-      setOffers(raw.map(fromApi));
-    } catch {
-      setOffers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId]);
-
-  useEffect(() => { load(); }, [load]);
+      return raw.map(fromApi);
+    },
+    enabled: Boolean(dealId),
+  });
 
   async function addOffer(o: Omit<Offer, 'id' | 'dealId' | 'submittedAt'>) {
     if (!dealId) return;
@@ -66,13 +60,21 @@ export function useOffers(dealId: string | undefined) {
       contingencies: o.contingencies,
       agent_notes: o.agentNotes,
     });
-    setOffers((prev) => [fromApi(raw), ...prev]);
+    queryClient.setQueryData<Offer[]>(queryKey, (prev) => [fromApi(raw), ...(prev ?? [])]);
   }
 
   async function removeOffer(offerId: string) {
     await api.delete(`/offers/${offerId}`);
-    setOffers((prev) => prev.filter((o) => o.id !== offerId));
+    queryClient.setQueryData<Offer[]>(queryKey, (prev) =>
+      (prev ?? []).filter((o) => o.id !== offerId),
+    );
   }
 
-  return { offers, loading, refresh: load, addOffer, removeOffer };
+  return {
+    offers: query.data ?? [],
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+    addOffer,
+    removeOffer,
+  };
 }

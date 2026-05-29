@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type UserSettings = {
@@ -12,29 +12,29 @@ export type UserSettings = {
 };
 
 export function useSettings() {
-  const [settings, setSettings] = useState<UserSettings>({});
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['me-settings'];
 
-  const load = useCallback(async () => {
-    try {
-      const data = await api.get<UserSettings>('/me/settings');
-      setSettings(data);
-    } catch {
-      setSettings({});
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
+      try {
+        return await api.get<UserSettings>('/me/settings');
+      } catch {
+        return {} as UserSettings;
+      }
+    },
+  });
 
-  useEffect(() => { load(); }, [load]);
+  const settings = query.data ?? {};
 
   async function saveSettings(patch: Partial<UserSettings>) {
     const merged = { ...settings, ...patch };
-    setSettings(merged);
+    queryClient.setQueryData(queryKey, merged);
     try {
       await api.put('/me/settings', merged);
     } catch {
-      load();
+      void query.refetch();
     }
   }
 
@@ -46,5 +46,5 @@ export function useSettings() {
     }
   }
 
-  return { settings, loading, saveSettings, saveProfile };
+  return { settings, loading: query.isLoading, saveSettings, saveProfile };
 }
