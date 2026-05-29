@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Image from "next/image";
 import {
   User, Store, Bell, Plug, Star, Pencil, Trash2,
@@ -253,7 +253,7 @@ function VendorModal({
 
 // ─── Vendors Section ──────────────────────────────────────────────────────────
 
-function VendorsSection({ agentId }: { agentId: string }) {
+function VendorsSection({ agentId: _agentId }: { agentId: string }) {
   const { vendors, addVendor, updateVendor, deleteVendor, moveVendor, toggleFeatured } =
     useVendors();
 
@@ -1357,14 +1357,6 @@ function MyAgentsSection({ tcUserId: _tcUserId }: { tcUserId: string }) {
 // ─── Documents Section ────────────────────────────────────────────────────────
 
 const ALL_DOC_TYPES: DocType[] = ['baa', 'listing_agreement', 'purchase_contract', 'disclosure', 'other'];
-
-const DOC_TYPE_DESCRIPTIONS: Record<DocType, string> = {
-  baa:               'Required before showing homes to buyers',
-  listing_agreement: 'For seller clients',
-  purchase_contract: 'Standard purchase agreement',
-  disclosure:        'Property disclosure statement',
-  other:             'Any other template document',
-};
 
 function DocumentsSection({ agentId: _agentId }: { agentId: string }) {
   const { docs, loading, uploadDoc, updateDoc, removeDoc, getDownloadUrl } = useAgentDocs();

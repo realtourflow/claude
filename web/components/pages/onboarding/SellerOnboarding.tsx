@@ -370,16 +370,15 @@ export default function SellerOnboarding() {
 
   const activeUser = useAuthStore((s) => s.activeUser);
   const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
-  const [inviteDealId, setInviteDealId] = useState<string | null>(null);
 
   const [data, setData] = useState<SellerData>(EMPTY);
   const [screenIndex, setScreenIndex] = useState(0);
 
-  // Fetch invite details from token to get real agentName + dealId
+  // Fetch invite details from token to get real agentName.
   useEffect(() => {
     if (!token) return;
     api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
-      .then((inv) => { setAgentName(inv.agent_name); setInviteDealId(inv.deal_id); })
+      .then((inv) => { setAgentName(inv.agent_name); })
       .catch(() => {});
   }, [token]);
 

@@ -13,6 +13,23 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  // Respect the `_`-prefix convention for intentionally unused params and
+  // catch-binding errors. This is a widely-used signal and is not the same
+  // thing as a blanket disable — the rule still flags genuinely unused
+  // identifiers that aren't marked.
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

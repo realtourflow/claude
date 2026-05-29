@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import Image from "next/image";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Deal, DealStage, LoanMilestones } from "@/lib/data/mockDeals";
@@ -195,15 +195,6 @@ const TASK_STATUS_ICON: Record<string, React.ReactNode> = {
   overdue: <AlertCircle size={16} className="text-red-500" />,
   pending: <Circle size={16} className="text-gray-300" />,
   blocked: <AlertCircle size={16} className="text-orange-500" />,
-};
-
-const TASK_ASSIGNEE_COLORS: Record<string, string> = {
-  agent: 'bg-blue-100 text-blue-700',
-  buyer: 'bg-green-100 text-green-700',
-  seller: 'bg-purple-100 text-purple-700',
-  tc: 'bg-amber-100 text-amber-700',
-  admin: 'bg-red-100 text-red-700',
-  third_party: 'bg-gray-100 text-gray-600',
 };
 
 const FLAG_LABELS: Record<string, string> = {
@@ -970,7 +961,6 @@ function LoanMilestonesCard({ deal, onRefresh }: { deal: Deal; onRefresh?: () =>
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState('');
 
-  const lender = deal.vendors?.lender;
   const isArive = milestones?.source === 'arive';
   const isLinked = deal.flags.includes('mountain_mortgage');
 
@@ -2423,22 +2413,6 @@ const STAGE_GATE: Partial<Record<DealStage, { name: string; note: string }>> = {
   closing: { name: 'Wire / Cashier\'s Check Confirmation', note: 'Confirm funds before closing' },
 };
 
-const DOC_STATUS_BADGE: Record<string, string> = {
-  signed: 'bg-green-100 text-green-700',
-  pending_review: 'bg-amber-100 text-amber-700',
-  pending_signature: 'bg-blue-100 text-blue-700',
-  requested: 'bg-gray-100 text-gray-600',
-  missing: 'bg-red-50 text-red-500',
-};
-
-const DOC_STATUS_LABELS: Record<string, string> = {
-  signed: 'Signed',
-  pending_review: 'Pending Review',
-  pending_signature: 'Awaiting Signature',
-  requested: 'Requested',
-  missing: 'Missing',
-};
-
 // ── Upload Modal ──────────────────────────────────────────────────────────────
 
 const DOC_TYPE_OPTIONS = [
@@ -2631,7 +2605,8 @@ function SendForSignatureModal({
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }

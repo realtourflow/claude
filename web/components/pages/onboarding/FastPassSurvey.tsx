@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { CheckCircle2, ChevronRight, ChevronLeft, Check } from 'lucide-react';
 import {
@@ -656,7 +656,6 @@ function SubmittedScreen({
 
 export default function FastPassSurvey() {
   const router = useRouter();
-  const location = usePathname();
   const searchParams = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
   const state = (null as unknown) as LocationState | null;

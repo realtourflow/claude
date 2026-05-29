@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState, useEffect, useMemo } from 'react';
+import { useState } from 'react';
 import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useUsers, AppUser } from "@/hooks/useUsers";
@@ -192,7 +192,6 @@ function PipelineOverview({ deals }: { deals: Deal[] }) {
   const nowMs = Date.now();
   const closingSoon = activeDeals.filter((d) => {
     if (!d.timeline.closingDate) return false;
-    // eslint-disable-next-line react-hooks/purity
     const closeMs = new Date(d.timeline.closingDate).getTime();
     const days = Math.ceil((closeMs - nowMs) / 86_400_000);
     return days >= 0 && days <= 30;

@@ -593,7 +593,6 @@ export default function BuyerOnboarding() {
   const activeUser = useAuthStore((s) => s.activeUser);
 
   const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
-  const [inviteDealId, setInviteDealId] = useState<string | null>(null);
 
   // Lazy initializers read sessionStorage once at mount. This satisfies the
   // React 19 set-state-in-effect rule — the "resume after Fast Pass" branch
@@ -616,13 +615,12 @@ export default function BuyerOnboarding() {
     resumeState?.lenderChoice ? { ...EMPTY, lenderChoice: resumeState.lenderChoice } : EMPTY,
   );
 
-  // Fetch invite details from token to get real agentName + dealId
+  // Fetch invite details from token to get real agentName.
   useEffect(() => {
     if (!token) return;
     api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
       .then((inv) => {
         setAgentName(inv.agent_name);
-        setInviteDealId(inv.deal_id);
       })
       .catch(() => {});
   }, [token]);

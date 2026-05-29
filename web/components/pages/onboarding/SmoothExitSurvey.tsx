@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, CheckCircle2, Check } from 'lucide-react';
 import {
   SmoothExitNextStep,
@@ -484,7 +484,6 @@ function SubmittedScreen({ data, paymentOption, fromOnboarding }: { data: Survey
 
 export default function SmoothExitSurvey() {
   const router = useRouter();
-  const location = usePathname();
   const searchParams = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
   const locationState = (null as unknown) as { dealId?: string | null; selectedUpsells?: string[]; upsellTotal?: number } | null;

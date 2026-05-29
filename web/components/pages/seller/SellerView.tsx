@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, DealStage } from "@/lib/data/mockDeals";
 import { Task } from "@/lib/data/mockTasks";
@@ -1192,7 +1192,6 @@ function SmoothExitPitch() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function SellerView() {
-  const { userId } = useParams<{ userId: string }>();
   const activeUser = useAuthStore((s) => s.activeUser);
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
