@@ -3829,7 +3829,7 @@ export default function DealDetail() {
     return (
       <div className="max-w-3xl">
         <button
-          onClick={() => router.push(-1)}
+          onClick={() => router.back()}
           className="mb-4 flex items-center gap-1.5 text-sm text-gray-400 hover:text-brand-navy transition-colors"
         >
           <ArrowLeft size={14} /> Back
@@ -3845,7 +3845,7 @@ export default function DealDetail() {
     return (
       <div className="max-w-3xl">
         <button
-          onClick={() => router.push(-1)}
+          onClick={() => router.back()}
           className="mb-4 flex items-center gap-1.5 text-sm text-gray-400 hover:text-brand-navy transition-colors"
         >
           <ArrowLeft size={14} /> Back
@@ -3971,7 +3971,7 @@ export default function DealDetail() {
     <div className="max-w-3xl space-y-4">
       {/* Back nav */}
       <button
-        onClick={() => router.push(-1)}
+        onClick={() => router.back()}
         className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-brand-navy transition-colors w-fit"
       >
         <ArrowLeft size={14} /> Back

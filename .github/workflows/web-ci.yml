@@ -56,15 +56,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Phase 11 tech debt: typecheck + lint are intentionally informational
-      # right now. The migrated page components have residual type drift
-      # (useParams return shape, location.state stubs, Lucide icon typing).
-      # next.config.ts sets typescript.ignoreBuildErrors so production builds
-      # are unaffected. Tracked as a follow-up cleanup PR — flip `|| true`
-      # back to a hard fail once the per-page type fixes land.
-      - name: Typecheck (informational)
-        run: npm run typecheck || true
+      - name: Typecheck
+        run: npm run typecheck
 
+      # Lint is still informational while we mop up the ~224 React 19
+      # rule violations carried over from the Vite port. Tracked as the
+      # next follow-up PR (Phase 11 tech-debt PR B). Flip back to a hard
+      # fail by dropping the `|| true` once that PR lands.
       - name: Lint (informational)
         run: npm run lint || true
 
