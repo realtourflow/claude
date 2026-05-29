@@ -183,20 +183,20 @@ function PipelineOverview({ deals }: { deals: Deal[] }) {
   );
   const fastPassDeals = activeDeals.filter((d) => d.flags.includes('fast_pass'));
   const redDeals = activeDeals.filter((d) => d.health === 'red');
-  // useMemo isolates the impure clock + Date-parsing reads from the
-  // parent render body. React 19's react-hooks/purity rule is still
-  // conservative about Date.now() and `new Date()` even inside a useMemo
-  // callback, so the disable below documents that this is intentional.
-  const closingSoon = useMemo(() => {
+  // Closing-soon list. React 19's compiler memoizes automatically, so we
+  // no longer wrap this in useMemo (the rule complains that
+  // `activeDeals` may be mutated later, blocking optimization). The
+  // Date.now() / new Date() reads are unavoidable for a "next 30 days"
+  // filter — the per-line disable documents intent.
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+  const closingSoon = activeDeals.filter((d) => {
+    if (!d.timeline.closingDate) return false;
     // eslint-disable-next-line react-hooks/purity
-    const nowMs = Date.now();
-    return activeDeals.filter((d) => {
-      if (!d.timeline.closingDate) return false;
-      const closeMs = new Date(d.timeline.closingDate).getTime();
-      const days = Math.ceil((closeMs - nowMs) / 86_400_000);
-      return days >= 0 && days <= 30;
-    });
-  }, [activeDeals]);
+    const closeMs = new Date(d.timeline.closingDate).getTime();
+    const days = Math.ceil((closeMs - nowMs) / 86_400_000);
+    return days >= 0 && days <= 30;
+  });
 
   const byStage = STAGE_ORDER.map((stage) => ({
     stage,

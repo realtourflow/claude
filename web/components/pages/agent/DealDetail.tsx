@@ -1988,7 +1988,177 @@ const STATUS_SORT_ORDER: Record<string, number> = {
   overdue: 0, in_progress: 1, blocked: 2, pending: 3, completed: 4,
 };
 
-function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Task[]; onTasksChange: () => void }) {
+// Module-scope constants — moved out of TasksTab to satisfy
+// react-hooks/static-components. Constant, no closures needed.
+const STATUS_PILL: Record<string, string> = {
+  completed:   'bg-green-100 text-green-700',
+  in_progress: 'bg-blue-100 text-blue-700',
+  overdue:     'bg-red-100 text-red-700',
+  pending:     'bg-gray-100 text-gray-500',
+  blocked:     'bg-orange-100 text-orange-700',
+};
+
+const ASSIGNEE_OPTIONS: { value: Task['assignedTo']; label: string; color: string }[] = [
+  { value: 'agent',       label: 'Agent (Me)',      color: 'text-blue-700' },
+  { value: 'buyer',       label: 'Buyer (Client)',  color: 'text-green-700' },
+  { value: 'seller',      label: 'Seller (Client)', color: 'text-purple-700' },
+  { value: 'tc',          label: 'TC',              color: 'text-amber-700' },
+  { value: 'third_party', label: 'Third Party',     color: 'text-gray-600' },
+];
+
+const ASSIGNEE_LABEL: Record<string, string> = {
+  agent: 'Agent', buyer: 'Buyer', seller: 'Seller', tc: 'TC', third_party: 'Third Party', admin: 'Admin',
+};
+
+// All the state + callbacks TaskItem and OwnerSection used to close over.
+// Now passed as a single `ctx` prop so the components can live at module
+// scope and satisfy react-hooks/static-components.
+type TaskItemCtx = {
+  completedIds: Set<string>;
+  toggleComplete: (id: string) => void;
+  effectiveStatus: (t: Task) => string;
+  effectiveAssignee: (t: Task) => string;
+  assigningTaskId: string | null;
+  setAssigningTaskId: (id: string | null) => void;
+  canAssign: boolean;
+  reassign: (id: string, assignee: Task['assignedTo']) => void;
+};
+
+function TaskItem({ task, ctx }: { task: Task; ctx: TaskItemCtx }) {
+  const { completedIds, toggleComplete, effectiveStatus, effectiveAssignee, assigningTaskId, setAssigningTaskId, canAssign, reassign } = ctx;
+  const isDone = completedIds.has(task.id);
+  const status = effectiveStatus(task);
+  const assignee = effectiveAssignee(task);
+  const isAssigning = assigningTaskId === task.id;
+
+  return (
+    <div className={`flex items-start gap-3 rounded-lg px-3 py-3 transition-colors group ${isDone ? 'opacity-60' : 'hover:bg-brand-bg'}`}>
+      <button
+        onClick={() => toggleComplete(task.id)}
+        className={`mt-0.5 flex-shrink-0 rounded-full transition-all ${
+          isDone ? 'text-green-500 hover:text-gray-300' : 'text-gray-300 hover:text-green-400'
+        }`}
+        title={isDone ? 'Mark incomplete' : 'Mark complete'}
+      >
+        {isDone
+          ? <CheckCircle2 size={16} className="text-green-500" />
+          : TASK_STATUS_ICON[status]}
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start gap-2 flex-wrap">
+          <span className={`text-sm font-medium transition-colors ${isDone ? 'line-through text-gray-400' : 'text-brand-navy'}`}>
+            {task.title}
+          </span>
+          {task.source === 'ai' && !isDone && (
+            <span className="flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-600">
+              <Bot size={10} /> AI
+            </span>
+          )}
+        </div>
+        {task.description && !isDone && (
+          <p className="mt-0.5 text-xs text-gray-400 leading-relaxed">{task.description}</p>
+        )}
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_PILL[status]}`}>
+            {status.replace('_', ' ')}
+          </span>
+          {task.priority === 'high' && !isDone && (
+            <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-500 uppercase">High Priority</span>
+          )}
+          {task.dueDate && !isDone && (
+            <span className="flex items-center gap-0.5 text-[11px] text-gray-400">
+              <Calendar size={10} /> {task.dueDate}
+            </span>
+          )}
+
+          {/* Assign button — only for agent/admin */}
+          {canAssign && !isDone && (
+            <div className="relative ml-auto">
+              <button
+                onClick={() => setAssigningTaskId(isAssigning ? null : task.id)}
+                className={[
+                  'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors',
+                  isAssigning
+                    ? 'border-brand-navy bg-brand-navy text-white'
+                    : 'border-gray-200 bg-white text-gray-500 hover:border-brand-navy hover:text-brand-navy',
+                ].join(' ')}
+              >
+                <Users size={10} />
+                {ASSIGNEE_LABEL[assignee] ?? assignee}
+                <ChevronDown size={9} />
+              </button>
+
+              {isAssigning && (
+                <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-xl border border-gray-100 bg-white shadow-xl overflow-hidden">
+                  <div className="px-3 py-2 border-b border-gray-50">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Assign to</p>
+                  </div>
+                  {ASSIGNEE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => reassign(task.id, opt.value)}
+                      className={[
+                        'flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs transition-colors hover:bg-brand-bg',
+                        assignee === opt.value ? 'font-bold bg-brand-bg' : 'font-medium',
+                        opt.color,
+                      ].join(' ')}
+                    >
+                      {assignee === opt.value && <CheckCircle2 size={11} className="flex-shrink-0" />}
+                      {assignee !== opt.value && <span className="w-[11px]" />}
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OwnerSection({
+  label,
+  sublabel,
+  icon: Icon,
+  tasks,
+  ctx,
+}: {
+  label: string;
+  sublabel: string;
+  icon: React.ElementType;
+  tasks: Task[];
+  ctx: TaskItemCtx;
+}) {
+  const doneCount = tasks.filter((t) => ctx.completedIds.has(t.id)).length;
+  const total = tasks.length;
+  if (total === 0) return null;
+  const allSectionDone = doneCount === total;
+  return (
+    <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+      {/* Section header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-brand-navy border-b border-brand-navy">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10">
+          <Icon size={14} className="text-brand-gold" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold leading-none text-white">{label}</div>
+          <div className="text-[11px] mt-0.5 text-white/50">{sublabel}</div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {allSectionDone && <CheckCircle2 size={13} className="text-green-400" />}
+          <span className="text-xs font-bold text-brand-gold">{doneCount}/{total}</span>
+        </div>
+      </div>
+      <div className="divide-y divide-gray-50">
+        {tasks.map((t) => <TaskItem key={t.id} task={t} ctx={ctx} />)}
+      </div>
+    </div>
+  );
+}
+
+function TasksTab({ deal, tasks }: { deal: Deal; tasks: Task[]; onTasksChange: () => void }) {
   const { can } = usePermission();
   const canAssign = can(PERMISSIONS.TASK_ASSIGN_ANY);
 
@@ -2034,156 +2204,16 @@ function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Task[]; o
   const clientTasks  = tasks.filter((t) => effectiveAssignee(t) === 'buyer' || effectiveAssignee(t) === 'seller').sort(sortByStatus);
   const supportTasks = tasks.filter((t) => effectiveAssignee(t) === 'tc' || effectiveAssignee(t) === 'third_party' || effectiveAssignee(t) === 'admin').sort(sortByStatus);
 
-  const STATUS_PILL: Record<string, string> = {
-    completed:   'bg-green-100 text-green-700',
-    in_progress: 'bg-blue-100 text-blue-700',
-    overdue:     'bg-red-100 text-red-700',
-    pending:     'bg-gray-100 text-gray-500',
-    blocked:     'bg-orange-100 text-orange-700',
+  const ctx: TaskItemCtx = {
+    completedIds,
+    toggleComplete,
+    effectiveStatus,
+    effectiveAssignee,
+    assigningTaskId,
+    setAssigningTaskId,
+    canAssign,
+    reassign,
   };
-
-  const ASSIGNEE_OPTIONS: { value: Task['assignedTo']; label: string; color: string }[] = [
-    { value: 'agent',       label: 'Agent (Me)',      color: 'text-blue-700' },
-    { value: 'buyer',       label: 'Buyer (Client)',  color: 'text-green-700' },
-    { value: 'seller',      label: 'Seller (Client)', color: 'text-purple-700' },
-    { value: 'tc',          label: 'TC',              color: 'text-amber-700' },
-    { value: 'third_party', label: 'Third Party',     color: 'text-gray-600' },
-  ];
-
-  const ASSIGNEE_LABEL: Record<string, string> = {
-    agent: 'Agent', buyer: 'Buyer', seller: 'Seller', tc: 'TC', third_party: 'Third Party', admin: 'Admin',
-  };
-
-  function TaskItem({ task }: { task: Task }) {
-    const isDone = completedIds.has(task.id);
-    const status = effectiveStatus(task);
-    const assignee = effectiveAssignee(task);
-    const isAssigning = assigningTaskId === task.id;
-
-    return (
-      <div className={`flex items-start gap-3 rounded-lg px-3 py-3 transition-colors group ${isDone ? 'opacity-60' : 'hover:bg-brand-bg'}`}>
-        <button
-          onClick={() => toggleComplete(task.id)}
-          className={`mt-0.5 flex-shrink-0 rounded-full transition-all ${
-            isDone ? 'text-green-500 hover:text-gray-300' : 'text-gray-300 hover:text-green-400'
-          }`}
-          title={isDone ? 'Mark incomplete' : 'Mark complete'}
-        >
-          {isDone
-            ? <CheckCircle2 size={16} className="text-green-500" />
-            : TASK_STATUS_ICON[status]}
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start gap-2 flex-wrap">
-            <span className={`text-sm font-medium transition-colors ${isDone ? 'line-through text-gray-400' : 'text-brand-navy'}`}>
-              {task.title}
-            </span>
-            {task.source === 'ai' && !isDone && (
-              <span className="flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-600">
-                <Bot size={10} /> AI
-              </span>
-            )}
-          </div>
-          {task.description && !isDone && (
-            <p className="mt-0.5 text-xs text-gray-400 leading-relaxed">{task.description}</p>
-          )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_PILL[status]}`}>
-              {status.replace('_', ' ')}
-            </span>
-            {task.priority === 'high' && !isDone && (
-              <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-500 uppercase">High Priority</span>
-            )}
-            {task.dueDate && !isDone && (
-              <span className="flex items-center gap-0.5 text-[11px] text-gray-400">
-                <Calendar size={10} /> {task.dueDate}
-              </span>
-            )}
-
-            {/* Assign button — only for agent/admin */}
-            {canAssign && !isDone && (
-              <div className="relative ml-auto">
-                <button
-                  onClick={() => setAssigningTaskId(isAssigning ? null : task.id)}
-                  className={[
-                    'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors',
-                    isAssigning
-                      ? 'border-brand-navy bg-brand-navy text-white'
-                      : 'border-gray-200 bg-white text-gray-500 hover:border-brand-navy hover:text-brand-navy',
-                  ].join(' ')}
-                >
-                  <Users size={10} />
-                  {ASSIGNEE_LABEL[assignee] ?? assignee}
-                  <ChevronDown size={9} />
-                </button>
-
-                {isAssigning && (
-                  <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-xl border border-gray-100 bg-white shadow-xl overflow-hidden">
-                    <div className="px-3 py-2 border-b border-gray-50">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Assign to</p>
-                    </div>
-                    {ASSIGNEE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => reassign(task.id, opt.value)}
-                        className={[
-                          'flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs transition-colors hover:bg-brand-bg',
-                          assignee === opt.value ? 'font-bold bg-brand-bg' : 'font-medium',
-                          opt.color,
-                        ].join(' ')}
-                      >
-                        {assignee === opt.value && <CheckCircle2 size={11} className="flex-shrink-0" />}
-                        {assignee !== opt.value && <span className="w-[11px]" />}
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function OwnerSection({
-    label,
-    sublabel,
-    icon: Icon,
-    tasks,
-  }: {
-    label: string;
-    sublabel: string;
-    icon: React.ElementType;
-    tasks: Task[];
-  }) {
-    const doneCount = tasks.filter((t) => completedIds.has(t.id)).length;
-    const total = tasks.length;
-    if (total === 0) return null;
-    const allSectionDone = doneCount === total;
-    return (
-      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-        {/* Section header */}
-        <div className="flex items-center gap-3 px-4 py-3 bg-brand-navy border-b border-brand-navy">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10">
-            <Icon size={14} className="text-brand-gold" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold leading-none text-white">{label}</div>
-            <div className="text-[11px] mt-0.5 text-white/50">{sublabel}</div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {allSectionDone && <CheckCircle2 size={13} className="text-green-400" />}
-            <span className="text-xs font-bold text-brand-gold">{doneCount}/{total}</span>
-          </div>
-        </div>
-        <div className="divide-y divide-gray-50">
-          {tasks.map((t) => <TaskItem key={t.id} task={t} />)}
-        </div>
-      </div>
-    );
-  }
 
   const allDone = tasks.length > 0 && completedIds.size === tasks.length;
 
@@ -2202,18 +2232,21 @@ function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Task[]; o
             sublabel="Action required from you"
             icon={CheckSquare}
             tasks={agentTasks}
+            ctx={ctx}
           />
           <OwnerSection
             label="Client's Tasks"
             sublabel={`${deal.clientName} needs to complete these`}
             icon={Users}
             tasks={clientTasks}
+            ctx={ctx}
           />
           <OwnerSection
             label="TC / Third Party"
             sublabel="Handled by your team or vendors"
             icon={Building2}
             tasks={supportTasks}
+            ctx={ctx}
           />
         </>
       )}
@@ -2255,56 +2288,54 @@ function MessagesTab({ deal }: { deal: Deal }) {
     }
   }
 
-  function Thread() {
-    if (loading && messages.length === 0) {
-      return (
-        <div className="flex items-center justify-center py-10">
-          <Loader2 size={16} className="animate-spin text-gray-300" />
-        </div>
-      );
-    }
-    return (
-      <div className="p-4 space-y-4">
-        {messages.length === 0 && (
-          <p className="py-8 text-center text-sm text-gray-400">No messages yet.</p>
-        )}
-        {messages.map((msg) => {
-          const isMe = msg.senderId === activeUser?.id;
-          const avatarColor = AVATAR_COLOR[msg.senderRole] ?? 'bg-gray-400';
-          return (
-            <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-              <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white text-xs font-bold ${avatarColor}`}>
-                {msg.senderName.charAt(0)}
+  // Inlined Thread content (was previously a nested function component that
+  // violated react-hooks/static-components — closed over loading/messages/
+  // activeUser/channel)
+  const threadContent = (loading && messages.length === 0) ? (
+    <div className="flex items-center justify-center py-10">
+      <Loader2 size={16} className="animate-spin text-gray-300" />
+    </div>
+  ) : (
+    <div className="p-4 space-y-4">
+      {messages.length === 0 && (
+        <p className="py-8 text-center text-sm text-gray-400">No messages yet.</p>
+      )}
+      {messages.map((msg) => {
+        const isMe = msg.senderId === activeUser?.id;
+        const avatarColor = AVATAR_COLOR[msg.senderRole] ?? 'bg-gray-400';
+        return (
+          <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+            <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white text-xs font-bold ${avatarColor}`}>
+              {msg.senderName.charAt(0)}
+            </div>
+            <div className={`flex-1 max-w-[80%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+              <div className={`flex items-center gap-2 text-xs text-gray-400 ${isMe ? 'flex-row-reverse' : ''}`}>
+                <span className="font-medium text-gray-600">{msg.senderName}</span>
+                {msg.senderRole === 'tc' && (
+                  <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">TC</span>
+                )}
+                {msg.isAiDraft && (
+                  <span className="flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-600">
+                    <Bot size={9} /> AI draft
+                  </span>
+                )}
+                <span>{formatTimestamp(msg.timestamp)}</span>
               </div>
-              <div className={`flex-1 max-w-[80%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
-                <div className={`flex items-center gap-2 text-xs text-gray-400 ${isMe ? 'flex-row-reverse' : ''}`}>
-                  <span className="font-medium text-gray-600">{msg.senderName}</span>
-                  {msg.senderRole === 'tc' && (
-                    <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">TC</span>
-                  )}
-                  {msg.isAiDraft && (
-                    <span className="flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-600">
-                      <Bot size={9} /> AI draft
-                    </span>
-                  )}
-                  <span>{formatTimestamp(msg.timestamp)}</span>
-                </div>
-                <div className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                  isMe
-                    ? 'bg-brand-navy text-white rounded-tr-sm'
-                    : channel === 'internal'
-                    ? 'bg-amber-50 text-gray-800 rounded-tl-sm border border-amber-100'
-                    : 'bg-gray-100 text-gray-800 rounded-tl-sm'
-                }`}>
-                  {msg.content}
-                </div>
+              <div className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                isMe
+                  ? 'bg-brand-navy text-white rounded-tr-sm'
+                  : channel === 'internal'
+                  ? 'bg-amber-50 text-gray-800 rounded-tl-sm border border-amber-100'
+                  : 'bg-gray-100 text-gray-800 rounded-tl-sm'
+              }`}>
+                {msg.content}
               </div>
             </div>
-          );
-        })}
-      </div>
-    );
-  }
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="rounded-xl bg-white shadow-sm overflow-hidden">
@@ -2352,7 +2383,7 @@ function MessagesTab({ deal }: { deal: Deal }) {
         </div>
       )}
 
-      <Thread />
+      {threadContent}
 
       {/* Compose area */}
       <div className="border-t px-4 py-3">

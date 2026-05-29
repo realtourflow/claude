@@ -658,10 +658,6 @@ export default function BuyerOnboarding() {
   }
 
   const isCash = data.cashOrLoan === 'cash';
-  const isCashRef = useRef(false);
-  isCashRef.current = isCash;
-  const lenderChoiceRef = useRef('');
-  lenderChoiceRef.current = data.lenderChoice;
 
   const progress = screen < 0 ? 3 : screen >= TOTAL - 1 ? 100 : Math.round(((screen + 1) / TOTAL) * 100);
 
@@ -669,9 +665,13 @@ export default function BuyerOnboarding() {
     setData((d) => ({ ...d, [key]: val }));
   }
 
+  // Read the latest cash/lender state directly from `data`. React 19's
+  // compiler memoizes function bodies, so we no longer need refs to capture
+  // "the latest state" across renders — these closures already see the
+  // current values, and setScreen's updater receives the latest screen.
   function advance(currentIsCash?: boolean) {
-    const useCash = typeof currentIsCash === 'boolean' ? currentIsCash : isCashRef.current;
-    const lc = lenderChoiceRef.current;
+    const useCash = typeof currentIsCash === 'boolean' ? currentIsCash : isCash;
+    const lc = data.lenderChoice;
     setScreen((s) => {
       let next = s + 1;
       while (next < TOTAL - 1 && shouldSkipScreen(next, useCash, lc)) next++;
@@ -680,8 +680,8 @@ export default function BuyerOnboarding() {
   }
 
   function back() {
-    const useCash = isCashRef.current;
-    const lc = lenderChoiceRef.current;
+    const useCash = isCash;
+    const lc = data.lenderChoice;
     setScreen((s) => {
       let prev = s - 1;
       while (prev > 0 && shouldSkipScreen(prev, useCash, lc)) prev--;

@@ -313,76 +313,6 @@ function Deadlines() {
   const soon     = all.filter((t) => daysUntil(t.dueDate) > 0 && daysUntil(t.dueDate) <= 7);
   const upcoming = all.filter((t) => daysUntil(t.dueDate) > 7);
 
-  const SOURCE_BADGE: Record<string, string> = {
-    task:        'bg-brand-navy/10 text-brand-navy/60',
-    checklist:   'bg-purple-100 text-purple-600',
-    contingency: 'bg-amber-100 text-amber-700',
-  };
-
-  const ENTRY_ICON: Record<string, React.ReactNode> = {
-    overdue:     <AlertCircle size={15} className="text-red-500 flex-shrink-0" />,
-    in_progress: <Loader2 size={15} className="text-blue-500 flex-shrink-0 animate-spin" />,
-    pending:     <Circle size={15} className="text-gray-300 flex-shrink-0" />,
-    completed:   <CheckCircle2 size={15} className="text-green-500 flex-shrink-0" />,
-    blocked:     <AlertCircle size={15} className="text-orange-400 flex-shrink-0" />,
-  };
-
-  const ASSIGNEE_STYLE: Record<string, string> = {
-    agent: 'bg-blue-100 text-blue-700', buyer: 'bg-green-100 text-green-700',
-    seller: 'bg-purple-100 text-purple-700', tc: 'bg-amber-100 text-amber-700',
-    third_party: 'bg-gray-100 text-gray-500', admin: 'bg-gray-100 text-gray-500',
-  };
-
-  function DeadlineRow({ entry }: { entry: DeadlineEntry }) {
-    const deal = deals.find((d) => d.id === entry.dealId)!;
-    const days = daysUntil(entry.dueDate);
-    const isOverdue = days < 0;
-    const isToday   = days === 0;
-    const isSoon    = days > 0 && days <= 3;
-    return (
-      <div className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
-        isOverdue ? 'bg-red-50 border border-red-100' :
-        isToday   ? 'bg-amber-50 border border-amber-100' :
-                    'bg-white border border-gray-100'
-      }`}>
-        {ENTRY_ICON[entry.status]}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <p className={`text-sm font-semibold truncate ${isOverdue ? 'text-red-800' : 'text-brand-navy'}`}>
-              {entry.title}
-            </p>
-            <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase flex-shrink-0 ${SOURCE_BADGE[entry.source]}`}>
-              {entry.source}
-            </span>
-          </div>
-          <p className="text-xs text-gray-400 truncate">{deal?.clientName} · {STAGE_LABELS[deal?.stage]}</p>
-        </div>
-        <div className="text-right flex-shrink-0">
-          <div className={`text-xs font-bold ${isOverdue ? 'text-red-600' : isToday ? 'text-amber-600' : isSoon ? 'text-amber-500' : 'text-gray-400'}`}>
-            {isOverdue ? `${Math.abs(days)}d overdue` : isToday ? 'Today' : `${days}d`}
-          </div>
-          <div className="text-[10px] text-gray-300">{entry.dueDate}</div>
-        </div>
-        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase flex-shrink-0 ${ASSIGNEE_STYLE[entry.assignedTo] ?? 'bg-gray-100 text-gray-500'}`}>
-          {entry.assignedTo}
-        </span>
-      </div>
-    );
-  }
-
-  function Group({ title, items, accent }: { title: string; items: DeadlineEntry[]; accent: string }) {
-    if (items.length === 0) return null;
-    return (
-      <section>
-        <div className="mb-2 flex items-center gap-2">
-          <h2 className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{title}</h2>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{items.length}</span>
-        </div>
-        <div className="space-y-2">{items.map((t) => <DeadlineRow key={t.id} entry={t} />)}</div>
-      </section>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -396,13 +326,86 @@ function Deadlines() {
         </div>
       ) : (
         <div className="space-y-6">
-          <Group title="Overdue"      items={overdue}  accent="text-red-600"   />
-          <Group title="Today"        items={today}    accent="text-amber-600" />
-          <Group title="Next 7 Days"  items={soon}     accent="text-amber-500" />
-          <Group title="Upcoming"     items={upcoming} accent="text-gray-400"  />
+          <DeadlineGroup title="Overdue"      items={overdue}  accent="text-red-600"   deals={deals} />
+          <DeadlineGroup title="Today"        items={today}    accent="text-amber-600" deals={deals} />
+          <DeadlineGroup title="Next 7 Days"  items={soon}     accent="text-amber-500" deals={deals} />
+          <DeadlineGroup title="Upcoming"     items={upcoming} accent="text-gray-400"  deals={deals} />
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Module-scope helpers for Deadlines (hoisted to satisfy
+// react-hooks/static-components) ─────────────────────────────────────────────
+
+const SOURCE_BADGE: Record<string, string> = {
+  task:        'bg-brand-navy/10 text-brand-navy/60',
+  checklist:   'bg-purple-100 text-purple-600',
+  contingency: 'bg-amber-100 text-amber-700',
+};
+
+const ENTRY_ICON: Record<string, React.ReactNode> = {
+  overdue:     <AlertCircle size={15} className="text-red-500 flex-shrink-0" />,
+  in_progress: <Loader2 size={15} className="text-blue-500 flex-shrink-0 animate-spin" />,
+  pending:     <Circle size={15} className="text-gray-300 flex-shrink-0" />,
+  completed:   <CheckCircle2 size={15} className="text-green-500 flex-shrink-0" />,
+  blocked:     <AlertCircle size={15} className="text-orange-400 flex-shrink-0" />,
+};
+
+const ASSIGNEE_STYLE: Record<string, string> = {
+  agent: 'bg-blue-100 text-blue-700', buyer: 'bg-green-100 text-green-700',
+  seller: 'bg-purple-100 text-purple-700', tc: 'bg-amber-100 text-amber-700',
+  third_party: 'bg-gray-100 text-gray-500', admin: 'bg-gray-100 text-gray-500',
+};
+
+function DeadlineRow({ entry, deals }: { entry: DeadlineEntry; deals: Deal[] }) {
+  const deal = deals.find((d) => d.id === entry.dealId)!;
+  const days = daysUntil(entry.dueDate);
+  const isOverdue = days < 0;
+  const isToday   = days === 0;
+  const isSoon    = days > 0 && days <= 3;
+  return (
+    <div className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
+      isOverdue ? 'bg-red-50 border border-red-100' :
+      isToday   ? 'bg-amber-50 border border-amber-100' :
+                  'bg-white border border-gray-100'
+    }`}>
+      {ENTRY_ICON[entry.status]}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <p className={`text-sm font-semibold truncate ${isOverdue ? 'text-red-800' : 'text-brand-navy'}`}>
+            {entry.title}
+          </p>
+          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase flex-shrink-0 ${SOURCE_BADGE[entry.source]}`}>
+            {entry.source}
+          </span>
+        </div>
+        <p className="text-xs text-gray-400 truncate">{deal?.clientName} · {STAGE_LABELS[deal?.stage]}</p>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <div className={`text-xs font-bold ${isOverdue ? 'text-red-600' : isToday ? 'text-amber-600' : isSoon ? 'text-amber-500' : 'text-gray-400'}`}>
+          {isOverdue ? `${Math.abs(days)}d overdue` : isToday ? 'Today' : `${days}d`}
+        </div>
+        <div className="text-[10px] text-gray-300">{entry.dueDate}</div>
+      </div>
+      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase flex-shrink-0 ${ASSIGNEE_STYLE[entry.assignedTo] ?? 'bg-gray-100 text-gray-500'}`}>
+        {entry.assignedTo}
+      </span>
+    </div>
+  );
+}
+
+function DeadlineGroup({ title, items, accent, deals }: { title: string; items: DeadlineEntry[]; accent: string; deals: Deal[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{title}</h2>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{items.length}</span>
+      </div>
+      <div className="space-y-2">{items.map((t) => <DeadlineRow key={t.id} entry={t} deals={deals} />)}</div>
+    </section>
   );
 }
 
@@ -1092,48 +1095,6 @@ function CalendarSection() {
   const week2   = events.filter((e) => daysUntil(e.date) > 7  && daysUntil(e.date) <= 14);
   const month   = events.filter((e) => daysUntil(e.date) > 14 && daysUntil(e.date) <= 30);
 
-  function EventRow({ event }: { event: CalEvent }) {
-    const days    = daysUntil(event.date);
-    const isPast  = days < 0;
-    const isToday = days === 0;
-    const t = CAL_TYPE[event.type];
-    return (
-      <div className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
-        isPast  ? 'bg-red-50 border border-red-100' :
-        isToday ? 'bg-amber-50 border border-amber-100' :
-                  'bg-white border border-gray-100'
-      }`}>
-        <span className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${t.dot}`} />
-        <div className="flex-1 min-w-0">
-          <p className={`text-sm font-semibold truncate ${isPast ? 'text-red-800' : 'text-brand-navy'}`}>{event.title}</p>
-          <p className="text-xs text-gray-400 truncate">{event.sub}</p>
-        </div>
-        <div className="text-right flex-shrink-0">
-          <div className={`text-xs font-bold ${isPast ? 'text-red-600' : isToday ? 'text-amber-600' : 'text-gray-400'}`}>
-            {isPast ? `${Math.abs(days)}d ago` : isToday ? 'Today' : `${days}d`}
-          </div>
-          <div className="text-[10px] text-gray-300">{event.date}</div>
-        </div>
-        <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase bg-gray-100 text-gray-500 flex-shrink-0">
-          {t.label}
-        </span>
-      </div>
-    );
-  }
-
-  function Group({ title, items, accent }: { title: string; items: CalEvent[]; accent: string }) {
-    if (items.length === 0) return null;
-    return (
-      <section>
-        <div className="mb-2 flex items-center gap-2">
-          <h2 className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{title}</h2>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{items.length}</span>
-        </div>
-        <div className="space-y-2">{items.map((e) => <EventRow key={e.id} event={e} />)}</div>
-      </section>
-    );
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -1157,14 +1118,59 @@ function CalendarSection() {
         </div>
       ) : (
         <div className="space-y-6">
-          <Group title="Past / Overdue" items={overdue} accent="text-red-600"   />
-          <Group title="Today"          items={today}   accent="text-amber-600" />
-          <Group title="Next 7 Days"    items={week1}   accent="text-amber-500" />
-          <Group title="Next 2 Weeks"   items={week2}   accent="text-blue-500"  />
-          <Group title="This Month"     items={month}   accent="text-gray-400"  />
+          <CalEventGroup title="Past / Overdue" items={overdue} accent="text-red-600"   />
+          <CalEventGroup title="Today"          items={today}   accent="text-amber-600" />
+          <CalEventGroup title="Next 7 Days"    items={week1}   accent="text-amber-500" />
+          <CalEventGroup title="Next 2 Weeks"   items={week2}   accent="text-blue-500"  />
+          <CalEventGroup title="This Month"     items={month}   accent="text-gray-400"  />
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Module-scope helpers for CalendarSection (hoisted to satisfy
+// react-hooks/static-components) ─────────────────────────────────────────────
+
+function CalEventRow({ event }: { event: CalEvent }) {
+  const days    = daysUntil(event.date);
+  const isPast  = days < 0;
+  const isToday = days === 0;
+  const t = CAL_TYPE[event.type];
+  return (
+    <div className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
+      isPast  ? 'bg-red-50 border border-red-100' :
+      isToday ? 'bg-amber-50 border border-amber-100' :
+                'bg-white border border-gray-100'
+    }`}>
+      <span className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${t.dot}`} />
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm font-semibold truncate ${isPast ? 'text-red-800' : 'text-brand-navy'}`}>{event.title}</p>
+        <p className="text-xs text-gray-400 truncate">{event.sub}</p>
+      </div>
+      <div className="text-right flex-shrink-0">
+        <div className={`text-xs font-bold ${isPast ? 'text-red-600' : isToday ? 'text-amber-600' : 'text-gray-400'}`}>
+          {isPast ? `${Math.abs(days)}d ago` : isToday ? 'Today' : `${days}d`}
+        </div>
+        <div className="text-[10px] text-gray-300">{event.date}</div>
+      </div>
+      <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase bg-gray-100 text-gray-500 flex-shrink-0">
+        {t.label}
+      </span>
+    </div>
+  );
+}
+
+function CalEventGroup({ title, items, accent }: { title: string; items: CalEvent[]; accent: string }) {
+  if (items.length === 0) return null;
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{title}</h2>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{items.length}</span>
+      </div>
+      <div className="space-y-2">{items.map((e) => <CalEventRow key={e.id} event={e} />)}</div>
+    </section>
   );
 }
 
