@@ -17,7 +17,6 @@ import {
   AlertCircle,
   CheckSquare,
   DollarSign,
-  Shield,
   Zap,
   Activity,
   Tag,

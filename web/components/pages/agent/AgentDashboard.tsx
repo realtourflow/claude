@@ -9,7 +9,7 @@ import { Task } from "@/lib/data/mockTasks";
 import { useDeals } from "@/hooks/useDeals";
 import { useAgentTasks } from "@/hooks/useTasks";
 import { useNotifications, AppNotification } from "@/hooks/useNotifications";
-import { TrendingUp, Layers, CheckSquare, ArrowRight, Clock, AlertCircle, CheckCircle2, DollarSign, Zap, Share2, X, Phone } from 'lucide-react';
+import { TrendingUp, Layers, CheckSquare, ArrowRight, Clock, AlertCircle, CheckCircle2, DollarSign, Share2, X, Phone } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -17,10 +17,6 @@ function formatCurrency(n: number) {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
   return `$${n}`;
-}
-
-function formatPrice(n: number) {
-  return `$${n.toLocaleString()}`;
 }
 
 const STAGE_LABELS: Record<string, string> = {
