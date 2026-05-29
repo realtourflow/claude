@@ -239,7 +239,7 @@ function SetupBanner() {
   return (
     <div className="flex items-center justify-between gap-3 bg-amber-50 border-b border-amber-200 px-5 py-2.5">
       <div className="flex items-center gap-2 text-sm text-amber-800">
-        <span className="font-semibold">Your account setup isn't complete yet.</span>
+        <span className="font-semibold">Your account setup isn&apos;t complete yet.</span>
         <span className="text-amber-600 hidden sm:inline">Finish in about 3 minutes to unlock your full workspace.</span>
       </div>
       <div className="flex items-center gap-3 flex-shrink-0">

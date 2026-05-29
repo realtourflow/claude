@@ -513,7 +513,7 @@ function SellerOffersCard({ dealId }: { dealId: string }) {
       {offers.length === 0 && !showForm ? (
         <div className="px-5 py-6 text-center">
           <p className="text-sm text-gray-400">No offers added yet.</p>
-          <p className="text-xs text-gray-300 mt-0.5">Add offers here — they'll appear on the seller's portal.</p>
+          <p className="text-xs text-gray-300 mt-0.5">Add offers here — they&apos;ll appear on the seller&apos;s portal.</p>
         </div>
       ) : (
         <div className="divide-y divide-gray-50">
@@ -531,7 +531,7 @@ function SellerOffersCard({ dealId }: { dealId: string }) {
                     </div>
                   )}
                   {offer.agentNotes && (
-                    <p className="text-xs text-gray-500 italic mt-1.5 leading-relaxed">"{offer.agentNotes}"</p>
+                    <p className="text-xs text-gray-500 italic mt-1.5 leading-relaxed">&quot;{offer.agentNotes}&quot;</p>
                   )}
                 </div>
                 <button
@@ -569,10 +569,10 @@ function SellerBuyerStatusCard({ dealId }: { dealId: string }) {
     <div className="rounded-xl bg-white shadow-sm overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-100">
         <CheckCircle2 size={14} className="text-brand-navy" />
-        <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Buyer's Progress</h3>
+        <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Buyer&apos;s Progress</h3>
       </div>
       <div className="px-5 py-4">
-        <p className="text-xs text-gray-400 mb-2">Set the buyer's current status — this shows up on the seller's portal.</p>
+        <p className="text-xs text-gray-400 mb-2">Set the buyer&apos;s current status — this shows up on the seller&apos;s portal.</p>
         <select
           value={current}
           onChange={(e) => setBuyerStatus(dealId, e.target.value)}
@@ -931,7 +931,7 @@ function ConfettiCelebration({ onDismiss }: { onDismiss: () => void }) {
             onClick={onDismiss}
             className="mt-6 rounded-xl bg-brand-navy px-8 py-3 text-sm font-bold text-white hover:bg-brand-navy/90 transition-all active:scale-[0.98]"
           >
-            Let's go! 🚀
+            Let&apos;s go! 🚀
           </button>
         </div>
       </div>
@@ -1269,7 +1269,7 @@ function AgentPropertyRow({ prop, onRemove, onUpdateAgentNote }: { prop: Tracked
 
           {/* Agent's push note */}
           {prop.agentNote && (
-            <p className="mt-1 text-[10px] text-amber-700 italic">"{prop.agentNote}"</p>
+            <p className="mt-1 text-[10px] text-amber-700 italic">&quot;{prop.agentNote}&quot;</p>
           )}
 
           {/* Buyer's thoughts */}
@@ -1277,7 +1277,7 @@ function AgentPropertyRow({ prop, onRemove, onUpdateAgentNote }: { prop: Tracked
             <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-purple-50 border border-purple-100 px-2 py-1.5">
               <MessageSquare size={10} className="text-purple-400 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-[9px] font-bold text-purple-400 uppercase tracking-wide mb-0.5">Buyer's thoughts</p>
+                <p className="text-[9px] font-bold text-purple-400 uppercase tracking-wide mb-0.5">Buyer&apos;s thoughts</p>
                 <p className="text-[11px] text-purple-700 leading-snug">{prop.buyerNote}</p>
               </div>
             </div>
@@ -1466,7 +1466,7 @@ function PropertyTrackingCard({ deal }: { deal: Deal }) {
         <div className="flex flex-col items-center justify-center py-8 text-center">
           <Home size={28} className="text-gray-200 mb-2" />
           <p className="text-sm font-medium text-gray-400">No properties tracked yet</p>
-          <p className="text-xs text-gray-300 mt-0.5">Push a listing to start your buyer's property list</p>
+          <p className="text-xs text-gray-300 mt-0.5">Push a listing to start your buyer&apos;s property list</p>
         </div>
       )}
     </div>
@@ -3076,7 +3076,7 @@ function PreferredCategoryRow({ category, vendors }: { category: VendorCategory;
                     <span className="text-sm font-semibold text-brand-navy">{v.company}</span>
                   </div>
                   {v.contactName && <p className="text-xs text-gray-400 mt-0.5">{v.contactName}</p>}
-                  {v.notes && <p className="text-xs text-gray-500 mt-1 italic leading-relaxed">"{v.notes}"</p>}
+                  {v.notes && <p className="text-xs text-gray-500 mt-1 italic leading-relaxed">&quot;{v.notes}&quot;</p>}
                 </div>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -3325,7 +3325,7 @@ function VendorsTab({ deal }: { deal: Deal }) {
               </span>
             </div>
             <p className="px-5 py-2.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100">
-              Sarah's trusted vendor directory — shared with clients on their portal.
+              Sarah&apos;s trusted vendor directory — shared with clients on their portal.
             </p>
             {availableCategories.map((cat) => (
               <PreferredCategoryRow key={cat} category={cat} vendors={preferredVendors.filter((v) => v.category === cat)} />
@@ -3575,7 +3575,7 @@ function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: 
                   <p className="text-sm text-gray-700 leading-relaxed">{msg}</p>
                 </div>
               )}
-              <p className="mt-1.5 text-[10px] text-gray-400">Sent to client's portal — they'll see it immediately.</p>
+              <p className="mt-1.5 text-[10px] text-gray-400">Sent to client&apos;s portal — they&apos;ll see it immediately.</p>
             </div>
           )}
         </div>
@@ -3597,7 +3597,7 @@ function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: 
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-amber-600">Complete these tasks or use "Force Advance" to override.</p>
+            <p className="text-[10px] text-amber-600">Complete these tasks or use &quot;Force Advance&quot; to override.</p>
           </div>
         )}
 

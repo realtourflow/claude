@@ -364,7 +364,7 @@ function UtilitiesScreen({
         </div>
 
         <p className="text-center text-xs text-gray-400">
-          Select all that apply — or skip if you're handling utilities yourself
+          Select all that apply — or skip if you&apos;re handling utilities yourself
         </p>
 
         <button
@@ -629,7 +629,7 @@ function SubmittedScreen({
       <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-green-100">
         <CheckCircle2 size={34} className="text-green-500" />
       </div>
-      <h2 className="text-3xl font-black text-brand-navy">You're in!</h2>
+      <h2 className="text-3xl font-black text-brand-navy">You&apos;re in!</h2>
       <p className="mt-3 max-w-sm text-sm leading-relaxed text-gray-500">
         {SUBMITTED_NOTES[paymentOption]}
       </p>

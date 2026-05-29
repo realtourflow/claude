@@ -381,7 +381,7 @@ function MtnMortgageCTAScreen({ lenderChoice, onContinue }: {
     <div className="screen-enter flex flex-col items-center text-center">
       {isFastPass && (
         <div className="mb-5 w-full max-w-xs rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
-          ⚡ Fast Pass enrollment received — we'll be in touch!
+          ⚡ Fast Pass enrollment received — we&apos;ll be in touch!
         </div>
       )}
 
@@ -441,7 +441,7 @@ function MtnMortgageCTAScreen({ lenderChoice, onContinue }: {
           onClick={onContinue}
           className="mt-1 w-full text-center text-sm text-gray-400 transition-colors hover:text-gray-600"
         >
-          I'll do this later →
+          I&apos;ll do this later →
         </button>
       </div>
     </div>
@@ -487,12 +487,12 @@ function WelcomeScreen({ agentName, agentAvatar, onStart }: {
 
       {/* Personal note */}
       <p className="max-w-xs text-sm text-gray-600 leading-relaxed">
-        I've set up your home buying portal. A few quick questions and your search is personalized — takes about 3 minutes.
+        I&apos;ve set up your home buying portal. A few quick questions and your search is personalized — takes about 3 minutes.
       </p>
 
       {/* Steps */}
       <div className="mt-5 w-full max-w-xs rounded-2xl bg-gray-50 px-5 py-4 text-left">
-        <p className="mb-2.5 text-[10px] font-bold uppercase tracking-widest text-gray-300">We'll cover</p>
+        <p className="mb-2.5 text-[10px] font-bold uppercase tracking-widest text-gray-300">We&apos;ll cover</p>
         <div className="space-y-2.5">
           {steps.map(({ icon, label }) => (
             <div key={label} className="flex items-center gap-3 text-sm text-gray-600">
@@ -507,7 +507,7 @@ function WelcomeScreen({ agentName, agentAvatar, onStart }: {
         onClick={onStart}
         className="mt-6 flex w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-brand-navy py-4 text-base font-bold text-white hover:bg-brand-navy/80 active:scale-[0.98] transition-all"
       >
-        Let's get started <ArrowRight size={18} />
+        Let&apos;s get started <ArrowRight size={18} />
       </button>
     </div>
   );
@@ -562,7 +562,7 @@ function DoneScreen({ agentName }: { agentName: string }) {
       <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-green-100">
         <CheckCircle2 size={34} className="text-green-500" />
       </div>
-      <h2 className="text-3xl font-black text-brand-navy">You're all set!</h2>
+      <h2 className="text-3xl font-black text-brand-navy">You&apos;re all set!</h2>
       <p className="mt-3 max-w-sm text-sm leading-relaxed text-gray-500">
         {agentName} has been notified. Your dashboard is live — you can start tracking properties right away.
       </p>

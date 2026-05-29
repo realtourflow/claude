@@ -278,7 +278,7 @@ function VendorsSection({ agentId }: { agentId: string }) {
   return (
     <div className="space-y-1">
       <p className="mb-5 text-sm text-gray-400">
-        These vendors appear in your clients' portals under "Preferred Vendors." Changes apply to all active deals.
+        These vendors appear in your clients&apos; portals under &quot;Preferred Vendors.&quot; Changes apply to all active deals.
       </p>
 
       {VENDOR_CATEGORY_ORDER.map((category) => {
@@ -1211,7 +1211,7 @@ function TransactionCoordinatorSection({ agentId: _agentId }: { agentId: string 
       </div>
 
       <p className="text-xs text-gray-300">
-        If your TC doesn't have a RealTourFlow account yet, you can still enter their info. They'll be invited to join when you save.
+        If your TC doesn&apos;t have a RealTourFlow account yet, you can still enter their info. They&apos;ll be invited to join when you save.
       </p>
 
       <div className="flex items-center gap-3">
@@ -1268,7 +1268,7 @@ function MyAgentsSection({ tcUserId: _tcUserId }: { tcUserId: string }) {
           <div>
             <p className="text-sm font-semibold text-amber-800">Agents you work with</p>
             <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-              These agents have added you as their Transaction Coordinator. You're automatically included in their deals, internal messages, and checklists. Agents manage this relationship from their own settings.
+              These agents have added you as their Transaction Coordinator. You&apos;re automatically included in their deals, internal messages, and checklists. Agents manage this relationship from their own settings.
             </p>
           </div>
         </div>

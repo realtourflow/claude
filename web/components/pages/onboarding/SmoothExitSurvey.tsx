@@ -345,7 +345,7 @@ function ConfirmScreen({ data, submitting, onSubmit }: {
         {/* Summary */}
         <div className="rounded-2xl bg-white shadow-sm divide-y divide-gray-50 overflow-hidden">
           <div className="px-4 py-3">
-            <div className="text-xs text-gray-400 font-medium">What's next</div>
+            <div className="text-xs text-gray-400 font-medium">What&apos;s next</div>
             <div className="text-sm font-semibold text-brand-navy mt-0.5">
               {data.nextStep ? NEXT_STEP_LABELS[data.nextStep as SmoothExitNextStep] : '—'}
             </div>

@@ -101,7 +101,7 @@ export default function AgentSignupPage() {
               <Briefcase size={26} className="text-white" />
             </div>
             <h1 className="text-lg font-bold text-white">Agent Invitation</h1>
-            <p className="mt-1 text-sm text-white/60">You've been invited to join as an agent</p>
+            <p className="mt-1 text-sm text-white/60">You&apos;ve been invited to join as an agent</p>
           </div>
 
           <div className="px-6 py-6 space-y-5">

@@ -321,8 +321,8 @@ function ConfirmationScreen({ data, agentName }: { data: SellerData; agentName: 
       <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-100">
         <CheckCircle2 size={34} className="text-purple-500" />
       </div>
-      <h2 className="text-2xl font-black text-brand-navy">You're on your way!</h2>
-      <p className="mt-2 text-sm text-gray-500">Here's what you shared. Your agent has been notified.</p>
+      <h2 className="text-2xl font-black text-brand-navy">You&apos;re on your way!</h2>
+      <p className="mt-2 text-sm text-gray-500">Here&apos;s what you shared. Your agent has been notified.</p>
 
       {/* Summary */}
       <div className="mt-5 w-full max-w-sm rounded-xl bg-gray-50 border border-gray-200 px-5 py-4 text-left space-y-2">

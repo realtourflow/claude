@@ -48,7 +48,7 @@ export default function AgentDocuments() {
         </div>
       ) : deals.length === 0 ? (
         <div className="rounded-xl bg-white p-10 text-center shadow-sm">
-          <p className="text-sm text-gray-500">You don't have any deals yet.</p>
+          <p className="text-sm text-gray-500">You don&apos;t have any deals yet.</p>
           <Link
             href="/agent/pipeline"
             className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white hover:bg-brand-navy/90 transition-colors"

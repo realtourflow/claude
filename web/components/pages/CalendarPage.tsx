@@ -187,7 +187,7 @@ export default function CalendarPage() {
           <p className="text-xs font-semibold text-blue-800 mb-1">Subscribe in your calendar app</p>
           <p className="text-[11px] text-blue-600 leading-relaxed">
             Click <strong>Subscribe</strong> to open in your default calendar app, or click <strong>Copy URL</strong>
-            {' '}and paste into Google Calendar → "Other calendars" → "From URL".
+            {' '}and paste into Google Calendar → &quot;Other calendars&quot; → &quot;From URL&quot;.
             Closings, task deadlines, and contingency dates stay in sync automatically.
           </p>
         </div>

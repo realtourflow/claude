@@ -89,7 +89,7 @@ export default function SmoothExitDetail() {
           Seller Concierge Service
         </p>
         <p className="mt-4 mx-auto max-w-md text-sm text-white/70 leading-relaxed">
-          We coordinate everything from listing prep to move-out day — so you can focus on what's next.
+          We coordinate everything from listing prep to move-out day — so you can focus on what&apos;s next.
         </p>
         <div className="mt-6 inline-block rounded-2xl bg-white/10 px-6 py-3">
           <span className="text-3xl font-black text-white">1%</span>
