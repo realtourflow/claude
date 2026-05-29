@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import {
   User, Store, Bell, Plug, Star, Pencil, Trash2,
   ChevronUp, ChevronDown, Plus, X, Check, ExternalLink,
-  Phone, Mail, Globe, Users, UserCheck, FileText, Upload,
+  Phone, Mail, Users, UserCheck, FileText, Upload,
 } from 'lucide-react';
 import { useAuthStore } from "@/lib/store/authStore";
 import { useTC, useMyAgents } from "@/hooks/useTC";

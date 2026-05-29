@@ -16,10 +16,9 @@ import { useNetSheet, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
-  ChevronRight, Phone, Mail, Home, Star,
-  TrendingUp, Clock, DollarSign, Eye, Wrench, X, Send,
+  Phone, Mail, Home, Star,
+  TrendingUp, Clock, DollarSign, Eye, Wrench, Send,
 } from 'lucide-react';
-import MetroMap from "@/components/MetroMap";
 import VendorDirectory from "@/components/VendorDirectory";
 
 // ─── Constants ────────────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
   ChevronRight, Phone, Mail, Home, Zap,
-  ClipboardList, Clock, Building2, Star, ExternalLink,
+  ClipboardList, Building2, Star, ExternalLink,
   Plus, X, Link as LinkIcon, MessageCircle, Pencil, Send, Upload,
 } from 'lucide-react';
 import MetroMap from "@/components/MetroMap";

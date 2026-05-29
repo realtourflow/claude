@@ -60,7 +60,7 @@ import { useDealStageStore } from "@/lib/store/dealStageStore";
 import { useParticipants } from "@/hooks/useParticipants";
 import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
 import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
-import { useOffers, Offer } from "@/hooks/useOffers";
+import { useOffers } from "@/hooks/useOffers";
 import { useNetSheet, NetSheetLine, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
 import {
   VENDOR_CATEGORY_LABELS,

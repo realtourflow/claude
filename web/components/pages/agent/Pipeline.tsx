@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, DealType } from "@/lib/data/mockDeals";
 import { MOCK_TASKS } from "@/lib/data/mockTasks";
-import { useDeals, apiDealToFrontend, type ApiDeal } from "@/hooks/useDeals";
+import { useDeals, type ApiDeal } from "@/hooks/useDeals";
 import { api } from "@/lib/api-client";
 import { ArrowRight, MapPin, Calendar, Clock, Zap, Plus, X } from 'lucide-react';
 

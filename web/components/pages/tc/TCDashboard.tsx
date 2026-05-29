@@ -6,13 +6,13 @@ import { useParams } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, LoanMilestones } from "@/lib/data/mockDeals";
 import { useDeals } from "@/hooks/useDeals";
-import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType, Contingency } from "@/hooks/useContingencies";
+import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType } from "@/hooks/useContingencies";
 import { useChecklist, ChecklistAssignee } from "@/hooks/useChecklist";
 import { useAgentTasks } from "@/hooks/useTasks";
 import { usePermission } from "@/permissions/usePermission";
 import { PERMISSIONS } from "@/permissions/permissions";
 import {
-  AlertTriangle, CheckCircle2, Circle, Clock, FileText,
+  AlertTriangle, CheckCircle2, Circle, FileText,
   CalendarClock, ClipboardList, Loader2, AlertCircle,
   CheckSquare, RefreshCw, Pencil, Building2, Plus, X, Lock,
   Shield, ShieldCheck, ShieldOff, Phone, Copy, Zap,
