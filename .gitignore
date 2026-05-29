@@ -20,3 +20,10 @@ memory/
 # OS
 .DS_Store
 Thumbs.db
+
+# macOS Finder / iCloud duplicate files (e.g. "page 2.tsx", "package-lock 2.json")
+# created by sync/copy operations. Never want these in the repo.
+* 2.*
+* 2
+* 3.*
+* 3
