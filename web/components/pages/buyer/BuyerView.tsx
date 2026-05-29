@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from 'react';
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, DealStage } from "@/lib/data/mockDeals";
@@ -569,9 +570,12 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
         {/* Thumbnail */}
         <div className="h-20 w-24 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
           {property.thumbnailUrl && !imgError ? (
-            <img
+            <Image
               src={property.thumbnailUrl}
               alt={property.address}
+              width={96}
+              height={80}
+              unoptimized
               className="h-full w-full object-cover"
               onError={() => setImgError(true)}
             />
@@ -823,7 +827,7 @@ function MLSListingCard({ listing, onAdd }: { listing: MLSListing; onAdd: (l: ML
   return (
     <div className="rounded-xl border border-gray-100 bg-white overflow-hidden shadow-sm">
       {photo ? (
-        <img src={photo} alt={listing.address.full} className="w-full h-36 object-cover" />
+        <Image src={photo} alt={listing.address.full} width={400} height={144} unoptimized className="w-full h-36 object-cover" />
       ) : (
         <div className="w-full h-36 bg-gray-100 flex items-center justify-center">
           <Home size={24} className="text-gray-300" />

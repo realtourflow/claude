@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from 'react';
+import Image from "next/image";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Deal, DealStage, LoanMilestones } from "@/lib/data/mockDeals";
 import { useDeal, patchStage } from "@/hooks/useDeals";
@@ -1245,7 +1246,7 @@ function AgentPropertyRow({ prop, onRemove, onUpdateAgentNote }: { prop: Tracked
         {/* Thumbnail */}
         <div className="h-14 w-14 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200 flex items-center justify-center">
           {prop.thumbnailUrl && !imgErr ? (
-            <img src={prop.thumbnailUrl} alt="" className="h-full w-full object-cover" onError={() => setImgErr(true)} />
+            <Image src={prop.thumbnailUrl} alt="" width={56} height={56} unoptimized className="h-full w-full object-cover" onError={() => setImgErr(true)} />
           ) : (
             <Home size={20} className="text-gray-400" />
           )}

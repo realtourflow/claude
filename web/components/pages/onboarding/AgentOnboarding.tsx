@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   ChevronRight, Check, CheckCircle2, ArrowRight,
@@ -363,9 +364,12 @@ function PhotoScreen({
         {/* Preview */}
         <div className="mb-5 flex h-32 w-32 items-center justify-center">
           {selected ? (
-            <img
+            <Image
               src={selected}
               alt="Your headshot"
+              width={128}
+              height={128}
+              unoptimized
               className="h-32 w-32 rounded-2xl object-cover ring-2 ring-brand-navy/10 shadow-sm"
             />
           ) : (

@@ -2,6 +2,7 @@
 
 import { ReactNode, useState, useRef, useEffect } from 'react';
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useAgentSetupStore } from "@/lib/store/agentSetupStore";
@@ -217,9 +218,12 @@ function TopHeader({
         {activeUser && (
           <>
             <span className="text-sm text-white/70">{activeUser.name}</span>
-            <img
+            <Image
               src={activeUser.avatar}
               alt={activeUser.name}
+              width={32}
+              height={32}
+              unoptimized
               className="h-8 w-8 rounded-full ring-2 ring-brand-gold/50"
             />
           </>
@@ -302,7 +306,7 @@ function AdminLayout({ children }: { children: ReactNode }) {
             {activeUser && (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-500 hidden sm:block">{activeUser.name}</span>
-                <img src={activeUser.avatar} alt={activeUser.name} className="h-7 w-7 rounded-full ring-2 ring-red-200" />
+                <Image src={activeUser.avatar} alt={activeUser.name} width={28} height={28} unoptimized className="h-7 w-7 rounded-full ring-2 ring-red-200" />
               </div>
             )}
           </div>
@@ -328,7 +332,7 @@ function TCLayout({ children }: { children: ReactNode }) {
             {activeUser && (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-gray-500 hidden sm:block">{activeUser.name}</span>
-                <img src={activeUser.avatar} alt={activeUser.name} className="h-7 w-7 rounded-full ring-2 ring-amber-200" />
+                <Image src={activeUser.avatar} alt={activeUser.name} width={28} height={28} unoptimized className="h-7 w-7 rounded-full ring-2 ring-amber-200" />
               </div>
             )}
           </div>

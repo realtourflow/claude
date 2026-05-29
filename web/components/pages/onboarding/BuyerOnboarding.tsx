@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
+import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { api } from "@/lib/api-client";
@@ -468,9 +469,12 @@ function WelcomeScreen({ agentName, agentAvatar, onStart }: {
       {/* Agent — hero */}
       <div className="mb-3">
         {agentAvatar ? (
-          <img
+          <Image
             src={agentAvatar}
             alt={agentName}
+            width={80}
+            height={80}
+            unoptimized
             className="h-20 w-20 rounded-2xl object-cover shadow-md ring-4 ring-brand-navy/10"
           />
         ) : (

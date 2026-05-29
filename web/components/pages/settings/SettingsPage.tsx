@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import Image from "next/image";
 import {
   User, Store, Bell, Plug, Star, Pencil, Trash2,
   ChevronUp, ChevronDown, Plus, X, Check, ExternalLink,
@@ -525,9 +526,12 @@ function ProfileSection() {
       <div className="flex items-center gap-4">
         <div className="relative h-16 w-16 flex-shrink-0">
           {photoUrl ? (
-            <img
+            <Image
               src={photoUrl}
               alt={form.name || 'Headshot'}
+              width={64}
+              height={64}
+              unoptimized
               className="h-16 w-16 rounded-2xl ring-2 ring-brand-navy/10 object-cover"
             />
           ) : (

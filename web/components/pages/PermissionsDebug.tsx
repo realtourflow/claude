@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useAuthStore } from "@/lib/store/authStore";
 import { PERMISSIONS, Permission } from "@/permissions/permissions";
 import { GROUPS, GroupId } from "@/permissions/groups";
@@ -49,7 +50,7 @@ export default function PermissionsDebug() {
           <div className="rounded-xl bg-white p-5 shadow-sm">
             <h2 className="mb-4 text-xs font-semibold uppercase tracking-widest text-gray-400">Active User</h2>
             <div className="flex items-center gap-4">
-              <img src={activeUser.avatar} alt={activeUser.name} className="h-14 w-14 rounded-full ring-2 ring-brand-gold/40" />
+              <Image src={activeUser.avatar} alt={activeUser.name} width={56} height={56} unoptimized className="h-14 w-14 rounded-full ring-2 ring-brand-gold/40" />
               <div className="flex-1">
                 <div className="text-lg font-bold text-brand-navy">{activeUser.name}</div>
                 <div className="text-sm text-gray-500">{activeUser.email}</div>
