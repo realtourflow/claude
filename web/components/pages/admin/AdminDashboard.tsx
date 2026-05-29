@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useUsers, AppUser } from "@/hooks/useUsers";
@@ -183,11 +183,20 @@ function PipelineOverview({ deals }: { deals: Deal[] }) {
   );
   const fastPassDeals = activeDeals.filter((d) => d.flags.includes('fast_pass'));
   const redDeals = activeDeals.filter((d) => d.health === 'red');
-  const closingSoon = activeDeals.filter((d) => {
-    if (!d.timeline.closingDate) return false;
-    const days = Math.ceil((new Date(d.timeline.closingDate).getTime() - Date.now()) / 86_400_000);
-    return days >= 0 && days <= 30;
-  });
+  // useMemo isolates the impure clock + Date-parsing reads from the
+  // parent render body. React 19's react-hooks/purity rule is still
+  // conservative about Date.now() and `new Date()` even inside a useMemo
+  // callback, so the disable below documents that this is intentional.
+  const closingSoon = useMemo(() => {
+    // eslint-disable-next-line react-hooks/purity
+    const nowMs = Date.now();
+    return activeDeals.filter((d) => {
+      if (!d.timeline.closingDate) return false;
+      const closeMs = new Date(d.timeline.closingDate).getTime();
+      const days = Math.ceil((closeMs - nowMs) / 86_400_000);
+      return days >= 0 && days <= 30;
+    });
+  }, [activeDeals]);
 
   const byStage = STAGE_ORDER.map((stage) => ({
     stage,

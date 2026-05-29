@@ -876,8 +876,20 @@ function NetSheetLineRow({ line, salePrice, onChange }: {
 
 const CONFETTI_COLORS = ['#FFD700', '#00C49F', '#1a2d5a', '#FF6B6B', '#4ECDC4', '#A78BFA'];
 
+// Reads Date.now() once per mount via useState's lazy initializer — keeps
+// the parent render pure (react-hooks/purity rule).
+function ClosingDaysBadge({ closingDate }: { closingDate: string }) {
+  const [days] = useState(() =>
+    Math.max(0, Math.round((new Date(closingDate).getTime() - Date.now()) / 86_400_000))
+  );
+  return <span className="font-bold text-brand-navy">({days}d)</span>;
+}
+
 function ConfettiCelebration({ onDismiss }: { onDismiss: () => void }) {
-  const pieces = useMemo(() =>
+  // useState lazy initializer runs ONCE per mount; React 19's purity rule
+  // disallows Math.random() inside useMemo's compute fn since useMemo can
+  // recompute. The lazy initializer pattern is the canonical fix.
+  const [pieces] = useState(() =>
     Array.from({ length: 60 }, (_, i) => ({
       id: i,
       color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
@@ -886,7 +898,7 @@ function ConfettiCelebration({ onDismiss }: { onDismiss: () => void }) {
       duration: `${2.5 + Math.random() * 2}s`,
       size: `${6 + Math.random() * 8}px`,
       round: Math.random() > 0.5,
-    })), []
+    }))
   );
 
   useEffect(() => {
@@ -3792,10 +3804,7 @@ function DealHeader({ deal, onFlagChange }: { deal: Deal; onFlagChange?: (flags:
         <div className="mt-2 flex items-center gap-1 text-xs text-gray-400">
           <Calendar size={11} />
           <span>Closing {deal.timeline.closingDate}</span>
-          {(() => {
-            const days = Math.max(0, Math.round((new Date(deal.timeline.closingDate).getTime() - Date.now()) / 86_400_000));
-            return <span className="font-bold text-brand-navy">({days}d)</span>;
-          })()}
+          <ClosingDaysBadge closingDate={deal.timeline.closingDate} />
           <span className="mx-1">·</span>
           <Clock size={11} />
           <span>{deal.timeline.daysInStage} days in current stage</span>
