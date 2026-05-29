@@ -413,11 +413,15 @@ export default function SellerOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
 
-  useEffect(() => {
+  // Reset local input state when screen changes. React 19 pattern: compare
+  // to previous value during render rather than syncing in useEffect.
+  const [prevScreenIndex, setPrevScreenIndex] = useState(screenIndex);
+  if (screenIndex !== prevScreenIndex) {
+    setPrevScreenIndex(screenIndex);
     setLocalText('');
     setLocalText2('');
     setLocalAnswer('');
-  }, [screenIndex]);
+  }
 
   function set<K extends keyof SellerData>(key: K, val: SellerData[K]) {
     setData((d) => ({ ...d, [key]: val }));

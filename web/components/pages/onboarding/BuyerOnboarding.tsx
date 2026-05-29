@@ -595,8 +595,26 @@ export default function BuyerOnboarding() {
   const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
   const [inviteDealId, setInviteDealId] = useState<string | null>(null);
 
-  const [screen, setScreen] = useState(-1);
-  const [data, setData] = useState<BuyerData>(EMPTY);
+  // Lazy initializers read sessionStorage once at mount. This satisfies the
+  // React 19 set-state-in-effect rule — the "resume after Fast Pass" branch
+  // used to happen in a mount-only useEffect, but the cleaner pattern is to
+  // bake the restored state into the initial useState() call.
+  const [resumeState] = useState<{ lenderChoice?: LenderChoice | '' } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    if (searchParams.get('resume') !== 'true') return null;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('rtf_onboarding_resume') ?? '{}');
+      sessionStorage.removeItem('rtf_onboarding_resume');
+      return saved;
+    } catch {
+      return null;
+    }
+  });
+
+  const [screen, setScreen] = useState(() => (resumeState ? 20 : -1));
+  const [data, setData] = useState<BuyerData>(() =>
+    resumeState?.lenderChoice ? { ...EMPTY, lenderChoice: resumeState.lenderChoice } : EMPTY,
+  );
 
   // Fetch invite details from token to get real agentName + dealId
   useEffect(() => {
@@ -608,21 +626,6 @@ export default function BuyerOnboarding() {
       })
       .catch(() => {});
   }, [token]);
-
-  // Resume after Fast Pass survey — restore lenderChoice and jump to MTN CTA
-  useEffect(() => {
-    if (searchParams.get('resume') === 'true') {
-      try {
-        const saved = JSON.parse(sessionStorage.getItem('rtf_onboarding_resume') ?? '{}');
-        if (saved.lenderChoice) {
-          setData((d) => ({ ...d, lenderChoice: saved.lenderChoice }));
-        }
-        sessionStorage.removeItem('rtf_onboarding_resume');
-        setScreen(20);
-      } catch {}
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // On done screen: persist contact info + claim invite (which advances stage + creates task + notifies agent)
   const hasSubmittedRef = useRef(false);
@@ -644,13 +647,15 @@ export default function BuyerOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
 
-  // Reset local input state when screen changes (screens 1–15 map to SCREENS[screen-1])
+  // Reset local input state when screen changes. React 19 pattern: compare to
+  // previous screen during render rather than syncing in useEffect.
   const [textVal, setTextVal] = useState('');
-  useEffect(() => {
+  const [prevScreen, setPrevScreen] = useState(screen);
+  if (screen !== prevScreen) {
+    setPrevScreen(screen);
     const s = screen >= 1 && screen <= 15 ? SCREENS[screen - 1] : null;
-    if (s) setTextVal(data[s.field] as string ?? '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen]);
+    if (s) setTextVal((data[s.field] as string) ?? '');
+  }
 
   const isCash = data.cashOrLoan === 'cash';
   const isCashRef = useRef(false);

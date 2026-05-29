@@ -643,13 +643,20 @@ function SellerNetSheetCard({ deal }: { deal: import("@/lib/data/mockDeals").Dea
   const [saved, setSaved] = useState(false);
   const [showOptional, setShowOptional] = useState(false);
 
-  useEffect(() => {
-    if (!sheet) return;
-    setSalePrice(sheet.salePrice || deal.property.price);
-    setClosingDate(sheet.closingDate ?? deal.timeline.closingDate ?? '');
-    setAnnualTaxes(sheet.annualTaxes);
-    setLines(recalcLines(sheet.lines, sheet.salePrice || deal.property.price, sheet.annualTaxes, sheet.closingDate));
-  }, [sheet, deal.property.price, deal.timeline.closingDate]);
+  // React 19 pattern for "hydrate local form state from a fetched record":
+  // compare to previous value during render and call setState before returning
+  // JSX. Avoids the set-state-in-effect anti-pattern.
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevSheet, setPrevSheet] = useState(sheet);
+  if (sheet !== prevSheet) {
+    setPrevSheet(sheet);
+    if (sheet) {
+      setSalePrice(sheet.salePrice || deal.property.price);
+      setClosingDate(sheet.closingDate ?? deal.timeline.closingDate ?? '');
+      setAnnualTaxes(sheet.annualTaxes);
+      setLines(recalcLines(sheet.lines, sheet.salePrice || deal.property.price, sheet.annualTaxes, sheet.closingDate));
+    }
+  }
 
   const liveLines = recalcLines(lines, salePrice, annualTaxes, closingDate || null);
   const netProceeds = calcNetProceeds(liveLines, salePrice);

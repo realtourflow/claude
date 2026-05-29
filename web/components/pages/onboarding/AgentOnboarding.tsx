@@ -932,12 +932,19 @@ function CommissionInput({
   const [pctStr, setPctStr] = useState<string>(String(pct ?? ''));
   const [amountStr, setAmountStr] = useState<string>(String(amount ?? ''));
 
-  useEffect(() => {
+  // React 19 pattern for "reset local state when a prop changes": compare to
+  // previous value during render. See:
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevPct, setPrevPct] = useState(pct);
+  if (pct !== prevPct) {
+    setPrevPct(pct);
     setPctStr(String(pct ?? ''));
-  }, [pct]);
-  useEffect(() => {
+  }
+  const [prevAmount, setPrevAmount] = useState(amount);
+  if (amount !== prevAmount) {
+    setPrevAmount(amount);
     setAmountStr(String(amount ?? ''));
-  }, [amount]);
+  }
 
   const dollarEquiv = salePreview && isPct ? Math.round(salePreview * pct / 100) : null;
   const pctEquiv = salePreview && !isPct && salePreview > 0 ? ((amount / salePreview) * 100).toFixed(2) : null;

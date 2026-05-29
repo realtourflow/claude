@@ -450,21 +450,23 @@ function ProfileSection() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!settingsLoading) {
-      setForm((f) => ({
-        ...f,
-        // The onboarding flow writes these into the settings JSONB, so we
-        // prefer those values over the empty initial form state.
-        name: (settings.name as string) ?? f.name,
-        phone: (settings.phone as string) ?? '',
-        title: (settings.title as string) ?? '',
-        licenseNumber: (settings.licenseNumber as string) ?? '',
-        bio: (settings.bio as string) ?? '',
-      }));
-      setPhotoUrl((settings.photoUrl as string) ?? '');
-    }
-  }, [settingsLoading, settings]);
+  // React 19 pattern for "hydrate local form state from fetched settings":
+  // compare to previous value during render rather than syncing in useEffect.
+  // The onboarding flow writes these into the settings JSONB, so we prefer
+  // those values over the empty initial form state.
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (!settingsLoading && settings !== prevSettings) {
+    setPrevSettings(settings);
+    setForm((f) => ({
+      ...f,
+      name: (settings.name as string) ?? f.name,
+      phone: (settings.phone as string) ?? '',
+      title: (settings.title as string) ?? '',
+      licenseNumber: (settings.licenseNumber as string) ?? '',
+      bio: (settings.bio as string) ?? '',
+    }));
+    setPhotoUrl((settings.photoUrl as string) ?? '');
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -665,11 +667,13 @@ function NotificationsSection() {
   const { settings, loading, saveSettings } = useSettings();
   const [enabled, setEnabled] = useState<Record<string, boolean>>(NOTIFICATION_DEFAULTS);
 
-  useEffect(() => {
-    if (!loading && settings.notifications) {
-      setEnabled({ ...NOTIFICATION_DEFAULTS, ...(settings.notifications as Record<string, boolean>) });
-    }
-  }, [loading, settings.notifications]);
+  // React 19 pattern: compare to previous notifications during render to
+  // hydrate local state when settings finish loading.
+  const [prevNotifs, setPrevNotifs] = useState(settings.notifications);
+  if (!loading && settings.notifications && settings.notifications !== prevNotifs) {
+    setPrevNotifs(settings.notifications);
+    setEnabled({ ...NOTIFICATION_DEFAULTS, ...(settings.notifications as Record<string, boolean>) });
+  }
 
   function toggle(id: string) {
     const updated = { ...enabled, [id]: !enabled[id] };
@@ -937,24 +941,35 @@ function IntegrationsSection() {
 
   // After the OAuth callback bounces the user back to /agent/settings?integrations=...
   // we surface a one-time toast so the agent sees that the connection landed
-  // (or that it failed). This mirrors the redirect query param the backend sets.
-  useEffect(() => {
+  // (or that it failed). React 19 pattern: capture the initial query state at
+  // mount via a lazy useState initializer; setActionError gets called from
+  // there exactly once.
+  const [integrationsInitFlag] = useState<{ flag: string | null; reason: string | null }>(() => {
+    if (typeof window === 'undefined') return { flag: null, reason: null };
     const params = new URLSearchParams(window.location.search);
     const flag = params.get('integrations');
-    if (!flag) return;
-    if (flag.endsWith('_connected')) {
-      // Refresh status so the new "Connected" badge appears.
-      refresh();
-    } else if (flag.endsWith('_error')) {
-      const reason = params.get('reason') ?? 'unknown';
-      setActionError(`Calendar connection failed: ${reason}`);
+    const reason = params.get('reason');
+    if (flag) {
+      // Clean the query string so a refresh doesn't keep showing the toast.
+      params.delete('integrations');
+      params.delete('reason');
+      const newSearch = params.toString();
+      window.history.replaceState({}, '', window.location.pathname + (newSearch ? `?${newSearch}` : ''));
     }
-    // Clean the query string so a refresh doesn't keep showing the toast.
-    params.delete('integrations');
-    params.delete('reason');
-    const newSearch = params.toString();
-    window.history.replaceState({}, '', window.location.pathname + (newSearch ? `?${newSearch}` : ''));
-  }, [refresh]);
+    return { flag, reason };
+  });
+
+  // Apply the initial query state. We use a one-shot guard so the side
+  // effect (refresh + setActionError) only fires once.
+  const [initApplied, setInitApplied] = useState(false);
+  if (!initApplied && integrationsInitFlag.flag) {
+    setInitApplied(true);
+    if (integrationsInitFlag.flag.endsWith('_connected')) {
+      void refresh();
+    } else if (integrationsInitFlag.flag.endsWith('_error')) {
+      setActionError(`Calendar connection failed: ${integrationsInitFlag.reason ?? 'unknown'}`);
+    }
+  }
 
   async function handleConnect(provider: 'google_calendar' | 'microsoft_calendar') {
     setBusy(provider);
@@ -1115,9 +1130,13 @@ function TransactionCoordinatorSection({ agentId: _agentId }: { agentId: string 
   const [saving, setSaving] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
-  useEffect(() => {
+  // React 19 pattern: hydrate local form state from fetched record by
+  // comparing to previous value during render.
+  const [prevExisting, setPrevExisting] = useState(existing);
+  if (existing !== prevExisting) {
+    setPrevExisting(existing);
     if (existing) setForm({ name: existing.name, email: existing.email, phone: existing.phone });
-  }, [existing]);
+  }
 
   const canSave = form.name.trim().length > 0 && form.email.trim().length > 0;
 

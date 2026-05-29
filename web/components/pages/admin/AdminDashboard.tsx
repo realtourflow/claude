@@ -1431,12 +1431,18 @@ const DEFAULT_CONFIG: SystemConfig = {
 
 function AdminSystemConfig() {
   const { config, updatedAt, loading, saving, saveConfig } = useSystemConfig();
-  const [form, setForm] = useState<SystemConfig>(DEFAULT_CONFIG);
+  const [form, setForm] = useState<SystemConfig>(config ?? DEFAULT_CONFIG);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
+  // React 19 pattern for "reset local state when a prop changes": compare to
+  // previous value during render and call setState before returning JSX. This
+  // avoids the set-state-in-effect anti-pattern and is the documented fix.
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevConfig, setPrevConfig] = useState(config);
+  if (config !== prevConfig) {
+    setPrevConfig(config);
     if (config) setForm(config);
-  }, [config]);
+  }
 
   function setThreshold(stage: string, val: string) {
     const n = parseInt(val, 10);
