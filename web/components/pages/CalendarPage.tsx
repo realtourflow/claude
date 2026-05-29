@@ -28,6 +28,57 @@ const TYPE_META = {
   contingency: { dot: 'bg-amber-400',   label: 'Contingency', icon: Shield },
 };
 
+// Hoisted to module scope so they're not re-created every CalendarPage
+// render (react-hooks/static-components). Both are pure functions of
+// their props plus the module-level TYPE_META + daysUntil helpers.
+function EventRow({ entry }: { entry: CalEntry }) {
+  const days = daysUntil(entry.date);
+  const isPast  = days < 0;
+  const isToday = days === 0;
+  const meta = TYPE_META[entry.type];
+  const Icon = meta.icon;
+
+  return (
+    <div className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
+      isPast  ? 'bg-red-50 border border-red-100' :
+      isToday ? 'bg-amber-50 border border-amber-100' :
+                'bg-white border border-gray-100'
+    }`}>
+      <Icon size={15} className={isPast ? 'text-red-400' : isToday ? 'text-amber-500' : 'text-gray-300'} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <p className={`text-sm font-semibold truncate ${isPast ? 'text-red-800' : 'text-brand-navy'}`}>
+            {entry.title}
+          </p>
+          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase flex-shrink-0 ${meta.dot} text-white`}>
+            {meta.label}
+          </span>
+        </div>
+        {entry.sub && <p className="text-xs text-gray-400 truncate">{entry.sub}</p>}
+      </div>
+      <div className="text-right flex-shrink-0">
+        <div className={`text-xs font-bold ${isPast ? 'text-red-600' : isToday ? 'text-amber-600' : days <= 7 ? 'text-amber-500' : 'text-gray-400'}`}>
+          {isPast ? `${Math.abs(days)}d overdue` : isToday ? 'Today' : `${days}d`}
+        </div>
+        <div className="text-[10px] text-gray-300">{entry.date}</div>
+      </div>
+    </div>
+  );
+}
+
+function Group({ title, items, accent }: { title: string; items: CalEntry[]; accent: string }) {
+  if (items.length === 0) return null;
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{title}</h2>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{items.length}</span>
+      </div>
+      <div className="space-y-2">{items.map((e) => <EventRow key={e.id} entry={e} />)}</div>
+    </section>
+  );
+}
+
 export default function CalendarPage() {
   const { deals } = useDeals();
   const { tasks }  = useAgentTasks();
@@ -97,53 +148,6 @@ export default function CalendarPage() {
     });
   }
 
-  function EventRow({ entry }: { entry: CalEntry }) {
-    const days = daysUntil(entry.date);
-    const isPast  = days < 0;
-    const isToday = days === 0;
-    const meta = TYPE_META[entry.type];
-    const Icon = meta.icon;
-
-    return (
-      <div className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
-        isPast  ? 'bg-red-50 border border-red-100' :
-        isToday ? 'bg-amber-50 border border-amber-100' :
-                  'bg-white border border-gray-100'
-      }`}>
-        <Icon size={15} className={isPast ? 'text-red-400' : isToday ? 'text-amber-500' : 'text-gray-300'} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <p className={`text-sm font-semibold truncate ${isPast ? 'text-red-800' : 'text-brand-navy'}`}>
-              {entry.title}
-            </p>
-            <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase flex-shrink-0 ${meta.dot} text-white`}>
-              {meta.label}
-            </span>
-          </div>
-          {entry.sub && <p className="text-xs text-gray-400 truncate">{entry.sub}</p>}
-        </div>
-        <div className="text-right flex-shrink-0">
-          <div className={`text-xs font-bold ${isPast ? 'text-red-600' : isToday ? 'text-amber-600' : days <= 7 ? 'text-amber-500' : 'text-gray-400'}`}>
-            {isPast ? `${Math.abs(days)}d overdue` : isToday ? 'Today' : `${days}d`}
-          </div>
-          <div className="text-[10px] text-gray-300">{entry.date}</div>
-        </div>
-      </div>
-    );
-  }
-
-  function Group({ title, items, accent }: { title: string; items: CalEntry[]; accent: string }) {
-    if (items.length === 0) return null;
-    return (
-      <section>
-        <div className="mb-2 flex items-center gap-2">
-          <h2 className={`text-xs font-bold uppercase tracking-wider ${accent}`}>{title}</h2>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{items.length}</span>
-        </div>
-        <div className="space-y-2">{items.map((e) => <EventRow key={e.id} entry={e} />)}</div>
-      </section>
-    );
-  }
 
   return (
     <div className="max-w-2xl space-y-6">
