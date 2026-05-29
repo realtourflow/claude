@@ -731,8 +731,8 @@ function MLSCard() {
       setKeyInput('');
       setSecretInput('');
       setTimeout(() => setSaved(false), 3000);
-    } catch (e: any) {
-      setSaveErr(e?.message ?? 'Failed to save — check your credentials');
+    } catch (e: unknown) {
+      setSaveErr(e instanceof Error ? e.message : 'Failed to save — check your credentials');
     }
     setSaving(false);
   }

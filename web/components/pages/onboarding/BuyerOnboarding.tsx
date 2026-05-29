@@ -603,7 +603,6 @@ export default function BuyerOnboarding() {
         setInviteDealId(inv.deal_id);
       })
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   // Resume after Fast Pass survey — restore lenderChoice and jump to MTN CTA

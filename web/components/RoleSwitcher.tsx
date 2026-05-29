@@ -23,11 +23,16 @@ function getHomeUrl(userId: string, groupId: GroupId): string {
 }
 
 export function RoleSwitcher() {
-  if (!(process.env.NODE_ENV !== "production")) return null;
-
+  // Hooks must be called unconditionally and in the same order on every
+  // render (react-hooks/rules-of-hooks). The dev-only short-circuit moves
+  // BELOW the hooks. Next.js inlines `process.env.NODE_ENV` at build time,
+  // so the entire component body is dead-code-eliminated in production
+  // bundles — no runtime cost.
   const { activeUser, setActiveUser } = useAuthStore();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+
+  if (process.env.NODE_ENV === "production") return null;
 
   const dotColor = GROUP_DOT_COLORS[activeUser?.groupId as GroupId] ?? 'bg-gray-400';
 

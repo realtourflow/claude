@@ -1,0 +1,45 @@
+import { error, json } from "@/lib/http";
+import { prisma } from "@/lib/db";
+
+type Ctx = { params: Promise<{ token: string }> };
+
+// Public — returns invite details for the /join/[token] landing page.
+export async function GET(_req: Request, ctx: Ctx): Promise<Response> {
+  const { token } = await ctx.params;
+  const rows = await prisma.$queryRaw<
+    {
+      token: string;
+      deal_id: string;
+      email: string;
+      name: string;
+      role: string;
+      agent_name: string;
+      deal_title: string;
+      expires_at: Date;
+      claimed_at: Date | null;
+    }[]
+  >`
+    SELECT di.token::text AS token, di.deal_id, di.email, di.name, di.role,
+           u.name AS agent_name,
+           d.title AS deal_title,
+           di.expires_at, di.claimed_at
+    FROM deal_invites di
+    JOIN deals d ON d.id = di.deal_id
+    JOIN users u ON u.id = di.invited_by
+    WHERE di.token = ${token}::uuid
+  `;
+  const row = rows[0];
+  if (!row) return error("invite not found", 404);
+
+  return json({
+    token: row.token,
+    deal_id: row.deal_id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    agent_name: row.agent_name,
+    deal_title: row.deal_title,
+    expires_at: row.expires_at.toISOString(),
+    claimed: row.claimed_at !== null,
+  });
+}

@@ -648,7 +648,7 @@ function SellerNetSheetCard({ deal }: { deal: import("@/lib/data/mockDeals").Dea
     setClosingDate(sheet.closingDate ?? deal.timeline.closingDate ?? '');
     setAnnualTaxes(sheet.annualTaxes);
     setLines(recalcLines(sheet.lines, sheet.salePrice || deal.property.price, sheet.annualTaxes, sheet.closingDate));
-  }, [sheet]);
+  }, [sheet, deal.property.price, deal.timeline.closingDate]);
 
   const liveLines = recalcLines(lines, salePrice, annualTaxes, closingDate || null);
   const netProceeds = calcNetProceeds(liveLines, salePrice);
@@ -873,12 +873,13 @@ function NetSheetLineRow({ line, salePrice, onChange }: {
 
 // ─── Confetti Celebration ────────────────────────────────────────────────────
 
+const CONFETTI_COLORS = ['#FFD700', '#00C49F', '#1a2d5a', '#FF6B6B', '#4ECDC4', '#A78BFA'];
+
 function ConfettiCelebration({ onDismiss }: { onDismiss: () => void }) {
-  const COLORS = ['#FFD700', '#00C49F', '#1a2d5a', '#FF6B6B', '#4ECDC4', '#A78BFA'];
   const pieces = useMemo(() =>
     Array.from({ length: 60 }, (_, i) => ({
       id: i,
-      color: COLORS[i % COLORS.length],
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
       left: `${Math.random() * 100}%`,
       delay: `${Math.random() * 1.5}s`,
       duration: `${2.5 + Math.random() * 2}s`,
@@ -2594,8 +2595,8 @@ function SendForSignatureModal({
     try {
       await sendForSignature(dealId, doc.id, signers);
       onSent();
-    } catch (e: any) {
-      setErr(e?.message ?? 'Failed to send — check DocuSign configuration.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to send — check DocuSign configuration.');
     }
     setSending(false);
   }
@@ -3194,7 +3195,7 @@ function VendorsTab({ deal }: { deal: Deal }) {
               subtitle={localVendors.lender.loanOfficer ?? localVendors.lender.contactName}
               phone={localVendors.lender.phone}
               email={localVendors.lender.email}
-              portalUrl={(localVendors.lender as any).portalUrl}
+              portalUrl={(localVendors.lender as { portalUrl?: string }).portalUrl}
               badge={
                 localVendors.lender.isAriveIntegrated ? (
                   <span className="flex items-center gap-0.5 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">

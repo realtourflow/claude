@@ -381,7 +381,6 @@ export default function SellerOnboarding() {
     api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
       .then((inv) => { setAgentName(inv.agent_name); setInviteDealId(inv.deal_id); })
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   // On confirmation screen: persist contact info + claim invite
