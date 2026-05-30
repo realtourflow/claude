@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, DealStage } from "@/lib/data/mockDeals";
 import { Task } from "@/lib/data/mockTasks";
@@ -16,10 +16,9 @@ import { useNetSheet, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
-  ChevronRight, Phone, Mail, Home, Star,
-  TrendingUp, Clock, DollarSign, Eye, Wrench, X, Send,
+  Phone, Mail, Home, Star,
+  TrendingUp, Clock, DollarSign, Eye, Wrench, Send,
 } from 'lucide-react';
-import MetroMap from "@/components/MetroMap";
 import VendorDirectory from "@/components/VendorDirectory";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -481,7 +480,7 @@ function ShowingAvailabilityModal({ dealId, onClose }: { dealId: string; onClose
             Save my availability
           </button>
           <button onClick={onClose} className="w-full text-center text-xs text-gray-400 hover:text-gray-600 py-1 transition-colors">
-            I'll do this later
+            I&apos;ll do this later
           </button>
         </div>
       </div>
@@ -509,7 +508,7 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
       <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
         <div className="bg-green-50 border-b border-green-100 px-5 py-3 flex items-center gap-2">
           <TrendingUp size={15} className="text-green-600" />
-          <span className="text-sm font-bold text-green-800">You're live on the market</span>
+          <span className="text-sm font-bold text-green-800">You&apos;re live on the market</span>
         </div>
         <div className="p-5">
           <div className="grid grid-cols-3 gap-3 mb-4">
@@ -528,7 +527,7 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
           <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3">
             <p className="text-xs font-semibold text-amber-800 mb-1">Latest showing feedback</p>
             <p className="text-xs text-amber-600 leading-relaxed italic">
-              "Great layout, loved the kitchen. Buyers want to see it again this weekend."
+              &quot;Great layout, loved the kitchen. Buyers want to see it again this weekend.&quot;
             </p>
           </div>
         </div>
@@ -641,7 +640,7 @@ function UnderContractCard({ deal }: { deal: Deal }) {
           <div>
             <p className="text-sm font-bold text-orange-800">Buyer submitted a repair request</p>
             <p className="text-xs text-orange-600 mt-0.5 leading-relaxed">
-              Your agent is reviewing it. You'll need to respond — accept, reject, or counter — within the deadline. They'll be in touch shortly.
+              Your agent is reviewing it. You&apos;ll need to respond — accept, reject, or counter — within the deadline. They&apos;ll be in touch shortly.
             </p>
           </div>
         </div>
@@ -663,11 +662,11 @@ function UnderContractCard({ deal }: { deal: Deal }) {
       {/* Buyer status */}
       <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-5 py-3.5 border-b border-gray-100">
-          <span className="text-xs font-bold uppercase tracking-widest text-gray-500">Buyer's Progress</span>
+          <span className="text-xs font-bold uppercase tracking-widest text-gray-500">Buyer&apos;s Progress</span>
         </div>
         {!buyerStatus ? (
           <div className="px-5 py-4 text-center">
-            <p className="text-sm text-gray-400">Your agent will update the buyer's status here.</p>
+            <p className="text-sm text-gray-400">Your agent will update the buyer&apos;s status here.</p>
           </div>
         ) : (
           <div className="p-5 space-y-2">
@@ -752,7 +751,7 @@ function ClosingCard({ deal }: { deal: Deal }) {
     <div className="rounded-2xl overflow-hidden">
       <div className="bg-brand-gold px-5 py-4">
         <p className="text-xs font-bold uppercase tracking-widest text-brand-navy/60">Closing Day</p>
-        <p className="text-xl font-black text-brand-navy mt-0.5">Today's the day!</p>
+        <p className="text-xl font-black text-brand-navy mt-0.5">Today&apos;s the day!</p>
         <p className="text-sm text-brand-navy/70 mt-1">
           Sale price: ${deal.property.price.toLocaleString()}
         </p>
@@ -872,7 +871,7 @@ function PostCloseCard({ deal, firstName }: { deal: Deal; firstName: string }) {
       <div className="rounded-2xl border-2 border-brand-gold/40 bg-brand-gold/5 p-5">
         <p className="text-sm font-black text-brand-navy mb-1">Earn $50 per referral 🤝</p>
         <p className="text-xs text-gray-600 leading-relaxed mb-3">
-          Know someone buying or selling? Send them our way and we'll pay you $50 for every referral who completes a transaction with us.
+          Know someone buying or selling? Send them our way and we&apos;ll pay you $50 for every referral who completes a transaction with us.
         </p>
         <button
           onClick={() => setShowReferral(true)}
@@ -884,7 +883,7 @@ function PostCloseCard({ deal, firstName }: { deal: Deal; firstName: string }) {
 
       {/* What's next */}
       <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-5">
-        <p className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">What's Next</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">What&apos;s Next</p>
         <div className="space-y-2.5">
           {[
             { icon: Mail,     label: 'Update your mailing address everywhere' },
@@ -937,7 +936,7 @@ function FallenThroughCard({ deal, firstName }: { deal: Deal; firstName: string 
           <XCircle size={18} className="text-red-400" />
           <p className="text-xs font-bold uppercase tracking-widest text-white/50">Deal Fell Through</p>
         </div>
-        <p className="text-lg font-bold">We're sorry, {firstName}.</p>
+        <p className="text-lg font-bold">We&apos;re sorry, {firstName}.</p>
         {deal.fallReason && (
           <p className="text-sm text-white/60 mt-2 leading-relaxed">{deal.fallReason}</p>
         )}
@@ -946,7 +945,7 @@ function FallenThroughCard({ deal, firstName }: { deal: Deal; firstName: string 
         <p className="text-sm font-bold text-purple-800 mb-1">What happens next</p>
         <p className="text-xs text-purple-600 leading-relaxed">
           Your agent will discuss your options — whether that means going back on the market,
-          re-negotiating, or a different approach. You're still in good hands.
+          re-negotiating, or a different approach. You&apos;re still in good hands.
         </p>
         <div className="mt-3 flex gap-2">
           <a href="tel:+12055550100"
@@ -1163,7 +1162,7 @@ function SmoothExitPitch() {
         </div>
         <div className="text-lg font-black text-purple-900">Smooth Exit</div>
         <p className="mt-1.5 text-sm text-purple-800/80 leading-relaxed">
-          We coordinate your move-out, handle utility cancellations, get repair bids, and support you all the way through closing — so you can focus on what's next.
+          We coordinate your move-out, handle utility cancellations, get repair bids, and support you all the way through closing — so you can focus on what&apos;s next.
         </p>
         <div className="mt-3 inline-block rounded-lg bg-purple-100 px-3 py-1.5 text-sm font-black text-purple-800">
           1% of sale price · paid from proceeds
@@ -1193,7 +1192,6 @@ function SmoothExitPitch() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function SellerView() {
-  const { userId } = useParams<{ userId: string }>();
   const activeUser = useAuthStore((s) => s.activeUser);
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
@@ -1368,7 +1366,7 @@ export default function SellerView() {
             <div className="bg-gradient-to-br from-purple-600 to-indigo-700 px-6 pt-8 pb-6 text-center">
               <div className="text-5xl mb-3">🏡</div>
               <h2 className="text-2xl font-black text-white leading-snug">
-                You're all set!
+                You&apos;re all set!
               </h2>
             </div>
             <div className="px-6 py-6 text-center">

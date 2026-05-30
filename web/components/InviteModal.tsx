@@ -101,7 +101,7 @@ export default function InviteModal({ agentId, onClose }: Props) {
                 </button>
               </div>
               <p className="text-[11px] text-gray-400">
-                This link is tied to your account. When your client completes onboarding they'll appear in your pipeline automatically.
+                This link is tied to your account. When your client completes onboarding they&apos;ll appear in your pipeline automatically.
               </p>
             </div>
           )}

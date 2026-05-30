@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type DayOfWeek = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
@@ -13,29 +13,32 @@ export type ShowingSlot = {
 };
 
 export function useShowingAvailability(dealId: string | undefined) {
-  const [slots, setSlots] = useState<ShowingSlot[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['showing-availability', dealId ?? ''];
 
-  const load = useCallback(async () => {
-    if (!dealId) { setLoading(false); return; }
-    try {
-      setLoading(true);
-      const raw = await api.get<ShowingSlot[]>(`/deals/${dealId}/showing-availability`);
-      setSlots(raw ?? []);
-    } catch {
-      setSlots([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId]);
-
-  useEffect(() => { load(); }, [load]);
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
+      try {
+        const raw = await api.get<ShowingSlot[]>(`/deals/${dealId}/showing-availability`);
+        return raw ?? [];
+      } catch {
+        return [] as ShowingSlot[];
+      }
+    },
+    enabled: Boolean(dealId),
+  });
 
   async function saveSlots(newSlots: ShowingSlot[]) {
     if (!dealId) return;
     await api.put(`/deals/${dealId}/showing-availability`, newSlots);
-    setSlots(newSlots);
+    queryClient.setQueryData(queryKey, newSlots);
   }
 
-  return { slots, loading, refresh: load, saveSlots };
+  return {
+    slots: query.data ?? [],
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+    saveSlots,
+  };
 }

@@ -321,8 +321,8 @@ function ConfirmationScreen({ data, agentName }: { data: SellerData; agentName: 
       <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-100">
         <CheckCircle2 size={34} className="text-purple-500" />
       </div>
-      <h2 className="text-2xl font-black text-brand-navy">You're on your way!</h2>
-      <p className="mt-2 text-sm text-gray-500">Here's what you shared. Your agent has been notified.</p>
+      <h2 className="text-2xl font-black text-brand-navy">You&apos;re on your way!</h2>
+      <p className="mt-2 text-sm text-gray-500">Here&apos;s what you shared. Your agent has been notified.</p>
 
       {/* Summary */}
       <div className="mt-5 w-full max-w-sm rounded-xl bg-gray-50 border border-gray-200 px-5 py-4 text-left space-y-2">
@@ -370,18 +370,16 @@ export default function SellerOnboarding() {
 
   const activeUser = useAuthStore((s) => s.activeUser);
   const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
-  const [inviteDealId, setInviteDealId] = useState<string | null>(null);
 
   const [data, setData] = useState<SellerData>(EMPTY);
   const [screenIndex, setScreenIndex] = useState(0);
 
-  // Fetch invite details from token to get real agentName + dealId
+  // Fetch invite details from token to get real agentName.
   useEffect(() => {
     if (!token) return;
     api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
-      .then((inv) => { setAgentName(inv.agent_name); setInviteDealId(inv.deal_id); })
+      .then((inv) => { setAgentName(inv.agent_name); })
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   // On confirmation screen: persist contact info + claim invite
@@ -414,11 +412,15 @@ export default function SellerOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
 
-  useEffect(() => {
+  // Reset local input state when screen changes. React 19 pattern: compare
+  // to previous value during render rather than syncing in useEffect.
+  const [prevScreenIndex, setPrevScreenIndex] = useState(screenIndex);
+  if (screenIndex !== prevScreenIndex) {
+    setPrevScreenIndex(screenIndex);
     setLocalText('');
     setLocalText2('');
     setLocalAnswer('');
-  }, [screenIndex]);
+  }
 
   function set<K extends keyof SellerData>(key: K, val: SellerData[K]) {
     setData((d) => ({ ...d, [key]: val }));

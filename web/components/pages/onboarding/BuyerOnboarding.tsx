@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
+import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { api } from "@/lib/api-client";
@@ -381,7 +382,7 @@ function MtnMortgageCTAScreen({ lenderChoice, onContinue }: {
     <div className="screen-enter flex flex-col items-center text-center">
       {isFastPass && (
         <div className="mb-5 w-full max-w-xs rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
-          ⚡ Fast Pass enrollment received — we'll be in touch!
+          ⚡ Fast Pass enrollment received — we&apos;ll be in touch!
         </div>
       )}
 
@@ -441,7 +442,7 @@ function MtnMortgageCTAScreen({ lenderChoice, onContinue }: {
           onClick={onContinue}
           className="mt-1 w-full text-center text-sm text-gray-400 transition-colors hover:text-gray-600"
         >
-          I'll do this later →
+          I&apos;ll do this later →
         </button>
       </div>
     </div>
@@ -468,9 +469,12 @@ function WelcomeScreen({ agentName, agentAvatar, onStart }: {
       {/* Agent — hero */}
       <div className="mb-3">
         {agentAvatar ? (
-          <img
+          <Image
             src={agentAvatar}
             alt={agentName}
+            width={80}
+            height={80}
+            unoptimized
             className="h-20 w-20 rounded-2xl object-cover shadow-md ring-4 ring-brand-navy/10"
           />
         ) : (
@@ -487,12 +491,12 @@ function WelcomeScreen({ agentName, agentAvatar, onStart }: {
 
       {/* Personal note */}
       <p className="max-w-xs text-sm text-gray-600 leading-relaxed">
-        I've set up your home buying portal. A few quick questions and your search is personalized — takes about 3 minutes.
+        I&apos;ve set up your home buying portal. A few quick questions and your search is personalized — takes about 3 minutes.
       </p>
 
       {/* Steps */}
       <div className="mt-5 w-full max-w-xs rounded-2xl bg-gray-50 px-5 py-4 text-left">
-        <p className="mb-2.5 text-[10px] font-bold uppercase tracking-widest text-gray-300">We'll cover</p>
+        <p className="mb-2.5 text-[10px] font-bold uppercase tracking-widest text-gray-300">We&apos;ll cover</p>
         <div className="space-y-2.5">
           {steps.map(({ icon, label }) => (
             <div key={label} className="flex items-center gap-3 text-sm text-gray-600">
@@ -507,7 +511,7 @@ function WelcomeScreen({ agentName, agentAvatar, onStart }: {
         onClick={onStart}
         className="mt-6 flex w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-brand-navy py-4 text-base font-bold text-white hover:bg-brand-navy/80 active:scale-[0.98] transition-all"
       >
-        Let's get started <ArrowRight size={18} />
+        Let&apos;s get started <ArrowRight size={18} />
       </button>
     </div>
   );
@@ -562,7 +566,7 @@ function DoneScreen({ agentName }: { agentName: string }) {
       <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-green-100">
         <CheckCircle2 size={34} className="text-green-500" />
       </div>
-      <h2 className="text-3xl font-black text-brand-navy">You're all set!</h2>
+      <h2 className="text-3xl font-black text-brand-navy">You&apos;re all set!</h2>
       <p className="mt-3 max-w-sm text-sm leading-relaxed text-gray-500">
         {agentName} has been notified. Your dashboard is live — you can start tracking properties right away.
       </p>
@@ -589,37 +593,37 @@ export default function BuyerOnboarding() {
   const activeUser = useAuthStore((s) => s.activeUser);
 
   const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
-  const [inviteDealId, setInviteDealId] = useState<string | null>(null);
 
-  const [screen, setScreen] = useState(-1);
-  const [data, setData] = useState<BuyerData>(EMPTY);
+  // Lazy initializers read sessionStorage once at mount. This satisfies the
+  // React 19 set-state-in-effect rule — the "resume after Fast Pass" branch
+  // used to happen in a mount-only useEffect, but the cleaner pattern is to
+  // bake the restored state into the initial useState() call.
+  const [resumeState] = useState<{ lenderChoice?: LenderChoice | '' } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    if (searchParams.get('resume') !== 'true') return null;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('rtf_onboarding_resume') ?? '{}');
+      sessionStorage.removeItem('rtf_onboarding_resume');
+      return saved;
+    } catch {
+      return null;
+    }
+  });
 
-  // Fetch invite details from token to get real agentName + dealId
+  const [screen, setScreen] = useState(() => (resumeState ? 20 : -1));
+  const [data, setData] = useState<BuyerData>(() =>
+    resumeState?.lenderChoice ? { ...EMPTY, lenderChoice: resumeState.lenderChoice } : EMPTY,
+  );
+
+  // Fetch invite details from token to get real agentName.
   useEffect(() => {
     if (!token) return;
     api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
       .then((inv) => {
         setAgentName(inv.agent_name);
-        setInviteDealId(inv.deal_id);
       })
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
-
-  // Resume after Fast Pass survey — restore lenderChoice and jump to MTN CTA
-  useEffect(() => {
-    if (searchParams.get('resume') === 'true') {
-      try {
-        const saved = JSON.parse(sessionStorage.getItem('rtf_onboarding_resume') ?? '{}');
-        if (saved.lenderChoice) {
-          setData((d) => ({ ...d, lenderChoice: saved.lenderChoice }));
-        }
-        sessionStorage.removeItem('rtf_onboarding_resume');
-        setScreen(20);
-      } catch {}
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // On done screen: persist contact info + claim invite (which advances stage + creates task + notifies agent)
   const hasSubmittedRef = useRef(false);
@@ -641,19 +645,17 @@ export default function BuyerOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
 
-  // Reset local input state when screen changes (screens 1–15 map to SCREENS[screen-1])
+  // Reset local input state when screen changes. React 19 pattern: compare to
+  // previous screen during render rather than syncing in useEffect.
   const [textVal, setTextVal] = useState('');
-  useEffect(() => {
+  const [prevScreen, setPrevScreen] = useState(screen);
+  if (screen !== prevScreen) {
+    setPrevScreen(screen);
     const s = screen >= 1 && screen <= 15 ? SCREENS[screen - 1] : null;
-    if (s) setTextVal(data[s.field] as string ?? '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen]);
+    if (s) setTextVal((data[s.field] as string) ?? '');
+  }
 
   const isCash = data.cashOrLoan === 'cash';
-  const isCashRef = useRef(false);
-  isCashRef.current = isCash;
-  const lenderChoiceRef = useRef('');
-  lenderChoiceRef.current = data.lenderChoice;
 
   const progress = screen < 0 ? 3 : screen >= TOTAL - 1 ? 100 : Math.round(((screen + 1) / TOTAL) * 100);
 
@@ -661,9 +663,13 @@ export default function BuyerOnboarding() {
     setData((d) => ({ ...d, [key]: val }));
   }
 
+  // Read the latest cash/lender state directly from `data`. React 19's
+  // compiler memoizes function bodies, so we no longer need refs to capture
+  // "the latest state" across renders — these closures already see the
+  // current values, and setScreen's updater receives the latest screen.
   function advance(currentIsCash?: boolean) {
-    const useCash = typeof currentIsCash === 'boolean' ? currentIsCash : isCashRef.current;
-    const lc = lenderChoiceRef.current;
+    const useCash = typeof currentIsCash === 'boolean' ? currentIsCash : isCash;
+    const lc = data.lenderChoice;
     setScreen((s) => {
       let next = s + 1;
       while (next < TOTAL - 1 && shouldSkipScreen(next, useCash, lc)) next++;
@@ -672,8 +678,8 @@ export default function BuyerOnboarding() {
   }
 
   function back() {
-    const useCash = isCashRef.current;
-    const lc = lenderChoiceRef.current;
+    const useCash = isCash;
+    const lc = data.lenderChoice;
     setScreen((s) => {
       let prev = s - 1;
       while (prev > 0 && shouldSkipScreen(prev, useCash, lc)) prev--;

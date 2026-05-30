@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type PropertyStatus = 'interested' | 'toured' | 'not_for_me' | 'offer_submitted';
@@ -68,23 +68,21 @@ function fromApi(p: ApiProperty): TrackedProperty {
 }
 
 export function useProperties(dealId: string | undefined) {
-  const [properties, setProperties] = useState<TrackedProperty[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['properties', dealId ?? ''];
 
-  const load = useCallback(async () => {
-    if (!dealId) { setLoading(false); return; }
-    try {
-      setLoading(true);
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
       const raw = await api.get<ApiProperty[]>(`/deals/${dealId}/properties`);
-      setProperties(raw.map(fromApi));
-    } catch {
-      setProperties([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId]);
+      return raw.map(fromApi);
+    },
+    enabled: Boolean(dealId),
+  });
 
-  useEffect(() => { load(); }, [load]);
+  const update = (mut: (prev: TrackedProperty[]) => TrackedProperty[]) => {
+    queryClient.setQueryData<TrackedProperty[]>(queryKey, (prev) => mut(prev ?? []));
+  };
 
   async function addProperty(p: Omit<TrackedProperty, 'id'>) {
     if (!dealId) return;
@@ -103,33 +101,43 @@ export function useProperties(dealId: string | undefined) {
       agent_note: p.agentNote,
       buyer_note: p.buyerNote,
     });
-    setProperties((prev) => [...prev, fromApi(raw)]);
+    update((prev) => [...prev, fromApi(raw)]);
   }
 
   async function removeProperty(propertyId: string) {
     await api.delete(`/properties/${propertyId}`);
-    setProperties((prev) => prev.filter((p) => p.id !== propertyId));
+    update((prev) => prev.filter((p) => p.id !== propertyId));
   }
 
   async function updateStatus(propertyId: string, status: PropertyStatus) {
     await api.patch(`/properties/${propertyId}`, { status });
-    setProperties((prev) => prev.map((p) => p.id === propertyId ? { ...p, status } : p));
+    update((prev) => prev.map((p) => (p.id === propertyId ? { ...p, status } : p)));
   }
 
   async function updateBuyerNote(propertyId: string, buyerNote: string) {
     await api.patch(`/properties/${propertyId}`, { buyer_note: buyerNote });
-    setProperties((prev) => prev.map((p) => p.id === propertyId ? { ...p, buyerNote } : p));
+    update((prev) => prev.map((p) => (p.id === propertyId ? { ...p, buyerNote } : p)));
   }
 
   async function updateAgentNote(propertyId: string, agentPrivateNote: string) {
     await api.patch(`/properties/${propertyId}`, { agent_private_note: agentPrivateNote });
-    setProperties((prev) => prev.map((p) => p.id === propertyId ? { ...p, agentPrivateNote } : p));
+    update((prev) => prev.map((p) => (p.id === propertyId ? { ...p, agentPrivateNote } : p)));
   }
 
   async function setOfferRequested(propertyId: string, offerRequested: boolean) {
     await api.patch(`/properties/${propertyId}`, { offer_requested: offerRequested });
-    setProperties((prev) => prev.map((p) => p.id === propertyId ? { ...p, offerRequested } : p));
+    update((prev) => prev.map((p) => (p.id === propertyId ? { ...p, offerRequested } : p)));
   }
 
-  return { properties, loading, refresh: load, addProperty, removeProperty, updateStatus, updateBuyerNote, updateAgentNote, setOfferRequested };
+  return {
+    properties: query.data ?? [],
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+    addProperty,
+    removeProperty,
+    updateStatus,
+    updateBuyerNote,
+    updateAgentNote,
+    setOfferRequested,
+  };
 }

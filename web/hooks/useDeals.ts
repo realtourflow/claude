@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { AriveTracker, AriveKeyDates, Deal, DealStage, LoanMilestones, FastPassEnrollment, SmoothExitEnrollment } from "@/lib/data/mockDeals";
 
@@ -180,34 +180,27 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
   };
 }
 
-export function useDeal(id: string | undefined) {
-  const [deal, setDeal] = useState<Deal | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    if (!id) {
-      setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
-      setError(null);
+export function useDeal(id: string | undefined): {
+  deal: Deal | null;
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+} {
+  const query = useQuery({
+    queryKey: ['deal', id],
+    queryFn: async () => {
       const raw = await api.get<ApiDeal>(`/deals/${id}`);
-      setDeal(apiDealToFrontend(raw));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load deal');
-      setDeal(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
+      return apiDealToFrontend(raw);
+    },
+    enabled: Boolean(id),
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { deal, loading, error, refresh: load };
+  return {
+    deal: query.data ?? null,
+    loading: query.isLoading || query.isFetching,
+    error: query.error instanceof Error ? query.error.message : null,
+    refresh: () => { void query.refetch(); },
+  };
 }
 
 export async function patchStage(dealId: string, stage: string, force?: boolean): Promise<ApiDeal> {
@@ -215,27 +208,24 @@ export async function patchStage(dealId: string, stage: string, force?: boolean)
   return api.patch<ApiDeal>(`/deals/${dealId}/stage${qs}`, { stage });
 }
 
-export function useDeals() {
-  const [deals, setDeals] = useState<Deal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+export function useDeals(): {
+  deals: Deal[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+} {
+  const query = useQuery({
+    queryKey: ['deals'],
+    queryFn: async () => {
       const raw = await api.get<ApiDeal[]>('/deals');
-      setDeals(raw.map(apiDealToFrontend));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load deals');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return raw.map(apiDealToFrontend);
+    },
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { deals, loading, error, refresh: load };
+  return {
+    deals: query.data ?? [],
+    loading: query.isLoading,
+    error: query.error instanceof Error ? query.error.message : null,
+    refresh: () => { void query.refetch(); },
+  };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type IntegrationStatus = {
@@ -27,24 +27,14 @@ const EMPTY: IntegrationsResponse = {
 };
 
 export function useIntegrations() {
-  const [status, setStatus] = useState<IntegrationsResponse>(EMPTY);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey: ['me-integrations'],
+    queryFn: () => api.get<IntegrationsResponse>('/me/integrations'),
+  });
 
-  const refresh = useCallback(async () => {
-    try {
-      setError(null);
-      const data = await api.get<IntegrationsResponse>('/me/integrations');
-      setStatus(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load integrations');
-      setStatus(EMPTY);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
+  async function refresh() {
+    await query.refetch();
+  }
 
   async function disconnect(provider: 'google_calendar' | 'microsoft_calendar') {
     const path =
@@ -64,5 +54,12 @@ export function useIntegrations() {
     window.location.assign(authorize_url);
   }
 
-  return { status, loading, error, refresh, startOAuth, disconnect };
+  return {
+    status: query.data ?? EMPTY,
+    loading: query.isLoading,
+    error: query.error instanceof Error ? query.error.message : null,
+    refresh,
+    startOAuth,
+    disconnect,
+  };
 }

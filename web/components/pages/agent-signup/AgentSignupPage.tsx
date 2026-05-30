@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useAuth0 } from '@auth0/auth0-react';
 import { api } from "@/lib/api-client";
@@ -18,17 +18,21 @@ type AgentInviteDetails = {
 export default function AgentSignupPage() {
   const { token } = useParams<{ token: string }>();
   const { loginWithRedirect, isAuthenticated, isLoading: auth0Loading } = useAuth0();
-  const [invite, setInvite] = useState<AgentInviteDetails | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!token) { setError('Invalid invite link'); setLoading(false); return; }
-    api.get<AgentInviteDetails>(`/agent-invites/${token}`)
-      .then(setInvite)
-      .catch(() => setError('This invite link is invalid or has expired.'))
-      .finally(() => setLoading(false));
-  }, [token]);
+  const query = useQuery({
+    queryKey: ['agent-invite', token],
+    queryFn: () => api.get<AgentInviteDetails>(`/agent-invites/${token}`),
+    enabled: Boolean(token),
+    retry: false,
+  });
+
+  const invite = query.data ?? null;
+  const loading = query.isLoading;
+  const error: string | null = !token
+    ? 'Invalid invite link'
+    : query.error instanceof Error
+      ? 'This invite link is invalid or has expired.'
+      : null;
 
   function accept() {
     if (!token || !invite) return;
@@ -101,7 +105,7 @@ export default function AgentSignupPage() {
               <Briefcase size={26} className="text-white" />
             </div>
             <h1 className="text-lg font-bold text-white">Agent Invitation</h1>
-            <p className="mt-1 text-sm text-white/60">You've been invited to join as an agent</p>
+            <p className="mt-1 text-sm text-white/60">You&apos;ve been invited to join as an agent</p>
           </div>
 
           <div className="px-6 py-6 space-y-5">

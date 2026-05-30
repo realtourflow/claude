@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { VendorCategory } from "@/lib/data/mockVendors";
 
@@ -63,23 +63,18 @@ export type VendorInput = {
 };
 
 export function useVendors() {
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['vendors'];
 
-  const fetchVendors = useCallback(async () => {
-    try {
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
       const data = await api.get<ApiVendor[]>('/vendors');
-      setVendors(data.map(apiVendorToFrontend));
-    } catch {
-      // leave list as-is on error
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return data.map(apiVendorToFrontend);
+    },
+  });
 
-  useEffect(() => {
-    fetchVendors();
-  }, [fetchVendors]);
+  const vendors = query.data ?? [];
 
   async function addVendor(input: VendorInput): Promise<Vendor> {
     const v = await api.post<ApiVendor>('/vendors', {
@@ -93,7 +88,7 @@ export function useVendors() {
       is_featured: input.isFeatured ?? false,
     });
     const vendor = apiVendorToFrontend(v);
-    setVendors((prev) => [...prev, vendor]);
+    queryClient.setQueryData<Vendor[]>(queryKey, (prev) => [...(prev ?? []), vendor]);
     return vendor;
   }
 
@@ -110,12 +105,16 @@ export function useVendors() {
 
     const v = await api.patch<ApiVendor>(`/vendors/${id}`, body);
     const updated = apiVendorToFrontend(v);
-    setVendors((prev) => prev.map((x) => (x.id === id ? updated : x)));
+    queryClient.setQueryData<Vendor[]>(queryKey, (prev) =>
+      (prev ?? []).map((x) => (x.id === id ? updated : x)),
+    );
   }
 
   async function deleteVendor(id: string): Promise<void> {
     await api.delete<void>(`/vendors/${id}`);
-    setVendors((prev) => prev.filter((v) => v.id !== id));
+    queryClient.setQueryData<Vendor[]>(queryKey, (prev) =>
+      (prev ?? []).filter((v) => v.id !== id),
+    );
   }
 
   async function toggleFeatured(id: string): Promise<void> {
@@ -146,5 +145,14 @@ export function useVendors() {
     ]);
   }
 
-  return { vendors, loading, refresh: fetchVendors, addVendor, updateVendor, deleteVendor, toggleFeatured, moveVendor };
+  return {
+    vendors,
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+    addVendor,
+    updateVendor,
+    deleteVendor,
+    toggleFeatured,
+    moveVendor,
+  };
 }

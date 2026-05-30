@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from 'react';
-import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, DealStage } from "@/lib/data/mockDeals";
 import { Task } from "@/lib/data/mockTasks";
@@ -12,7 +13,7 @@ import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
   ChevronRight, Phone, Mail, Home, Zap,
-  ClipboardList, Clock, Building2, Star, ExternalLink,
+  ClipboardList, Building2, Star, ExternalLink,
   Plus, X, Link as LinkIcon, MessageCircle, Pencil, Send, Upload,
 } from 'lucide-react';
 import MetroMap from "@/components/MetroMap";
@@ -119,7 +120,7 @@ function TaskCard({ task, onComplete }: { task: Task; onComplete?: (id: string) 
                   onClick={handleConfirm}
                   className="flex-1 rounded-lg bg-green-500 py-2.5 text-xs font-bold text-white hover:bg-green-600 transition-colors"
                 >
-                  Yes, I'm done ✓
+                  Yes, I&apos;m done ✓
                 </button>
                 <button
                   onClick={() => setExpanded(false)}
@@ -186,7 +187,7 @@ function TaskCard({ task, onComplete }: { task: Task; onComplete?: (id: string) 
                 onClick={handleConfirm}
                 className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-green-200 bg-green-50 py-2 text-xs font-bold text-green-700 hover:bg-green-100 transition-colors"
               >
-                <CheckCircle2 size={12} /> I've completed this
+                <CheckCircle2 size={12} /> I&apos;ve completed this
               </button>
               <button onClick={() => setExpanded(false)} className="w-full text-center text-xs text-gray-400 hover:text-gray-600 transition-colors pt-0.5">
                 Close
@@ -569,9 +570,12 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
         {/* Thumbnail */}
         <div className="h-20 w-24 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100">
           {property.thumbnailUrl && !imgError ? (
-            <img
+            <Image
               src={property.thumbnailUrl}
               alt={property.address}
+              width={96}
+              height={80}
+              unoptimized
               className="h-full w-full object-cover"
               onError={() => setImgError(true)}
             />
@@ -613,7 +617,7 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
             </div>
           )}
           {property.addedBy === 'agent' && !property.agentNote && (
-            <span className="mt-1 inline-block text-[10px] font-bold uppercase tracking-wide text-brand-gold">Agent's pick</span>
+            <span className="mt-1 inline-block text-[10px] font-bold uppercase tracking-wide text-brand-gold">Agent&apos;s pick</span>
           )}
 
           {/* Buyer's own note (after review) */}
@@ -660,7 +664,7 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
                 <div className="flex items-center gap-1.5 rounded-lg bg-green-50 border border-green-100 px-3 py-2">
                   <CheckCircle2 size={13} className="text-green-500 flex-shrink-0" />
                   <p className="text-xs text-green-700 leading-snug">
-                    Your agent has been notified. They'll reach out to discuss details.
+                    Your agent has been notified. They&apos;ll reach out to discuss details.
                   </p>
                 </div>
               ) : (
@@ -768,12 +772,12 @@ function BAASigningModal({ deal, agentId, onClose, onSigned }: {
           </div>
 
           <p><strong>1. Exclusive Representation.</strong> Buyer agrees to work exclusively with Agent for the purpose of locating and purchasing residential real property during the term of this agreement.</p>
-          <p><strong>2. Agent's Duties.</strong> Agent agrees to use reasonable efforts to assist Buyer in locating suitable properties, presenting offers, and negotiating on Buyer's behalf.</p>
-          <p><strong>3. Buyer's Duties.</strong> Buyer agrees to work exclusively with Agent and to notify Agent of any properties discovered through independent sources.</p>
-          <p><strong>4. Compensation.</strong> Agent's compensation is negotiated separately and will be disclosed in each purchase agreement.</p>
+          <p><strong>2. Agent&apos;s Duties.</strong> Agent agrees to use reasonable efforts to assist Buyer in locating suitable properties, presenting offers, and negotiating on Buyer&apos;s behalf.</p>
+          <p><strong>3. Buyer&apos;s Duties.</strong> Buyer agrees to work exclusively with Agent and to notify Agent of any properties discovered through independent sources.</p>
+          <p><strong>4. Compensation.</strong> Agent&apos;s compensation is negotiated separately and will be disclosed in each purchase agreement.</p>
           <p><strong>5. Termination.</strong> Either party may terminate this agreement with written notice. Properties introduced by Agent during the term remain subject to this agreement for 60 days post-termination.</p>
           <p className="text-xs text-gray-400 border-t border-gray-100 pt-3">
-            This is a placeholder template. In production, the agent's uploaded document will be displayed here for electronic signature via DocuSign or a similar service.
+            This is a placeholder template. In production, the agent&apos;s uploaded document will be displayed here for electronic signature via DocuSign or a similar service.
           </p>
         </div>
 
@@ -823,7 +827,7 @@ function MLSListingCard({ listing, onAdd }: { listing: MLSListing; onAdd: (l: ML
   return (
     <div className="rounded-xl border border-gray-100 bg-white overflow-hidden shadow-sm">
       {photo ? (
-        <img src={photo} alt={listing.address.full} className="w-full h-36 object-cover" />
+        <Image src={photo} alt={listing.address.full} width={400} height={144} unoptimized className="w-full h-36 object-cover" />
       ) : (
         <div className="w-full h-36 bg-gray-100 flex items-center justify-center">
           <Home size={24} className="text-gray-300" />
@@ -1080,7 +1084,7 @@ function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () 
             <div>
               <p className="text-sm font-black text-amber-900">Get pre-approved to make an offer</p>
               <p className="mt-0.5 text-xs text-amber-700 leading-relaxed">
-                Browse homes your agent has shared below. You'll need a pre-approval letter before we can submit an offer.
+                Browse homes your agent has shared below. You&apos;ll need a pre-approval letter before we can submit an offer.
               </p>
             </div>
           </div>
@@ -1327,7 +1331,7 @@ function UnderContractCard({ deal }: { deal: Deal }) {
           <div className="mt-3 rounded-lg bg-teal-50 border border-teal-100 px-3 py-2.5">
             <p className="text-xs font-semibold text-teal-700">💡 Attend your inspection</p>
             <p className="text-xs text-teal-600 mt-0.5 leading-relaxed">
-              Being there in person lets you ask questions and understand the home's condition before you close — highly recommended.
+              Being there in person lets you ask questions and understand the home&apos;s condition before you close — highly recommended.
             </p>
           </div>
         </div>
@@ -1358,7 +1362,7 @@ function UnderContractCard({ deal }: { deal: Deal }) {
             <div>
               <p className="text-sm font-bold text-orange-800">Repair request submitted</p>
               <p className="text-xs text-orange-600 mt-0.5 leading-relaxed">
-                Your agent submitted a repair request to the seller after the inspection. The seller's agent is reviewing it — your agent will update you once they respond.
+                Your agent submitted a repair request to the seller after the inspection. The seller&apos;s agent is reviewing it — your agent will update you once they respond.
               </p>
               <p className="text-xs text-orange-500 mt-1.5 leading-relaxed italic">
                 Typical response time: 3–5 business days. Stay available for questions.
@@ -1427,8 +1431,8 @@ function ClosingCard() {
     <div className="rounded-2xl overflow-hidden">
       <div className="bg-brand-gold px-5 py-4">
         <p className="text-xs font-bold uppercase tracking-widest text-brand-navy/60">Closing Day</p>
-        <p className="text-xl font-black text-brand-navy mt-0.5">Today's the day!</p>
-        <p className="text-sm text-brand-navy/70 mt-1">Here's what to bring to the closing table.</p>
+        <p className="text-xl font-black text-brand-navy mt-0.5">Today&apos;s the day!</p>
+        <p className="text-sm text-brand-navy/70 mt-1">Here&apos;s what to bring to the closing table.</p>
       </div>
       <div className="bg-white border border-brand-gold/30 rounded-b-2xl p-5 space-y-2.5">
         {checklist.map((item, i) => (
@@ -1553,7 +1557,7 @@ function FallenThroughCard({ deal, firstName }: { deal: Deal; firstName: string 
           <XCircle size={18} className="text-red-400" />
           <p className="text-xs font-bold uppercase tracking-widest text-white/50">Deal Fell Through</p>
         </div>
-        <p className="text-lg font-bold">We're sorry, {firstName}.</p>
+        <p className="text-lg font-bold">We&apos;re sorry, {firstName}.</p>
         {deal.fallReason && (
           <p className="text-sm text-white/60 mt-2 leading-relaxed">{deal.fallReason}</p>
         )}
@@ -1561,8 +1565,8 @@ function FallenThroughCard({ deal, firstName }: { deal: Deal; firstName: string 
       <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
         <p className="text-sm font-bold text-blue-800 mb-1">What happens next</p>
         <p className="text-xs text-blue-600 leading-relaxed">
-          This doesn't mean the end of your home search. Your agent will reach out to discuss
-          your options — whether that's a different lender, a different property, or another approach.
+          This doesn&apos;t mean the end of your home search. Your agent will reach out to discuss
+          your options — whether that&apos;s a different lender, a different property, or another approach.
         </p>
         <div className="mt-3 flex gap-2">
           <a href="tel:+12055550100"
@@ -1772,7 +1776,6 @@ function StageCard({ deal, firstName, onRefresh }: { deal: Deal; firstName: stri
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function BuyerView() {
-  const { userId } = useParams<{ userId: string }>();
   const activeUser = useAuthStore((s) => s.activeUser);
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());

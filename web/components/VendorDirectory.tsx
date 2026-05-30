@@ -60,7 +60,7 @@ function CategorySection({ category, vendors }: { category: VendorCategory; vend
                   )}
                   {vendor.notes && (
                     <p className="text-xs text-gray-500 mt-1 leading-relaxed italic">
-                      "{vendor.notes}"
+                      &quot;{vendor.notes}&quot;
                     </p>
                   )}
                 </div>
@@ -112,7 +112,7 @@ export default function VendorDirectory({ agentId: _agentId }: { agentId: string
             <BookOpen size={16} className="text-brand-navy" />
           </div>
           <div>
-            <p className="text-sm font-bold text-brand-navy">Agent's Preferred Vendors</p>
+            <p className="text-sm font-bold text-brand-navy">Agent&apos;s Preferred Vendors</p>
             <p className="text-xs text-gray-400">
               {availableCategories.length} categories · trusted &amp; recommended
             </p>
@@ -128,7 +128,7 @@ export default function VendorDirectory({ agentId: _agentId }: { agentId: string
       {open && (
         <div className="border-t border-gray-100">
           <p className="px-4 py-2.5 text-xs text-gray-400 bg-gray-50">
-            Need a plumber, inspector, or mover? These are your agent's go-to contacts.
+            Need a plumber, inspector, or mover? These are your agent&apos;s go-to contacts.
           </p>
           {availableCategories.map((cat) => (
             <CategorySection

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useUsers, AppUser } from "@/hooks/useUsers";
@@ -183,9 +183,17 @@ function PipelineOverview({ deals }: { deals: Deal[] }) {
   );
   const fastPassDeals = activeDeals.filter((d) => d.flags.includes('fast_pass'));
   const redDeals = activeDeals.filter((d) => d.health === 'red');
+  // Closing-soon list. React 19's compiler memoizes automatically, so we
+  // no longer wrap this in useMemo (the rule complains that
+  // `activeDeals` may be mutated later, blocking optimization). The
+  // Date.now() / new Date() reads are unavoidable for a "next 30 days"
+  // filter — the per-line disable documents intent.
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
   const closingSoon = activeDeals.filter((d) => {
     if (!d.timeline.closingDate) return false;
-    const days = Math.ceil((new Date(d.timeline.closingDate).getTime() - Date.now()) / 86_400_000);
+    const closeMs = new Date(d.timeline.closingDate).getTime();
+    const days = Math.ceil((closeMs - nowMs) / 86_400_000);
     return days >= 0 && days <= 30;
   });
 
@@ -499,7 +507,7 @@ function StuckDeals({ deals }: { deals: Deal[] }) {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-brand-navy">Stuck Deals</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Deals that haven't progressed in 14+ days</p>
+        <p className="text-sm text-gray-400 mt-0.5">Deals that haven&apos;t progressed in 14+ days</p>
       </div>
       {stuck.length === 0 ? (
         <div className="rounded-xl bg-white px-5 py-10 text-center text-gray-400 shadow-sm">
@@ -960,7 +968,7 @@ function SmoothExitQueue({ deals }: { deals: Deal[] }) {
         {se.surveyAnswers && (
           <div className="border-t border-gray-50 px-5 py-3 grid grid-cols-2 gap-x-4 gap-y-1.5">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-300">What's next</div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-300">What&apos;s next</div>
               <div className="text-xs text-gray-600">
                 {se.nextStep ? NEXT_STEP_LABELS[se.nextStep] : '—'}
               </div>
@@ -1174,7 +1182,7 @@ function InviteAgentModal({ onClose }: { onClose: () => void }) {
         {!inviteLink ? (
           <form onSubmit={handleSubmit} className="px-6 py-5 space-y-4">
             <p className="text-sm text-gray-500">
-              Enter the agent's email and we'll send them a signup link. They'll create their account and land directly in onboarding.
+              Enter the agent&apos;s email and we&apos;ll send them a signup link. They&apos;ll create their account and land directly in onboarding.
             </p>
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-gray-600">Email address *</label>
@@ -1212,7 +1220,7 @@ function InviteAgentModal({ onClose }: { onClose: () => void }) {
               <CheckCheck size={18} className="mt-0.5 flex-shrink-0 text-green-600" />
               <div>
                 <p className="text-sm font-semibold text-green-800">Invite sent to {email}</p>
-                <p className="text-xs text-green-600 mt-0.5">They'll receive an email with a signup link. You can also copy the link below to share directly.</p>
+                <p className="text-xs text-green-600 mt-0.5">They&apos;ll receive an email with a signup link. You can also copy the link below to share directly.</p>
               </div>
             </div>
             <div>
@@ -1422,12 +1430,18 @@ const DEFAULT_CONFIG: SystemConfig = {
 
 function AdminSystemConfig() {
   const { config, updatedAt, loading, saving, saveConfig } = useSystemConfig();
-  const [form, setForm] = useState<SystemConfig>(DEFAULT_CONFIG);
+  const [form, setForm] = useState<SystemConfig>(config ?? DEFAULT_CONFIG);
   const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
+  // React 19 pattern for "reset local state when a prop changes": compare to
+  // previous value during render and call setState before returning JSX. This
+  // avoids the set-state-in-effect anti-pattern and is the documented fix.
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevConfig, setPrevConfig] = useState(config);
+  if (config !== prevConfig) {
+    setPrevConfig(config);
     if (config) setForm(config);
-  }, [config]);
+  }
 
   function setThreshold(stage: string, val: string) {
     const n = parseInt(val, 10);

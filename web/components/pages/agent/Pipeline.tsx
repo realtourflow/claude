@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, DealType } from "@/lib/data/mockDeals";
 import { MOCK_TASKS } from "@/lib/data/mockTasks";
-import { useDeals, apiDealToFrontend, type ApiDeal } from "@/hooks/useDeals";
+import { useDeals, type ApiDeal } from "@/hooks/useDeals";
 import { api } from "@/lib/api-client";
 import { ArrowRight, MapPin, Calendar, Clock, Zap, Plus, X } from 'lucide-react';
 
@@ -529,7 +529,7 @@ export default function Pipeline() {
       {/* Deals grouped by stage */}
       {error ? (
         <div className="rounded-xl bg-red-50 p-6 text-center shadow-sm">
-          <p className="text-sm text-red-700 font-semibold">We couldn't load your pipeline.</p>
+          <p className="text-sm text-red-700 font-semibold">We couldn&apos;t load your pipeline.</p>
           <p className="mt-1 text-xs text-red-500">{error}</p>
           <button
             onClick={refresh}

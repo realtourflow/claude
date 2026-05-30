@@ -26,6 +26,7 @@
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@tanstack/react-query": "^5.100.14",
     "clsx": "^2.1.1",
     "docusign-esign": "^9.0.0",
     "googleapis": "^172.0.0",
@@ -40,8 +41,11 @@
     "stripe": "^22.1.1",
     "tailwind-merge": "^3.6.0",
     "zod": "^4.4.3",
-    "zustand": "^5.0.13"
+    "zustand": "^5.0.13",
+    "@emnapi/core": "^1.10.0",
+    "@emnapi/runtime": "^1.10.0"
   },
+  "//": "@emnapi/core and @emnapi/runtime are pinned at the top level so npm ci succeeds on Linux CI. They are transitive deps of @tailwindcss/oxide-wasm32-wasi's bundleDependencies that npm prunes from the lockfile on macOS unless declared directly. Marking them in optionalDependencies didn't work — npm strips them on macOS anyway. Listing them as regular deps is the only configuration that keeps a cross-platform-compatible lockfile.",
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4",

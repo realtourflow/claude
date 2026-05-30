@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { Deal } from "@/lib/data/mockDeals";
 import { apiDealToFrontend, ApiDeal } from './useDeals';
@@ -26,27 +26,24 @@ function apiMyDealToFrontend(d: ApiMyDeal): MyDeal {
   };
 }
 
-export function useMyDeals() {
-  const [deals, setDeals] = useState<MyDeal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+export function useMyDeals(): {
+  deals: MyDeal[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+} {
+  const query = useQuery({
+    queryKey: ['my-deals'],
+    queryFn: async () => {
       const raw = await api.get<ApiMyDeal[]>('/me/deals');
-      setDeals(raw.map(apiMyDealToFrontend));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load deals');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return raw.map(apiMyDealToFrontend);
+    },
+  });
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  return { deals, loading, error, refresh: load };
+  return {
+    deals: query.data ?? [],
+    loading: query.isLoading,
+    error: query.error instanceof Error ? query.error.message : null,
+    refresh: () => { void query.refetch(); },
+  };
 }

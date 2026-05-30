@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useAuth0 } from '@auth0/auth0-react';
 import { api } from "@/lib/api-client";
@@ -21,17 +21,21 @@ type InviteDetails = {
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>();
   const { loginWithRedirect, isAuthenticated, isLoading: auth0Loading } = useAuth0();
-  const [invite, setInvite] = useState<InviteDetails | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!token) { setError('Invalid invite link'); setLoading(false); return; }
-    api.get<InviteDetails>(`/invites/${token}`)
-      .then(setInvite)
-      .catch(() => setError('Invite not found or has expired.'))
-      .finally(() => setLoading(false));
-  }, [token]);
+  const query = useQuery({
+    queryKey: ['invite', token],
+    queryFn: () => api.get<InviteDetails>(`/invites/${token}`),
+    enabled: Boolean(token),
+    retry: false,
+  });
+
+  const invite = query.data ?? null;
+  const loading = query.isLoading;
+  const error: string | null = !token
+    ? 'Invalid invite link'
+    : query.error instanceof Error
+      ? 'Invite not found or has expired.'
+      : null;
 
   function accept() {
     if (!token || !invite) return;
@@ -100,7 +104,7 @@ export default function InvitePage() {
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10">
               <RoleIcon size={26} className="text-white" />
             </div>
-            <h1 className="text-lg font-bold text-white">You're invited!</h1>
+            <h1 className="text-lg font-bold text-white">You&apos;re invited!</h1>
             <p className="mt-1 text-sm text-white/60">to join a real estate transaction</p>
           </div>
 
@@ -128,7 +132,7 @@ export default function InvitePage() {
             </div>
 
             <p className="text-xs text-gray-400 text-center leading-relaxed">
-              By accepting, you'll get access to your deal file, tasks, messages, and documents through the client portal.
+              By accepting, you&apos;ll get access to your deal file, tasks, messages, and documents through the client portal.
             </p>
 
             <button

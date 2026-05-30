@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 // ─── System Config ─────────────────────────────────────────────────────────────
@@ -25,43 +25,43 @@ export type SystemConfig = {
 type ConfigResponse = { config: SystemConfig; updated_at: string };
 
 export function useSystemConfig() {
-  const [config, setConfig] = useState<SystemConfig | null>(null);
-  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const queryKey = ['admin-config'];
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const query = useQuery({
+    queryKey,
+    queryFn: () => api.get<ConfigResponse>('/admin/config'),
+  });
+
+  const mutation = useMutation({
+    mutationFn: (cfg: SystemConfig) =>
+      api.put<ConfigResponse>('/admin/config', { config: cfg }),
+    onSuccess: (data) => {
+      queryClient.setQueryData<ConfigResponse>(queryKey, data);
+    },
+  });
+
+  const saveConfig = async (cfg: SystemConfig) => {
     try {
-      const data = await api.get<ConfigResponse>('/admin/config');
-      setConfig(data.config ?? {});
-      setUpdatedAt(data.updated_at);
+      await mutation.mutateAsync(cfg);
     } catch {
-      setError('Failed to load config');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const saveConfig = useCallback(async (cfg: SystemConfig) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const data = await api.put<ConfigResponse>('/admin/config', { config: cfg });
-      setConfig(data.config);
-      setUpdatedAt(data.updated_at);
-    } catch {
-      setError('Failed to save config');
       throw new Error('Failed to save config');
-    } finally {
-      setSaving(false);
     }
-  }, []);
+  };
 
-  return { config, updatedAt, loading, saving, error, saveConfig };
+  return {
+    config: query.data?.config ?? null,
+    updatedAt: query.data?.updated_at ?? null,
+    loading: query.isLoading,
+    saving: mutation.isPending,
+    error:
+      query.error instanceof Error
+        ? 'Failed to load config'
+        : mutation.error instanceof Error
+          ? 'Failed to save config'
+          : null,
+    saveConfig,
+  };
 }
 
 // ─── Promo Codes ───────────────────────────────────────────────────────────────
@@ -125,29 +125,25 @@ function apiToAuditEntry(raw: Record<string, unknown>): AuditEntry {
 }
 
 export function useAuditLog(eventTypeFilter?: string) {
-  const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
+  const query = useQuery({
+    queryKey: ['admin-audit-log', eventTypeFilter ?? ''],
+    queryFn: async () => {
       const qs = eventTypeFilter ? `?event_type=${encodeURIComponent(eventTypeFilter)}&limit=200` : '?limit=200';
       const data = await api.get<Record<string, unknown>>(`/admin/audit-log${qs}`);
       const resp = data as unknown as AuditLogResponse;
-      setEntries((resp.entries ?? []).map((e) => apiToAuditEntry(e as unknown as Record<string, unknown>)));
-      setTotal(resp.total ?? 0);
-    } catch {
-      setError('Failed to load audit log');
-    } finally {
-      setLoading(false);
-    }
-  }, [eventTypeFilter]);
+      return {
+        entries: (resp.entries ?? []).map((e) => apiToAuditEntry(e as unknown as Record<string, unknown>)),
+        total: resp.total ?? 0,
+      };
+    },
+  });
 
-  useEffect(() => { load(); }, [load]);
-
-  return { entries, total, loading, error };
+  return {
+    entries: query.data?.entries ?? [],
+    total: query.data?.total ?? 0,
+    loading: query.isLoading,
+    error: query.error instanceof Error ? 'Failed to load audit log' : null,
+  };
 }
 
 export type CreatePromoCodeInput = {
@@ -160,25 +156,18 @@ export type CreatePromoCodeInput = {
 };
 
 export function usePromoCodes() {
-  const [codes, setCodes] = useState<PromoCode[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const queryKey = ['admin-promo-codes'];
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
       const data = await api.get<Record<string, unknown>[]>('/admin/promo-codes');
-      setCodes(data.map(apiToPromoCode));
-    } catch {
-      setError('Failed to load promo codes');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return data.map(apiToPromoCode);
+    },
+  });
 
-  useEffect(() => { load(); }, [load]);
-
-  const createCode = useCallback(async (input: CreatePromoCodeInput) => {
+  const createCode = async (input: CreatePromoCodeInput) => {
     const raw = await api.post<Record<string, unknown>>('/admin/promo-codes', {
       code: input.code,
       discount_type: input.discountType,
@@ -188,18 +177,26 @@ export function usePromoCodes() {
       expires_at: input.expiresAt,
     });
     const created = apiToPromoCode(raw);
-    setCodes((prev) => [created, ...prev]);
+    queryClient.setQueryData<PromoCode[]>(queryKey, (prev) => [created, ...(prev ?? [])]);
     return created;
-  }, []);
+  };
 
-  const deleteCode = useCallback(async (id: string) => {
-    setCodes((prev) => prev.filter((c) => c.id !== id));
+  const deleteCode = async (id: string) => {
+    queryClient.setQueryData<PromoCode[]>(queryKey, (prev) =>
+      (prev ?? []).filter((c) => c.id !== id),
+    );
     try {
       await api.delete<void>(`/admin/promo-codes/${id}`);
     } catch {
       // 204 No Content causes a JSON parse rejection — expected
     }
-  }, []);
+  };
 
-  return { codes, loading, error, createCode, deleteCode };
+  return {
+    codes: query.data ?? [],
+    loading: query.isLoading,
+    error: query.error instanceof Error ? 'Failed to load promo codes' : null,
+    createCode,
+    deleteCode,
+  };
 }

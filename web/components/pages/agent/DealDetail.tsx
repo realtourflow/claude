@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
+import Image from "next/image";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Deal, DealStage, LoanMilestones } from "@/lib/data/mockDeals";
 import { useDeal, patchStage } from "@/hooks/useDeals";
@@ -60,7 +61,7 @@ import { useDealStageStore } from "@/lib/store/dealStageStore";
 import { useParticipants } from "@/hooks/useParticipants";
 import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
 import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
-import { useOffers, Offer } from "@/hooks/useOffers";
+import { useOffers } from "@/hooks/useOffers";
 import { useNetSheet, NetSheetLine, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
 import {
   VENDOR_CATEGORY_LABELS,
@@ -194,15 +195,6 @@ const TASK_STATUS_ICON: Record<string, React.ReactNode> = {
   overdue: <AlertCircle size={16} className="text-red-500" />,
   pending: <Circle size={16} className="text-gray-300" />,
   blocked: <AlertCircle size={16} className="text-orange-500" />,
-};
-
-const TASK_ASSIGNEE_COLORS: Record<string, string> = {
-  agent: 'bg-blue-100 text-blue-700',
-  buyer: 'bg-green-100 text-green-700',
-  seller: 'bg-purple-100 text-purple-700',
-  tc: 'bg-amber-100 text-amber-700',
-  admin: 'bg-red-100 text-red-700',
-  third_party: 'bg-gray-100 text-gray-600',
 };
 
 const FLAG_LABELS: Record<string, string> = {
@@ -513,7 +505,7 @@ function SellerOffersCard({ dealId }: { dealId: string }) {
       {offers.length === 0 && !showForm ? (
         <div className="px-5 py-6 text-center">
           <p className="text-sm text-gray-400">No offers added yet.</p>
-          <p className="text-xs text-gray-300 mt-0.5">Add offers here — they'll appear on the seller's portal.</p>
+          <p className="text-xs text-gray-300 mt-0.5">Add offers here — they&apos;ll appear on the seller&apos;s portal.</p>
         </div>
       ) : (
         <div className="divide-y divide-gray-50">
@@ -531,7 +523,7 @@ function SellerOffersCard({ dealId }: { dealId: string }) {
                     </div>
                   )}
                   {offer.agentNotes && (
-                    <p className="text-xs text-gray-500 italic mt-1.5 leading-relaxed">"{offer.agentNotes}"</p>
+                    <p className="text-xs text-gray-500 italic mt-1.5 leading-relaxed">&quot;{offer.agentNotes}&quot;</p>
                   )}
                 </div>
                 <button
@@ -569,10 +561,10 @@ function SellerBuyerStatusCard({ dealId }: { dealId: string }) {
     <div className="rounded-xl bg-white shadow-sm overflow-hidden">
       <div className="flex items-center gap-2 px-5 py-3.5 border-b border-gray-100">
         <CheckCircle2 size={14} className="text-brand-navy" />
-        <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Buyer's Progress</h3>
+        <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Buyer&apos;s Progress</h3>
       </div>
       <div className="px-5 py-4">
-        <p className="text-xs text-gray-400 mb-2">Set the buyer's current status — this shows up on the seller's portal.</p>
+        <p className="text-xs text-gray-400 mb-2">Set the buyer&apos;s current status — this shows up on the seller&apos;s portal.</p>
         <select
           value={current}
           onChange={(e) => setBuyerStatus(dealId, e.target.value)}
@@ -642,13 +634,20 @@ function SellerNetSheetCard({ deal }: { deal: import("@/lib/data/mockDeals").Dea
   const [saved, setSaved] = useState(false);
   const [showOptional, setShowOptional] = useState(false);
 
-  useEffect(() => {
-    if (!sheet) return;
-    setSalePrice(sheet.salePrice || deal.property.price);
-    setClosingDate(sheet.closingDate ?? deal.timeline.closingDate ?? '');
-    setAnnualTaxes(sheet.annualTaxes);
-    setLines(recalcLines(sheet.lines, sheet.salePrice || deal.property.price, sheet.annualTaxes, sheet.closingDate));
-  }, [sheet]);
+  // React 19 pattern for "hydrate local form state from a fetched record":
+  // compare to previous value during render and call setState before returning
+  // JSX. Avoids the set-state-in-effect anti-pattern.
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevSheet, setPrevSheet] = useState(sheet);
+  if (sheet !== prevSheet) {
+    setPrevSheet(sheet);
+    if (sheet) {
+      setSalePrice(sheet.salePrice || deal.property.price);
+      setClosingDate(sheet.closingDate ?? deal.timeline.closingDate ?? '');
+      setAnnualTaxes(sheet.annualTaxes);
+      setLines(recalcLines(sheet.lines, sheet.salePrice || deal.property.price, sheet.annualTaxes, sheet.closingDate));
+    }
+  }
 
   const liveLines = recalcLines(lines, salePrice, annualTaxes, closingDate || null);
   const netProceeds = calcNetProceeds(liveLines, salePrice);
@@ -873,18 +872,31 @@ function NetSheetLineRow({ line, salePrice, onChange }: {
 
 // ─── Confetti Celebration ────────────────────────────────────────────────────
 
+const CONFETTI_COLORS = ['#FFD700', '#00C49F', '#1a2d5a', '#FF6B6B', '#4ECDC4', '#A78BFA'];
+
+// Reads Date.now() once per mount via useState's lazy initializer — keeps
+// the parent render pure (react-hooks/purity rule).
+function ClosingDaysBadge({ closingDate }: { closingDate: string }) {
+  const [days] = useState(() =>
+    Math.max(0, Math.round((new Date(closingDate).getTime() - Date.now()) / 86_400_000))
+  );
+  return <span className="font-bold text-brand-navy">({days}d)</span>;
+}
+
 function ConfettiCelebration({ onDismiss }: { onDismiss: () => void }) {
-  const COLORS = ['#FFD700', '#00C49F', '#1a2d5a', '#FF6B6B', '#4ECDC4', '#A78BFA'];
-  const pieces = useMemo(() =>
+  // useState lazy initializer runs ONCE per mount; React 19's purity rule
+  // disallows Math.random() inside useMemo's compute fn since useMemo can
+  // recompute. The lazy initializer pattern is the canonical fix.
+  const [pieces] = useState(() =>
     Array.from({ length: 60 }, (_, i) => ({
       id: i,
-      color: COLORS[i % COLORS.length],
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
       left: `${Math.random() * 100}%`,
       delay: `${Math.random() * 1.5}s`,
       duration: `${2.5 + Math.random() * 2}s`,
       size: `${6 + Math.random() * 8}px`,
       round: Math.random() > 0.5,
-    })), []
+    }))
   );
 
   useEffect(() => {
@@ -930,7 +942,7 @@ function ConfettiCelebration({ onDismiss }: { onDismiss: () => void }) {
             onClick={onDismiss}
             className="mt-6 rounded-xl bg-brand-navy px-8 py-3 text-sm font-bold text-white hover:bg-brand-navy/90 transition-all active:scale-[0.98]"
           >
-            Let's go! 🚀
+            Let&apos;s go! 🚀
           </button>
         </div>
       </div>
@@ -949,7 +961,6 @@ function LoanMilestonesCard({ deal, onRefresh }: { deal: Deal; onRefresh?: () =>
   const [linking, setLinking] = useState(false);
   const [linkError, setLinkError] = useState('');
 
-  const lender = deal.vendors?.lender;
   const isArive = milestones?.source === 'arive';
   const isLinked = deal.flags.includes('mountain_mortgage');
 
@@ -1244,7 +1255,7 @@ function AgentPropertyRow({ prop, onRemove, onUpdateAgentNote }: { prop: Tracked
         {/* Thumbnail */}
         <div className="h-14 w-14 flex-shrink-0 rounded-lg overflow-hidden bg-gray-200 flex items-center justify-center">
           {prop.thumbnailUrl && !imgErr ? (
-            <img src={prop.thumbnailUrl} alt="" className="h-full w-full object-cover" onError={() => setImgErr(true)} />
+            <Image src={prop.thumbnailUrl} alt="" width={56} height={56} unoptimized className="h-full w-full object-cover" onError={() => setImgErr(true)} />
           ) : (
             <Home size={20} className="text-gray-400" />
           )}
@@ -1268,7 +1279,7 @@ function AgentPropertyRow({ prop, onRemove, onUpdateAgentNote }: { prop: Tracked
 
           {/* Agent's push note */}
           {prop.agentNote && (
-            <p className="mt-1 text-[10px] text-amber-700 italic">"{prop.agentNote}"</p>
+            <p className="mt-1 text-[10px] text-amber-700 italic">&quot;{prop.agentNote}&quot;</p>
           )}
 
           {/* Buyer's thoughts */}
@@ -1276,7 +1287,7 @@ function AgentPropertyRow({ prop, onRemove, onUpdateAgentNote }: { prop: Tracked
             <div className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-purple-50 border border-purple-100 px-2 py-1.5">
               <MessageSquare size={10} className="text-purple-400 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-[9px] font-bold text-purple-400 uppercase tracking-wide mb-0.5">Buyer's thoughts</p>
+                <p className="text-[9px] font-bold text-purple-400 uppercase tracking-wide mb-0.5">Buyer&apos;s thoughts</p>
                 <p className="text-[11px] text-purple-700 leading-snug">{prop.buyerNote}</p>
               </div>
             </div>
@@ -1465,7 +1476,7 @@ function PropertyTrackingCard({ deal }: { deal: Deal }) {
         <div className="flex flex-col items-center justify-center py-8 text-center">
           <Home size={28} className="text-gray-200 mb-2" />
           <p className="text-sm font-medium text-gray-400">No properties tracked yet</p>
-          <p className="text-xs text-gray-300 mt-0.5">Push a listing to start your buyer's property list</p>
+          <p className="text-xs text-gray-300 mt-0.5">Push a listing to start your buyer&apos;s property list</p>
         </div>
       )}
     </div>
@@ -1967,7 +1978,177 @@ const STATUS_SORT_ORDER: Record<string, number> = {
   overdue: 0, in_progress: 1, blocked: 2, pending: 3, completed: 4,
 };
 
-function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Task[]; onTasksChange: () => void }) {
+// Module-scope constants — moved out of TasksTab to satisfy
+// react-hooks/static-components. Constant, no closures needed.
+const STATUS_PILL: Record<string, string> = {
+  completed:   'bg-green-100 text-green-700',
+  in_progress: 'bg-blue-100 text-blue-700',
+  overdue:     'bg-red-100 text-red-700',
+  pending:     'bg-gray-100 text-gray-500',
+  blocked:     'bg-orange-100 text-orange-700',
+};
+
+const ASSIGNEE_OPTIONS: { value: Task['assignedTo']; label: string; color: string }[] = [
+  { value: 'agent',       label: 'Agent (Me)',      color: 'text-blue-700' },
+  { value: 'buyer',       label: 'Buyer (Client)',  color: 'text-green-700' },
+  { value: 'seller',      label: 'Seller (Client)', color: 'text-purple-700' },
+  { value: 'tc',          label: 'TC',              color: 'text-amber-700' },
+  { value: 'third_party', label: 'Third Party',     color: 'text-gray-600' },
+];
+
+const ASSIGNEE_LABEL: Record<string, string> = {
+  agent: 'Agent', buyer: 'Buyer', seller: 'Seller', tc: 'TC', third_party: 'Third Party', admin: 'Admin',
+};
+
+// All the state + callbacks TaskItem and OwnerSection used to close over.
+// Now passed as a single `ctx` prop so the components can live at module
+// scope and satisfy react-hooks/static-components.
+type TaskItemCtx = {
+  completedIds: Set<string>;
+  toggleComplete: (id: string) => void;
+  effectiveStatus: (t: Task) => string;
+  effectiveAssignee: (t: Task) => string;
+  assigningTaskId: string | null;
+  setAssigningTaskId: (id: string | null) => void;
+  canAssign: boolean;
+  reassign: (id: string, assignee: Task['assignedTo']) => void;
+};
+
+function TaskItem({ task, ctx }: { task: Task; ctx: TaskItemCtx }) {
+  const { completedIds, toggleComplete, effectiveStatus, effectiveAssignee, assigningTaskId, setAssigningTaskId, canAssign, reassign } = ctx;
+  const isDone = completedIds.has(task.id);
+  const status = effectiveStatus(task);
+  const assignee = effectiveAssignee(task);
+  const isAssigning = assigningTaskId === task.id;
+
+  return (
+    <div className={`flex items-start gap-3 rounded-lg px-3 py-3 transition-colors group ${isDone ? 'opacity-60' : 'hover:bg-brand-bg'}`}>
+      <button
+        onClick={() => toggleComplete(task.id)}
+        className={`mt-0.5 flex-shrink-0 rounded-full transition-all ${
+          isDone ? 'text-green-500 hover:text-gray-300' : 'text-gray-300 hover:text-green-400'
+        }`}
+        title={isDone ? 'Mark incomplete' : 'Mark complete'}
+      >
+        {isDone
+          ? <CheckCircle2 size={16} className="text-green-500" />
+          : TASK_STATUS_ICON[status]}
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start gap-2 flex-wrap">
+          <span className={`text-sm font-medium transition-colors ${isDone ? 'line-through text-gray-400' : 'text-brand-navy'}`}>
+            {task.title}
+          </span>
+          {task.source === 'ai' && !isDone && (
+            <span className="flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-600">
+              <Bot size={10} /> AI
+            </span>
+          )}
+        </div>
+        {task.description && !isDone && (
+          <p className="mt-0.5 text-xs text-gray-400 leading-relaxed">{task.description}</p>
+        )}
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_PILL[status]}`}>
+            {status.replace('_', ' ')}
+          </span>
+          {task.priority === 'high' && !isDone && (
+            <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-500 uppercase">High Priority</span>
+          )}
+          {task.dueDate && !isDone && (
+            <span className="flex items-center gap-0.5 text-[11px] text-gray-400">
+              <Calendar size={10} /> {task.dueDate}
+            </span>
+          )}
+
+          {/* Assign button — only for agent/admin */}
+          {canAssign && !isDone && (
+            <div className="relative ml-auto">
+              <button
+                onClick={() => setAssigningTaskId(isAssigning ? null : task.id)}
+                className={[
+                  'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors',
+                  isAssigning
+                    ? 'border-brand-navy bg-brand-navy text-white'
+                    : 'border-gray-200 bg-white text-gray-500 hover:border-brand-navy hover:text-brand-navy',
+                ].join(' ')}
+              >
+                <Users size={10} />
+                {ASSIGNEE_LABEL[assignee] ?? assignee}
+                <ChevronDown size={9} />
+              </button>
+
+              {isAssigning && (
+                <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-xl border border-gray-100 bg-white shadow-xl overflow-hidden">
+                  <div className="px-3 py-2 border-b border-gray-50">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Assign to</p>
+                  </div>
+                  {ASSIGNEE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => reassign(task.id, opt.value)}
+                      className={[
+                        'flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs transition-colors hover:bg-brand-bg',
+                        assignee === opt.value ? 'font-bold bg-brand-bg' : 'font-medium',
+                        opt.color,
+                      ].join(' ')}
+                    >
+                      {assignee === opt.value && <CheckCircle2 size={11} className="flex-shrink-0" />}
+                      {assignee !== opt.value && <span className="w-[11px]" />}
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OwnerSection({
+  label,
+  sublabel,
+  icon: Icon,
+  tasks,
+  ctx,
+}: {
+  label: string;
+  sublabel: string;
+  icon: React.ElementType;
+  tasks: Task[];
+  ctx: TaskItemCtx;
+}) {
+  const doneCount = tasks.filter((t) => ctx.completedIds.has(t.id)).length;
+  const total = tasks.length;
+  if (total === 0) return null;
+  const allSectionDone = doneCount === total;
+  return (
+    <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+      {/* Section header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-brand-navy border-b border-brand-navy">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10">
+          <Icon size={14} className="text-brand-gold" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold leading-none text-white">{label}</div>
+          <div className="text-[11px] mt-0.5 text-white/50">{sublabel}</div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {allSectionDone && <CheckCircle2 size={13} className="text-green-400" />}
+          <span className="text-xs font-bold text-brand-gold">{doneCount}/{total}</span>
+        </div>
+      </div>
+      <div className="divide-y divide-gray-50">
+        {tasks.map((t) => <TaskItem key={t.id} task={t} ctx={ctx} />)}
+      </div>
+    </div>
+  );
+}
+
+function TasksTab({ deal, tasks }: { deal: Deal; tasks: Task[]; onTasksChange: () => void }) {
   const { can } = usePermission();
   const canAssign = can(PERMISSIONS.TASK_ASSIGN_ANY);
 
@@ -2013,156 +2194,16 @@ function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Task[]; o
   const clientTasks  = tasks.filter((t) => effectiveAssignee(t) === 'buyer' || effectiveAssignee(t) === 'seller').sort(sortByStatus);
   const supportTasks = tasks.filter((t) => effectiveAssignee(t) === 'tc' || effectiveAssignee(t) === 'third_party' || effectiveAssignee(t) === 'admin').sort(sortByStatus);
 
-  const STATUS_PILL: Record<string, string> = {
-    completed:   'bg-green-100 text-green-700',
-    in_progress: 'bg-blue-100 text-blue-700',
-    overdue:     'bg-red-100 text-red-700',
-    pending:     'bg-gray-100 text-gray-500',
-    blocked:     'bg-orange-100 text-orange-700',
+  const ctx: TaskItemCtx = {
+    completedIds,
+    toggleComplete,
+    effectiveStatus,
+    effectiveAssignee,
+    assigningTaskId,
+    setAssigningTaskId,
+    canAssign,
+    reassign,
   };
-
-  const ASSIGNEE_OPTIONS: { value: Task['assignedTo']; label: string; color: string }[] = [
-    { value: 'agent',       label: 'Agent (Me)',      color: 'text-blue-700' },
-    { value: 'buyer',       label: 'Buyer (Client)',  color: 'text-green-700' },
-    { value: 'seller',      label: 'Seller (Client)', color: 'text-purple-700' },
-    { value: 'tc',          label: 'TC',              color: 'text-amber-700' },
-    { value: 'third_party', label: 'Third Party',     color: 'text-gray-600' },
-  ];
-
-  const ASSIGNEE_LABEL: Record<string, string> = {
-    agent: 'Agent', buyer: 'Buyer', seller: 'Seller', tc: 'TC', third_party: 'Third Party', admin: 'Admin',
-  };
-
-  function TaskItem({ task }: { task: Task }) {
-    const isDone = completedIds.has(task.id);
-    const status = effectiveStatus(task);
-    const assignee = effectiveAssignee(task);
-    const isAssigning = assigningTaskId === task.id;
-
-    return (
-      <div className={`flex items-start gap-3 rounded-lg px-3 py-3 transition-colors group ${isDone ? 'opacity-60' : 'hover:bg-brand-bg'}`}>
-        <button
-          onClick={() => toggleComplete(task.id)}
-          className={`mt-0.5 flex-shrink-0 rounded-full transition-all ${
-            isDone ? 'text-green-500 hover:text-gray-300' : 'text-gray-300 hover:text-green-400'
-          }`}
-          title={isDone ? 'Mark incomplete' : 'Mark complete'}
-        >
-          {isDone
-            ? <CheckCircle2 size={16} className="text-green-500" />
-            : TASK_STATUS_ICON[status]}
-        </button>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start gap-2 flex-wrap">
-            <span className={`text-sm font-medium transition-colors ${isDone ? 'line-through text-gray-400' : 'text-brand-navy'}`}>
-              {task.title}
-            </span>
-            {task.source === 'ai' && !isDone && (
-              <span className="flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-600">
-                <Bot size={10} /> AI
-              </span>
-            )}
-          </div>
-          {task.description && !isDone && (
-            <p className="mt-0.5 text-xs text-gray-400 leading-relaxed">{task.description}</p>
-          )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_PILL[status]}`}>
-              {status.replace('_', ' ')}
-            </span>
-            {task.priority === 'high' && !isDone && (
-              <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-500 uppercase">High Priority</span>
-            )}
-            {task.dueDate && !isDone && (
-              <span className="flex items-center gap-0.5 text-[11px] text-gray-400">
-                <Calendar size={10} /> {task.dueDate}
-              </span>
-            )}
-
-            {/* Assign button — only for agent/admin */}
-            {canAssign && !isDone && (
-              <div className="relative ml-auto">
-                <button
-                  onClick={() => setAssigningTaskId(isAssigning ? null : task.id)}
-                  className={[
-                    'flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold transition-colors',
-                    isAssigning
-                      ? 'border-brand-navy bg-brand-navy text-white'
-                      : 'border-gray-200 bg-white text-gray-500 hover:border-brand-navy hover:text-brand-navy',
-                  ].join(' ')}
-                >
-                  <Users size={10} />
-                  {ASSIGNEE_LABEL[assignee] ?? assignee}
-                  <ChevronDown size={9} />
-                </button>
-
-                {isAssigning && (
-                  <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-xl border border-gray-100 bg-white shadow-xl overflow-hidden">
-                    <div className="px-3 py-2 border-b border-gray-50">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Assign to</p>
-                    </div>
-                    {ASSIGNEE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        onClick={() => reassign(task.id, opt.value)}
-                        className={[
-                          'flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs transition-colors hover:bg-brand-bg',
-                          assignee === opt.value ? 'font-bold bg-brand-bg' : 'font-medium',
-                          opt.color,
-                        ].join(' ')}
-                      >
-                        {assignee === opt.value && <CheckCircle2 size={11} className="flex-shrink-0" />}
-                        {assignee !== opt.value && <span className="w-[11px]" />}
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function OwnerSection({
-    label,
-    sublabel,
-    icon: Icon,
-    tasks,
-  }: {
-    label: string;
-    sublabel: string;
-    icon: React.ElementType;
-    tasks: Task[];
-  }) {
-    const doneCount = tasks.filter((t) => completedIds.has(t.id)).length;
-    const total = tasks.length;
-    if (total === 0) return null;
-    const allSectionDone = doneCount === total;
-    return (
-      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-        {/* Section header */}
-        <div className="flex items-center gap-3 px-4 py-3 bg-brand-navy border-b border-brand-navy">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10">
-            <Icon size={14} className="text-brand-gold" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-bold leading-none text-white">{label}</div>
-            <div className="text-[11px] mt-0.5 text-white/50">{sublabel}</div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {allSectionDone && <CheckCircle2 size={13} className="text-green-400" />}
-            <span className="text-xs font-bold text-brand-gold">{doneCount}/{total}</span>
-          </div>
-        </div>
-        <div className="divide-y divide-gray-50">
-          {tasks.map((t) => <TaskItem key={t.id} task={t} />)}
-        </div>
-      </div>
-    );
-  }
 
   const allDone = tasks.length > 0 && completedIds.size === tasks.length;
 
@@ -2181,18 +2222,21 @@ function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Task[]; o
             sublabel="Action required from you"
             icon={CheckSquare}
             tasks={agentTasks}
+            ctx={ctx}
           />
           <OwnerSection
             label="Client's Tasks"
             sublabel={`${deal.clientName} needs to complete these`}
             icon={Users}
             tasks={clientTasks}
+            ctx={ctx}
           />
           <OwnerSection
             label="TC / Third Party"
             sublabel="Handled by your team or vendors"
             icon={Building2}
             tasks={supportTasks}
+            ctx={ctx}
           />
         </>
       )}
@@ -2234,56 +2278,54 @@ function MessagesTab({ deal }: { deal: Deal }) {
     }
   }
 
-  function Thread() {
-    if (loading && messages.length === 0) {
-      return (
-        <div className="flex items-center justify-center py-10">
-          <Loader2 size={16} className="animate-spin text-gray-300" />
-        </div>
-      );
-    }
-    return (
-      <div className="p-4 space-y-4">
-        {messages.length === 0 && (
-          <p className="py-8 text-center text-sm text-gray-400">No messages yet.</p>
-        )}
-        {messages.map((msg) => {
-          const isMe = msg.senderId === activeUser?.id;
-          const avatarColor = AVATAR_COLOR[msg.senderRole] ?? 'bg-gray-400';
-          return (
-            <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-              <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white text-xs font-bold ${avatarColor}`}>
-                {msg.senderName.charAt(0)}
+  // Inlined Thread content (was previously a nested function component that
+  // violated react-hooks/static-components — closed over loading/messages/
+  // activeUser/channel)
+  const threadContent = (loading && messages.length === 0) ? (
+    <div className="flex items-center justify-center py-10">
+      <Loader2 size={16} className="animate-spin text-gray-300" />
+    </div>
+  ) : (
+    <div className="p-4 space-y-4">
+      {messages.length === 0 && (
+        <p className="py-8 text-center text-sm text-gray-400">No messages yet.</p>
+      )}
+      {messages.map((msg) => {
+        const isMe = msg.senderId === activeUser?.id;
+        const avatarColor = AVATAR_COLOR[msg.senderRole] ?? 'bg-gray-400';
+        return (
+          <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+            <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-white text-xs font-bold ${avatarColor}`}>
+              {msg.senderName.charAt(0)}
+            </div>
+            <div className={`flex-1 max-w-[80%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
+              <div className={`flex items-center gap-2 text-xs text-gray-400 ${isMe ? 'flex-row-reverse' : ''}`}>
+                <span className="font-medium text-gray-600">{msg.senderName}</span>
+                {msg.senderRole === 'tc' && (
+                  <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">TC</span>
+                )}
+                {msg.isAiDraft && (
+                  <span className="flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-600">
+                    <Bot size={9} /> AI draft
+                  </span>
+                )}
+                <span>{formatTimestamp(msg.timestamp)}</span>
               </div>
-              <div className={`flex-1 max-w-[80%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-1`}>
-                <div className={`flex items-center gap-2 text-xs text-gray-400 ${isMe ? 'flex-row-reverse' : ''}`}>
-                  <span className="font-medium text-gray-600">{msg.senderName}</span>
-                  {msg.senderRole === 'tc' && (
-                    <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">TC</span>
-                  )}
-                  {msg.isAiDraft && (
-                    <span className="flex items-center gap-0.5 rounded-full bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-600">
-                      <Bot size={9} /> AI draft
-                    </span>
-                  )}
-                  <span>{formatTimestamp(msg.timestamp)}</span>
-                </div>
-                <div className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
-                  isMe
-                    ? 'bg-brand-navy text-white rounded-tr-sm'
-                    : channel === 'internal'
-                    ? 'bg-amber-50 text-gray-800 rounded-tl-sm border border-amber-100'
-                    : 'bg-gray-100 text-gray-800 rounded-tl-sm'
-                }`}>
-                  {msg.content}
-                </div>
+              <div className={`rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                isMe
+                  ? 'bg-brand-navy text-white rounded-tr-sm'
+                  : channel === 'internal'
+                  ? 'bg-amber-50 text-gray-800 rounded-tl-sm border border-amber-100'
+                  : 'bg-gray-100 text-gray-800 rounded-tl-sm'
+              }`}>
+                {msg.content}
               </div>
             </div>
-          );
-        })}
-      </div>
-    );
-  }
+          </div>
+        );
+      })}
+    </div>
+  );
 
   return (
     <div className="rounded-xl bg-white shadow-sm overflow-hidden">
@@ -2331,7 +2373,7 @@ function MessagesTab({ deal }: { deal: Deal }) {
         </div>
       )}
 
-      <Thread />
+      {threadContent}
 
       {/* Compose area */}
       <div className="border-t px-4 py-3">
@@ -2369,22 +2411,6 @@ const STAGE_GATE: Partial<Record<DealStage, { name: string; note: string }>> = {
   active_search: { name: 'Buyer Agency Agreement', note: 'Required before showing properties' },
   under_contract: { name: 'Purchase Agreement', note: 'Must be signed to enter contract' },
   closing: { name: 'Wire / Cashier\'s Check Confirmation', note: 'Confirm funds before closing' },
-};
-
-const DOC_STATUS_BADGE: Record<string, string> = {
-  signed: 'bg-green-100 text-green-700',
-  pending_review: 'bg-amber-100 text-amber-700',
-  pending_signature: 'bg-blue-100 text-blue-700',
-  requested: 'bg-gray-100 text-gray-600',
-  missing: 'bg-red-50 text-red-500',
-};
-
-const DOC_STATUS_LABELS: Record<string, string> = {
-  signed: 'Signed',
-  pending_review: 'Pending Review',
-  pending_signature: 'Awaiting Signature',
-  requested: 'Requested',
-  missing: 'Missing',
 };
 
 // ── Upload Modal ──────────────────────────────────────────────────────────────
@@ -2579,7 +2605,8 @@ function SendForSignatureModal({
   function toggle(id: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   }
@@ -2594,8 +2621,8 @@ function SendForSignatureModal({
     try {
       await sendForSignature(dealId, doc.id, signers);
       onSent();
-    } catch (e: any) {
-      setErr(e?.message ?? 'Failed to send — check DocuSign configuration.');
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to send — check DocuSign configuration.');
     }
     setSending(false);
   }
@@ -3075,7 +3102,7 @@ function PreferredCategoryRow({ category, vendors }: { category: VendorCategory;
                     <span className="text-sm font-semibold text-brand-navy">{v.company}</span>
                   </div>
                   {v.contactName && <p className="text-xs text-gray-400 mt-0.5">{v.contactName}</p>}
-                  {v.notes && <p className="text-xs text-gray-500 mt-1 italic leading-relaxed">"{v.notes}"</p>}
+                  {v.notes && <p className="text-xs text-gray-500 mt-1 italic leading-relaxed">&quot;{v.notes}&quot;</p>}
                 </div>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -3194,7 +3221,7 @@ function VendorsTab({ deal }: { deal: Deal }) {
               subtitle={localVendors.lender.loanOfficer ?? localVendors.lender.contactName}
               phone={localVendors.lender.phone}
               email={localVendors.lender.email}
-              portalUrl={(localVendors.lender as any).portalUrl}
+              portalUrl={(localVendors.lender as { portalUrl?: string }).portalUrl}
               badge={
                 localVendors.lender.isAriveIntegrated ? (
                   <span className="flex items-center gap-0.5 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700">
@@ -3324,7 +3351,7 @@ function VendorsTab({ deal }: { deal: Deal }) {
               </span>
             </div>
             <p className="px-5 py-2.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100">
-              Sarah's trusted vendor directory — shared with clients on their portal.
+              Sarah&apos;s trusted vendor directory — shared with clients on their portal.
             </p>
             {availableCategories.map((cat) => (
               <PreferredCategoryRow key={cat} category={cat} vendors={preferredVendors.filter((v) => v.category === cat)} />
@@ -3574,7 +3601,7 @@ function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: 
                   <p className="text-sm text-gray-700 leading-relaxed">{msg}</p>
                 </div>
               )}
-              <p className="mt-1.5 text-[10px] text-gray-400">Sent to client's portal — they'll see it immediately.</p>
+              <p className="mt-1.5 text-[10px] text-gray-400">Sent to client&apos;s portal — they&apos;ll see it immediately.</p>
             </div>
           )}
         </div>
@@ -3596,7 +3623,7 @@ function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: 
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-amber-600">Complete these tasks or use "Force Advance" to override.</p>
+            <p className="text-[10px] text-amber-600">Complete these tasks or use &quot;Force Advance&quot; to override.</p>
           </div>
         )}
 
@@ -3790,10 +3817,7 @@ function DealHeader({ deal, onFlagChange }: { deal: Deal; onFlagChange?: (flags:
         <div className="mt-2 flex items-center gap-1 text-xs text-gray-400">
           <Calendar size={11} />
           <span>Closing {deal.timeline.closingDate}</span>
-          {(() => {
-            const days = Math.max(0, Math.round((new Date(deal.timeline.closingDate).getTime() - Date.now()) / 86_400_000));
-            return <span className="font-bold text-brand-navy">({days}d)</span>;
-          })()}
+          <ClosingDaysBadge closingDate={deal.timeline.closingDate} />
           <span className="mx-1">·</span>
           <Clock size={11} />
           <span>{deal.timeline.daysInStage} days in current stage</span>

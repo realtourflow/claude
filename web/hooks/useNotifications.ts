@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type AppNotification = {
@@ -49,25 +49,22 @@ function fromApi(n: ApiNotification): AppNotification {
 }
 
 export function useNotifications() {
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const queryClient = useQueryClient();
+  const queryKey = ['notifications'];
 
-  const load = useCallback(async () => {
-    try {
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
       const raw = await api.get<ApiNotification[]>('/notifications');
-      setNotifications(raw.map(fromApi));
-    } catch {
-      // Silently fail — bell stays empty rather than crashing
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 30_000);
-    return () => clearInterval(id);
-  }, [load]);
+      return raw.map(fromApi);
+    },
+    refetchInterval: 30_000, // Poll every 30s — replaces manual setInterval
+  });
 
   async function markRead(id: string) {
-    setNotifications((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+    queryClient.setQueryData<AppNotification[]>(queryKey, (prev) =>
+      (prev ?? []).map((n) => (n.id === id ? { ...n, read: true } : n)),
+    );
     try {
       await api.patch(`/notifications/${id}/read`, {});
     } catch {
@@ -76,11 +73,18 @@ export function useNotifications() {
   }
 
   async function markAllRead() {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    queryClient.setQueryData<AppNotification[]>(queryKey, (prev) =>
+      (prev ?? []).map((n) => ({ ...n, read: true })),
+    );
     try {
       await api.post('/notifications/read-all', {});
     } catch {}
   }
 
-  return { notifications, markRead, markAllRead, refresh: load };
+  return {
+    notifications: query.data ?? [],
+    markRead,
+    markAllRead,
+    refresh: () => { void query.refetch(); },
+  };
 }

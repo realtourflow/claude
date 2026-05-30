@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type NetSheetLine = {
@@ -119,28 +119,25 @@ export function calcNetProceeds(lines: NetSheetLine[], salePrice: number): numbe
   return salePrice - deductions;
 }
 
+type NetSheetResult = { sheet: NetSheet | null; notReady: boolean };
+
 export function useNetSheet(dealId: string | undefined) {
-  const [sheet, setSheet] = useState<NetSheet | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notReady, setNotReady] = useState(false);
+  const queryClient = useQueryClient();
+  const queryKey = ['net-sheet', dealId ?? ''];
 
-  const load = useCallback(async () => {
-    if (!dealId) { setLoading(false); return; }
-    try {
-      setLoading(true);
-      setNotReady(false);
-      const raw = await api.get<ApiNetSheet>(`/deals/${dealId}/net-sheet`);
-      setSheet(fromApi(raw));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '';
-      if (msg.includes('403')) setNotReady(true);
-      setSheet(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId]);
-
-  useEffect(() => { load(); }, [load]);
+  const query = useQuery<NetSheetResult>({
+    queryKey,
+    queryFn: async () => {
+      try {
+        const raw = await api.get<ApiNetSheet>(`/deals/${dealId}/net-sheet`);
+        return { sheet: fromApi(raw), notReady: false };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '';
+        return { sheet: null, notReady: msg.includes('403') };
+      }
+    },
+    enabled: Boolean(dealId),
+  });
 
   async function saveSheet(s: NetSheet) {
     if (!dealId) return;
@@ -150,14 +147,21 @@ export function useNetSheet(dealId: string | undefined) {
       annual_taxes: s.annualTaxes,
       lines: s.lines.map(lineToApi),
     });
-    setSheet(fromApi(raw));
+    queryClient.setQueryData<NetSheetResult>(queryKey, { sheet: fromApi(raw), notReady: false });
   }
 
   async function markReady(ready: boolean) {
     if (!dealId) return;
     const raw = await api.post<ApiNetSheet>(`/deals/${dealId}/net-sheet/ready`, { ready });
-    setSheet(fromApi(raw));
+    queryClient.setQueryData<NetSheetResult>(queryKey, { sheet: fromApi(raw), notReady: false });
   }
 
-  return { sheet, loading, notReady, refresh: load, saveSheet, markReady };
+  return {
+    sheet: query.data?.sheet ?? null,
+    loading: query.isLoading,
+    notReady: query.data?.notReady ?? false,
+    refresh: () => { void query.refetch(); },
+    saveSheet,
+    markReady,
+  };
 }

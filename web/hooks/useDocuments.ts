@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type Document = {
@@ -50,30 +50,27 @@ function apiDocToFrontend(d: ApiDocument): Document {
   };
 }
 
-export function useDocuments(dealId: string) {
-  const [docs, setDocs] = useState<Document[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchDocs = useCallback(async () => {
-    if (!dealId) return;
-    try {
+export function useDocuments(dealId: string): {
+  docs: Document[];
+  loading: boolean;
+  error: string | null;
+  refresh: () => void;
+} {
+  const query = useQuery({
+    queryKey: ['documents', dealId],
+    queryFn: async () => {
       const data = await api.get<ApiDocument[]>(`/deals/${dealId}/documents`);
-      setDocs(data.map(apiDocToFrontend));
-      setError(null);
-    } catch {
-      setError('Failed to load documents');
-    } finally {
-      setLoading(false);
-    }
-  }, [dealId]);
+      return data.map(apiDocToFrontend);
+    },
+    enabled: Boolean(dealId),
+  });
 
-  useEffect(() => {
-    setLoading(true);
-    fetchDocs();
-  }, [fetchDocs]);
-
-  return { docs, loading, error, refresh: fetchDocs };
+  return {
+    docs: query.data ?? [],
+    loading: query.isLoading,
+    error: query.error instanceof Error ? 'Failed to load documents' : null,
+    refresh: () => { void query.refetch(); },
+  };
 }
 
 export async function requestUploadUrl(

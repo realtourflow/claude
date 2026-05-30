@@ -141,7 +141,7 @@ export default function FastPassDetail() {
         <div className="mx-auto max-w-lg space-y-5">
           <div className="text-center">
             <div className="text-2xl mb-1">💚</div>
-            <h2 className="text-lg font-black text-brand-navy">You don't pay unless it works.</h2>
+            <h2 className="text-lg font-black text-brand-navy">You don&apos;t pay unless it works.</h2>
             <p className="mt-1 text-sm text-gray-500">
               Three ways to pay — and a refund policy with no fine print.
             </p>

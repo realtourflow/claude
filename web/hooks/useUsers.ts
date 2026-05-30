@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type AppUser = {
@@ -36,36 +36,40 @@ function fromApi(u: ApiUser): AppUser {
 }
 
 export function useUsers() {
-  const [users, setUsers] = useState<AppUser[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const queryKey = ['users'];
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
       const raw = await api.get<ApiUser[]>('/users');
-      setUsers(raw.map(fromApi));
-    } catch {
-      setUsers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+      return raw.map(fromApi);
+    },
+  });
 
   async function deactivateUser(userId: string): Promise<void> {
     await api.patch(`/users/${userId}/deactivate`, {});
-    setUsers((prev) => prev.map((u) =>
-      u.id === userId ? { ...u, deactivatedAt: new Date().toISOString() } : u
-    ));
+    queryClient.setQueryData<AppUser[]>(queryKey, (prev) =>
+      (prev ?? []).map((u) =>
+        u.id === userId ? { ...u, deactivatedAt: new Date().toISOString() } : u,
+      ),
+    );
   }
 
   async function activateUser(userId: string): Promise<void> {
     await api.patch(`/users/${userId}/activate`, {});
-    setUsers((prev) => prev.map((u) =>
-      u.id === userId ? { ...u, deactivatedAt: null } : u
-    ));
+    queryClient.setQueryData<AppUser[]>(queryKey, (prev) =>
+      (prev ?? []).map((u) =>
+        u.id === userId ? { ...u, deactivatedAt: null } : u,
+      ),
+    );
   }
 
-  return { users, loading, refresh: load, deactivateUser, activateUser };
+  return {
+    users: query.data ?? [],
+    loading: query.isLoading,
+    refresh: () => { void query.refetch(); },
+    deactivateUser,
+    activateUser,
+  };
 }

@@ -51,9 +51,9 @@ export default function PitchPage({ onSelect }: Props) {
           </div>
           <div className="mt-2 text-lg font-bold text-green-900">Fast Pass</div>
           <p className="mt-1 text-sm text-green-800/70">
-            Most buyers spend 30+ hours chasing vendors and paperwork. Fast Pass buyers don't.
+            Most buyers spend 30+ hours chasing vendors and paperwork. Fast Pass buyers don&apos;t.
           </p>
-          <p className="mt-3 text-xs font-semibold text-green-700">See what's included →</p>
+          <p className="mt-3 text-xs font-semibold text-green-700">See what&apos;s included →</p>
         </button>
 
         {/* Other lender */}
@@ -69,7 +69,7 @@ export default function PitchPage({ onSelect }: Props) {
           </div>
           <div className="mt-2 text-lg font-bold text-gray-700">I have my own lender</div>
           <p className="mt-1 text-sm text-gray-500">
-            No problem — we'll coordinate directly with your lender throughout the process.
+            No problem — we&apos;ll coordinate directly with your lender throughout the process.
           </p>
         </button>
       </div>

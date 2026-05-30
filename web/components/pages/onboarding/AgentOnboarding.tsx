@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import {
   ChevronRight, Check, CheckCircle2, ArrowRight,
@@ -202,7 +203,7 @@ function WelcomeScreen({ onStart, onSkip }: { onStart: () => void; onSkip: () =>
         Welcome to RealTour Flow
       </h1>
       <p className="mt-3 max-w-sm text-sm text-gray-500 leading-relaxed">
-        Let's build your office in about 3 minutes. You'll only do this once — every setting here saves time on every deal you open.
+        Let&apos;s build your office in about 3 minutes. You&apos;ll only do this once — every setting here saves time on every deal you open.
       </p>
 
       {/* What we'll set up */}
@@ -221,14 +222,14 @@ function WelcomeScreen({ onStart, onSkip }: { onStart: () => void; onSkip: () =>
         onClick={onStart}
         className="mt-7 flex w-full max-w-xs items-center justify-center gap-2 rounded-xl bg-brand-navy py-4 text-base font-bold text-white hover:bg-brand-navy/80 active:scale-[0.98] transition-all"
       >
-        Let's build my office <ArrowRight size={18} />
+        Let&apos;s build my office <ArrowRight size={18} />
       </button>
 
       <button
         onClick={onSkip}
         className="mt-4 text-sm text-gray-300 hover:text-gray-500 transition-colors"
       >
-        I'll finish this later →
+        I&apos;ll finish this later →
       </button>
     </div>
   );
@@ -363,9 +364,12 @@ function PhotoScreen({
         {/* Preview */}
         <div className="mb-5 flex h-32 w-32 items-center justify-center">
           {selected ? (
-            <img
+            <Image
               src={selected}
               alt="Your headshot"
+              width={128}
+              height={128}
+              unoptimized
               className="h-32 w-32 rounded-2xl object-cover ring-2 ring-brand-navy/10 shadow-sm"
             />
           ) : (
@@ -639,7 +643,7 @@ function WelcomeMessagesScreen({
         )}
 
         <p className="mt-2 mb-1 text-center text-[11px] text-gray-300">
-          Use [ClientName] and it'll be replaced with the client's name automatically
+          Use [ClientName] and it&apos;ll be replaced with the client&apos;s name automatically
         </p>
         <ContinueBtn onClick={onContinue} label="Save messages" />
       </div>
@@ -684,9 +688,9 @@ function LenderScreen({ onSelect }: { onSelect: (v: LenderChoice) => void }) {
             <Building2 size={16} className="text-gray-400" />
             <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Any other lender</span>
           </div>
-          <div className="mt-2 text-lg font-bold text-gray-700">I'll use a different lender</div>
+          <div className="mt-2 text-lg font-bold text-gray-700">I&apos;ll use a different lender</div>
           <p className="mt-1 text-sm text-gray-500">
-            Totally fine — you can use any lender you want. Loan milestones will need to be updated manually, and ARIVE automation won't apply.
+            Totally fine — you can use any lender you want. Loan milestones will need to be updated manually, and ARIVE automation won&apos;t apply.
           </p>
         </button>
       </div>
@@ -832,7 +836,7 @@ function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
         </div>
         <h2 className="text-2xl font-black text-brand-navy">Upload your templates</h2>
         <p className="mt-2 text-sm text-gray-500 leading-relaxed max-w-xs mx-auto">
-          Add the documents you use most — they'll be ready to send to clients at the right stage. You can always update these in Settings.
+          Add the documents you use most — they&apos;ll be ready to send to clients at the right stage. You can always update these in Settings.
         </p>
       </div>
 
@@ -928,12 +932,19 @@ function CommissionInput({
   const [pctStr, setPctStr] = useState<string>(String(pct ?? ''));
   const [amountStr, setAmountStr] = useState<string>(String(amount ?? ''));
 
-  useEffect(() => {
+  // React 19 pattern for "reset local state when a prop changes": compare to
+  // previous value during render. See:
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const [prevPct, setPrevPct] = useState(pct);
+  if (pct !== prevPct) {
+    setPrevPct(pct);
     setPctStr(String(pct ?? ''));
-  }, [pct]);
-  useEffect(() => {
+  }
+  const [prevAmount, setPrevAmount] = useState(amount);
+  if (amount !== prevAmount) {
+    setPrevAmount(amount);
     setAmountStr(String(amount ?? ''));
-  }, [amount]);
+  }
 
   const dollarEquiv = salePreview && isPct ? Math.round(salePreview * pct / 100) : null;
   const pctEquiv = salePreview && !isPct && salePreview > 0 ? ((amount / salePreview) * 100).toFixed(2) : null;
@@ -1129,7 +1140,7 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
       </div>
       <h2 className="text-3xl font-black text-brand-navy">Your office is live.</h2>
       <p className="mt-2 text-sm text-gray-500 max-w-xs">
-        Everything is set. Here's a quick summary of what we configured.
+        Everything is set. Here&apos;s a quick summary of what we configured.
       </p>
 
       {/* Summary */}
