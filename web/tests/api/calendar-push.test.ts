@@ -282,3 +282,58 @@ describe("task-due events + delete-on-clear (T5a-2)", () => {
     expect(map).toBeNull();
   });
 });
+
+// ── T5b: dual-provider fan-out ─────────────────────────────────────────────
+
+const MS_EVENTS_URL = "https://graph.microsoft.com/v1.0/me/events";
+
+describe("dual-provider fan-out (T5b)", () => {
+  it("one trigger upserts to BOTH Google and Microsoft (one event each)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "Both Cals" });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: { arive_key_dates: { estimatedFundingDate: "2026-09-15" } },
+    });
+    const expires = new Date(Date.now() + 60 * 60 * 1000);
+    for (const provider of ["google_calendar", "microsoft_calendar"]) {
+      await prisma.oauth_tokens.create({
+        data: {
+          user_id: agent.id,
+          provider,
+          access_token: "tok",
+          refresh_token: "r",
+          account_email: "agent@example.com",
+          expires_at: expires,
+        },
+      });
+    }
+
+    const calls: { method: string; url: string }[] = [];
+    setCalendarHttpForTesting(async (url, init) => {
+      calls.push({ method: init?.method ?? "GET", url });
+      const id = url.startsWith(MS_EVENTS_URL) ? "ms-evt" : "g-evt";
+      return new Response(JSON.stringify({ id }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const res = await stageRoute(await advanceReq(deal.id), ctx(deal.id));
+    expect(res.status).toBe(200);
+
+    const posts = calls.filter((c) => c.method === "POST");
+    expect(posts).toHaveLength(2);
+    expect(posts.some((c) => c.url === EVENTS_URL)).toBe(true);
+    expect(posts.some((c) => c.url === MS_EVENTS_URL)).toBe(true);
+
+    const gMap = await prisma.calendar_event_map.findFirst({
+      where: { user_id: agent.id, provider: "google_calendar", internal_uid: `close-${deal.id}` },
+    });
+    const mMap = await prisma.calendar_event_map.findFirst({
+      where: { user_id: agent.id, provider: "microsoft_calendar", internal_uid: `close-${deal.id}` },
+    });
+    expect(gMap?.external_event_id).toBe("g-evt");
+    expect(mMap?.external_event_id).toBe("ms-evt");
+  });
+});
