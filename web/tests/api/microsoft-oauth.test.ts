@@ -151,17 +151,51 @@ describe("GET /api/me/integrations/microsoft-calendar/start", () => {
 // --- callback -----------------------------------------------------------
 
 describe("GET /api/integrations/microsoft-calendar/callback", () => {
-  it("rejects a missing state cookie with 400 (CSRF)", async () => {
+  it("missing/mismatched state → 302 bounce to settings with invalid_state (CSRF)", async () => {
     await createUser({ role: "agent", auth0_id: "auth0|a" });
-    const res = await runCallback({ code: "x", state: "some-nonce" });
-    expect(res.status).toBe(400);
+    const noCookie = await runCallback({ code: "x", state: "some-nonce" });
+    expect(noCookie.status).toBe(302);
+    expect(noCookie.headers.get("location")).toContain(
+      "/agent/settings?integrations=microsoft_calendar_error&reason=invalid_state"
+    );
+
+    const { cookie } = await runStart("auth0|a");
+    const mismatched = await runCallback({ code: "x", state: "not-the-nonce", cookie });
+    expect(mismatched.status).toBe(302);
+    expect(mismatched.headers.get("location")).toContain(
+      "integrations=microsoft_calendar_error&reason=invalid_state"
+    );
   });
 
-  it("rejects a mismatched state with 400 (CSRF)", async () => {
+  it("provider error (user denied consent) → 302 bounce with the error reason", async () => {
     await createUser({ role: "agent", auth0_id: "auth0|a" });
-    const { cookie } = await runStart("auth0|a");
-    const res = await runCallback({ code: "x", state: "not-the-nonce", cookie });
-    expect(res.status).toBe(400);
+    const req = new Request(
+      "http://localhost/api/integrations/microsoft-calendar/callback?error=access_denied&state=x"
+    );
+    const res = await callbackRoute(req);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain(
+      "integrations=microsoft_calendar_error&reason=access_denied"
+    );
+  });
+
+  it("token-exchange failure → 302 bounce, no token row written", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    setMicrosoftOAuthForTesting({
+      exchangeCode: async () => {
+        throw new Error("microsoft exploded");
+      },
+    });
+    const { cookie, state } = await runStart("auth0|a");
+    const res = await runCallback({ code: "fake-code", state, cookie });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain(
+      "integrations=microsoft_calendar_error&reason=exchange_failed"
+    );
+    const row = await prisma.oauth_tokens.findFirst({
+      where: { user_id: agent.id, provider: "microsoft_calendar" },
+    });
+    expect(row).toBeNull();
   });
 
   it("happy path: exchanges code, upserts token row, redirects 302", async () => {
@@ -177,7 +211,7 @@ describe("GET /api/integrations/microsoft-calendar/callback", () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toContain(
-      "/settings?integration=microsoft_calendar&status=connected"
+      "/agent/settings?integrations=microsoft_calendar_connected"
     );
 
     const row = await prisma.oauth_tokens.findFirst({

@@ -1,32 +1,36 @@
-import { error } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { getGoogleOAuth } from "@/lib/google-oauth";
 import {
   verifyOAuthState,
   readStateCookie,
-  clearStateCookie,
+  settingsRedirect,
 } from "@/lib/oauth-state";
 
 const PROVIDER = "google_calendar";
-const SETTINGS_REDIRECT = "/settings?integration=google_calendar&status=connected";
 
 // OAuth redirect target — Google sends the browser here with ?code & ?state.
 // Not under /me and not Bearer-authed: identity travels in the signed, HttpOnly
-// state cookie set by `start`. Mirrors the callback half of
-// backend/internal/calendar/oauth.go (Exchange + SaveToken).
+// state cookie set by `start`. Every exit bounces back to the Settings →
+// Integrations tab (success or a friendly error), never a raw error page.
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const code = url.searchParams.get("code") ?? "";
   const stateParam = url.searchParams.get("state") ?? "";
+  const providerError = url.searchParams.get("error");
+
+  // User denied consent / provider-side error → bounce with the reason.
+  if (providerError) {
+    return settingsRedirect(req.url, PROVIDER, "error", providerError);
+  }
 
   // CSRF: the signed cookie must verify and its nonce must match the echoed state.
   const cookie = readStateCookie(req);
   const state = cookie ? await verifyOAuthState(cookie) : null;
   if (!state || !stateParam || state.nonce !== stateParam) {
-    return error("invalid oauth state", 400);
+    return settingsRedirect(req.url, PROVIDER, "error", "invalid_state");
   }
   if (!code) {
-    return error("missing authorization code", 400);
+    return settingsRedirect(req.url, PROVIDER, "error", "missing_code");
   }
 
   try {
@@ -49,23 +53,15 @@ export async function GET(req: Request): Promise<Response> {
         scope: tokens.scope,
         expires_at: expiresAt,
         updated_at: new Date(),
-        // Preserve the stored refresh token / email when Google returns none
-        // (it omits the refresh token on re-consent) — COALESCE-style.
+        // Preserve the stored refresh token / email when Google returns none.
         ...(tokens.refresh_token ? { refresh_token: tokens.refresh_token } : {}),
         ...(tokens.account_email ? { account_email: tokens.account_email } : {}),
       },
     });
   } catch (err) {
     console.error("google oauth callback failed", err);
-    return error("failed to connect google calendar", 502);
+    return settingsRedirect(req.url, PROVIDER, "error", "exchange_failed");
   }
 
-  // Send the browser back to Settings, and expire the now-spent state cookie.
-  return new Response(null, {
-    status: 302,
-    headers: {
-      location: new URL(SETTINGS_REDIRECT, req.url).toString(),
-      "set-cookie": clearStateCookie(),
-    },
-  });
+  return settingsRedirect(req.url, PROVIDER, "connected");
 }

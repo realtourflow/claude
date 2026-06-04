@@ -20,6 +20,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { useMLSConnection } from "@/hooks/useMLS";
 import { uploadAgentPhoto } from "@/hooks/useAgentPhoto";
 import { useIntegrations } from "@/hooks/useIntegrations";
+import { settingsTabFromSearch } from "@/lib/settings-nav";
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
@@ -1573,7 +1574,11 @@ export default function SettingsPage() {
     { id: 'integrations',  label: 'Integrations',  icon: <Plug size={15} /> },
   ];
 
-  const [tab, setTab] = useState<Tab>('profile');
+  // Open the Integrations tab when an OAuth connect bounces back here, so its
+  // return-flow handler (status refresh / error toast) runs.
+  const [tab, setTab] = useState<Tab>(() =>
+    settingsTabFromSearch(typeof window !== 'undefined' ? window.location.search : '')
+  );
   const agentId = activeUser?.id ?? 'agent-sarah';
 
   return (
