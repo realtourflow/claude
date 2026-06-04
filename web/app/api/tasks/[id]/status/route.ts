@@ -59,7 +59,12 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     if (rows.length === 0) return error("task not found", 404);
 
     const task = rows[0];
-    enqueuePushTaskDueEvent(task.id);
+    // Best-effort calendar sync; await (not detached) so it runs on Vercel.
+    try {
+      await enqueuePushTaskDueEvent(task.id);
+    } catch (err) {
+      console.error("calendar push (task due) failed", err);
+    }
     return json(task);
   })) as Response;
 }

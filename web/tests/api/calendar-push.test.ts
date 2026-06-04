@@ -7,12 +7,16 @@ import {
   afterEach,
 } from "vitest";
 import { PATCH as stageRoute } from "@/app/api/deals/[id]/stage/route";
+import { POST as createTaskRoute } from "@/app/api/deals/[id]/tasks/route";
+import { PATCH as taskStatusRoute } from "@/app/api/tasks/[id]/status/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setCalendarHttpForTesting } from "@/lib/calendar";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal } from "../helpers/factories";
+
+const EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
@@ -112,5 +116,169 @@ describe("calendar push on stage advance", () => {
 
     expect(res.status).toBe(200);
     expect(calls).toBe(0);
+  });
+});
+
+// ── T5a-2: task-due events + delete-on-clear ───────────────────────────────
+
+type RecordedCall = { method: string; url: string };
+
+function recorder(respond: (method: string, url: string) => Response): RecordedCall[] {
+  const calls: RecordedCall[] = [];
+  setCalendarHttpForTesting(async (url, init) => {
+    const method = init?.method ?? "GET";
+    calls.push({ method, url });
+    return respond(method, url);
+  });
+  return calls;
+}
+
+function jsonRes(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+async function connectedAgentDeal() {
+  const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+  const deal = await createDeal({ agent_id: agent.id, title: "Maple Ave" });
+  await prisma.oauth_tokens.create({
+    data: {
+      user_id: agent.id,
+      provider: "google_calendar",
+      access_token: "tok",
+      refresh_token: "r",
+      account_email: "agent@gmail.com",
+      expires_at: new Date(Date.now() + 60 * 60 * 1000),
+    },
+  });
+  return { agent, deal };
+}
+
+async function createTask(dealId: string, body: Record<string, unknown>) {
+  const req = new Request(`http://localhost/api/deals/${dealId}/tasks`, {
+    method: "POST",
+    headers: {
+      authorization: await authHeader("auth0|a", ["agent"]),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  return createTaskRoute(req, ctx(dealId));
+}
+
+async function setStatus(taskId: string, status: string) {
+  const req = new Request(`http://localhost/api/tasks/${taskId}/status`, {
+    method: "PATCH",
+    headers: {
+      authorization: await authHeader("auth0|a", ["agent"]),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ status }),
+  });
+  return taskStatusRoute(req, ctx(taskId));
+}
+
+describe("task-due events + delete-on-clear (T5a-2)", () => {
+  it("case 1: creating a task with a due date POSTs a task event", async () => {
+    const { agent, deal } = await connectedAgentDeal();
+    const calls = recorder(() => jsonRes({ id: "gevt-task" }));
+
+    const res = await createTask(deal.id, {
+      title: "Send disclosures",
+      due_date: "2026-09-20",
+    });
+    expect(res.status).toBe(201);
+    const task = (await res.json()) as { id: string };
+
+    expect(
+      calls.filter((c) => c.method === "POST" && c.url === EVENTS_URL)
+    ).toHaveLength(1);
+    const map = await prisma.calendar_event_map.findFirst({
+      where: { user_id: agent.id, internal_uid: `task-${task.id}` },
+    });
+    expect(map?.external_event_id).toBe("gevt-task");
+  });
+
+  it("case 2: updating the task PATCHes the same event", async () => {
+    const { deal } = await connectedAgentDeal();
+    recorder(() => jsonRes({ id: "gevt-task" }));
+    const created = await createTask(deal.id, {
+      title: "Send disclosures",
+      due_date: "2026-09-20",
+    });
+    const task = (await created.json()) as { id: string };
+
+    const calls = recorder(() => jsonRes({ id: "gevt-task" }));
+    const res = await setStatus(task.id, "in_progress");
+    expect(res.status).toBe(200);
+
+    const patch = calls.find((c) => c.method === "PATCH");
+    expect(patch?.url).toBe(`${EVENTS_URL}/gevt-task`);
+  });
+
+  it("case 3: clearing the closing date deletes the event (idempotent)", async () => {
+    const { agent, deal } = await connectedAgentDeal(); // deal has no arive_key_dates
+    await prisma.calendar_event_map.create({
+      data: {
+        user_id: agent.id,
+        provider: "google_calendar",
+        internal_uid: `close-${deal.id}`,
+        external_event_id: "close-evt-1",
+      },
+    });
+
+    const calls = recorder(() => new Response(null, { status: 204 }));
+    const res = await stageRoute(await advanceReq(deal.id), ctx(deal.id));
+    expect(res.status).toBe(200);
+
+    expect(
+      calls.filter(
+        (c) => c.method === "DELETE" && c.url === `${EVENTS_URL}/close-evt-1`
+      )
+    ).toHaveLength(1);
+    const map = await prisma.calendar_event_map.findFirst({
+      where: { internal_uid: `close-${deal.id}` },
+    });
+    expect(map).toBeNull();
+
+    // A second clear is a no-op — the mapping is already gone.
+    const calls2 = recorder(() => new Response(null, { status: 204 }));
+    await stageRoute(await advanceReq(deal.id), ctx(deal.id));
+    expect(calls2).toHaveLength(0);
+  });
+
+  it("case 4: creating a task with no due date makes zero calendar calls", async () => {
+    const { deal } = await connectedAgentDeal();
+    const calls = recorder(() => jsonRes({ id: "x" }));
+
+    const res = await createTask(deal.id, { title: "No date task" });
+    expect(res.status).toBe(201);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("completing a task deletes its event", async () => {
+    const { agent, deal } = await connectedAgentDeal();
+    recorder(() => jsonRes({ id: "gevt-task" }));
+    const created = await createTask(deal.id, {
+      title: "Inspection",
+      due_date: "2026-09-20",
+    });
+    const task = (await created.json()) as { id: string };
+
+    const calls = recorder(() => new Response(null, { status: 204 }));
+    const res = await setStatus(task.id, "completed");
+    expect(res.status).toBe(200);
+
+    expect(
+      calls.filter(
+        (c) => c.method === "DELETE" && c.url === `${EVENTS_URL}/gevt-task`
+      )
+    ).toHaveLength(1);
+    const map = await prisma.calendar_event_map.findFirst({
+      where: { user_id: agent.id, internal_uid: `task-${task.id}` },
+    });
+    expect(map).toBeNull();
   });
 });
