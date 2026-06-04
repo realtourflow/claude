@@ -105,7 +105,14 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
       }
     })();
 
-    enqueuePushDealClosingEvent(dealId);
+    // Calendar push is best-effort but must be AWAITED, not detached: on Vercel
+    // the function can freeze after the response is sent, killing a stray
+    // promise. Swallow errors so a calendar hiccup never fails the advance.
+    try {
+      await enqueuePushDealClosingEvent(dealId);
+    } catch (err) {
+      console.error("calendar push (closing event) failed", err);
+    }
 
     // Re-fetch with computed health.
     const fresh = await getDealForAgent(dealId, userId);
