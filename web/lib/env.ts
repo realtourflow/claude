@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+// Dev fallback for the OAuth CSRF state-cookie HMAC key. Used when the env var
+// is unset OR explicitly empty (e.g. copied from .env.example). Production
+// should set a strong random OAUTH_STATE_SECRET.
+const DEV_OAUTH_STATE_SECRET = "rtf-dev-oauth-state-secret-change-in-prod";
+
 const schema = z.object({
   DATABASE_URL: z.string().url(),
 
@@ -27,6 +32,15 @@ const schema = z.object({
   GOOGLE_OAUTH_CLIENT_ID: z.string().default(""),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().default(""),
   GOOGLE_OAUTH_REDIRECT_URL: z.string().default(""),
+
+  // HMAC key for the short-lived, signed CSRF state cookie used by the calendar
+  // OAuth connect flows (lib/oauth-state.ts). Falls back to a dev value when
+  // unset or empty so local and CI work without config; set a strong random
+  // value in production.
+  OAUTH_STATE_SECRET: z
+    .string()
+    .default(DEV_OAUTH_STATE_SECRET)
+    .transform((s) => s || DEV_OAUTH_STATE_SECRET),
 
   MICROSOFT_OAUTH_CLIENT_ID: z.string().default(""),
   MICROSOFT_OAUTH_CLIENT_SECRET: z.string().default(""),
