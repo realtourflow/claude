@@ -280,7 +280,35 @@ describe("ARIVE link + sync + webhook", () => {
     expect(res.status).toBe(200);
     const row = await prisma.deals.findUnique({ where: { id: deal.id } });
     expect(row?.arive_loan_status).toBe("active");
+    expect(row?.arive_milestones).toEqual({ contract: true });
+    expect(row?.arive_key_dates).toEqual({ closing: "2026-06-15" });
     expect(row?.arive_synced_at).not.toBeNull();
+  });
+
+  it("sync surfaces a 5xx and writes nothing when fetchLoan throws", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: { arive_loan_id: "loan-boom", arive_linked: true },
+    });
+    // A non-2xx ARIVE response makes the real client throw; assert the route
+    // surfaces a 5xx and never writes a phantom "unknown" status.
+    setAriveForTesting({
+      enabled: () => true,
+      fetchLoan: async () => {
+        throw new Error("arive get loan loan-boom: status 500");
+      },
+    });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/arive/sync`, {
+      method: "POST",
+      headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+    });
+    const res = await syncAriveRoute(req, ctx(deal.id));
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.arive_loan_status).toBeNull();
+    expect(row?.arive_synced_at).toBeNull();
   });
 
   it("sync returns 400 when deal not linked", async () => {
