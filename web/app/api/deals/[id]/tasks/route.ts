@@ -89,7 +89,14 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
                 due_date::text AS due_date, created_at, updated_at
     `;
     const task = rows[0];
-    if (task.due_date) enqueuePushTaskDueEvent(task.id);
+    // Best-effort calendar sync; await (not detached) so it runs on Vercel.
+    if (task.due_date) {
+      try {
+        await enqueuePushTaskDueEvent(task.id);
+      } catch (err) {
+        console.error("calendar push (task due) failed", err);
+      }
+    }
     return json(task, 201);
   })) as Response;
 }
