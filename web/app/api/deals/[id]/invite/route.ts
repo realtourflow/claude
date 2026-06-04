@@ -2,6 +2,7 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasRole } from "@/lib/roles";
+import { sendInviteEmail } from "@/lib/email";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -62,7 +63,24 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     `;
     const inv = rows[0];
 
-    // TODO(phase-8): send invite email via Resend.
+    // Best-effort: email the invitee their link. A delivery failure must never
+    // block invite creation — swallow + log and still return 201.
+    try {
+      const dealRow = await prisma.deals.findUnique({
+        where: { id: dealId },
+        select: { title: true },
+      });
+      const url = new URL(req.url);
+      const origin = `${url.protocol}//${url.host}`;
+      await sendInviteEmail({
+        to: inv.email,
+        name: inv.name,
+        dealTitle: dealRow?.title ?? "your deal",
+        inviteUrl: `${origin}/invite/${inv.token}`,
+      });
+    } catch (err) {
+      console.error("failed to send invite email", err);
+    }
 
     return json(
       { ...inv, expires_at: inv.expires_at.toISOString() },

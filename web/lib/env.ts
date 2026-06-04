@@ -34,6 +34,10 @@ const schema = z.object({
   MICROSOFT_OAUTH_TENANT: z.string().default("common"),
 
   RESEND_API_KEY: z.string().default(""),
+  // From-address for transactional email. Defaults to Resend's shared sandbox
+  // sender; set to a verified-domain address (e.g. "RealTourFlow
+  // <invites@realtourflow.com>") in production.
+  RESEND_FROM: z.string().default("RealTourFlow <onboarding@resend.dev>"),
 });
 
 export type Env = z.infer<typeof schema>;
