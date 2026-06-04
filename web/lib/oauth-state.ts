@@ -82,3 +82,28 @@ export function readStateCookie(req: Request): string | null {
   }
   return null;
 }
+
+export type CalendarConnectProvider = "google_calendar" | "microsoft_calendar";
+
+/**
+ * Builds the 302 that bounces the browser back to the agent's Settings →
+ * Integrations tab after an OAuth connect attempt, and clears the spent state
+ * cookie. The query contract is exactly what SettingsPage's return-flow reader
+ * expects (reused by both the Google and Microsoft callbacks):
+ *   /agent/settings?integrations=<provider>_connected
+ *   /agent/settings?integrations=<provider>_error&reason=<code>
+ */
+export function settingsRedirect(
+  reqUrl: string,
+  provider: CalendarConnectProvider,
+  outcome: "connected" | "error",
+  reason?: string
+): Response {
+  const params = new URLSearchParams({ integrations: `${provider}_${outcome}` });
+  if (outcome === "error" && reason) params.set("reason", reason);
+  const location = new URL(`/agent/settings?${params.toString()}`, reqUrl).toString();
+  return new Response(null, {
+    status: 302,
+    headers: { location, "set-cookie": clearStateCookie() },
+  });
+}

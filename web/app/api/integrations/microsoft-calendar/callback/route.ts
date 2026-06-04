@@ -1,33 +1,35 @@
-import { error } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { getMicrosoftOAuth } from "@/lib/microsoft-oauth";
 import {
   verifyOAuthState,
   readStateCookie,
-  clearStateCookie,
+  settingsRedirect,
 } from "@/lib/oauth-state";
 
 const PROVIDER = "microsoft_calendar";
-const SETTINGS_REDIRECT =
-  "/settings?integration=microsoft_calendar&status=connected";
 
 // OAuth redirect target — Microsoft sends the browser here with ?code & ?state.
 // Not under /me and not Bearer-authed: identity travels in the signed, HttpOnly
-// state cookie set by `start`. Mirrors the Google callback (T2); shares
-// lib/oauth-state.ts. Token exchange goes through @azure/msal-node.
+// state cookie set by `start`. Every exit bounces back to the Settings →
+// Integrations tab (success or a friendly error), never a raw error page.
+// Token exchange goes through @azure/msal-node.
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const code = url.searchParams.get("code") ?? "";
   const stateParam = url.searchParams.get("state") ?? "";
+  const providerError = url.searchParams.get("error");
 
-  // CSRF: the signed cookie must verify and its nonce must match the echoed state.
+  if (providerError) {
+    return settingsRedirect(req.url, PROVIDER, "error", providerError);
+  }
+
   const cookie = readStateCookie(req);
   const state = cookie ? await verifyOAuthState(cookie) : null;
   if (!state || !stateParam || state.nonce !== stateParam) {
-    return error("invalid oauth state", 400);
+    return settingsRedirect(req.url, PROVIDER, "error", "invalid_state");
   }
   if (!code) {
-    return error("missing authorization code", 400);
+    return settingsRedirect(req.url, PROVIDER, "error", "missing_code");
   }
 
   try {
@@ -50,23 +52,15 @@ export async function GET(req: Request): Promise<Response> {
         scope: tokens.scope,
         expires_at: expiresAt,
         updated_at: new Date(),
-        // Preserve the stored refresh token / email when Microsoft returns none
-        // (COALESCE-style) — e.g. a re-consent that doesn't reissue them.
+        // Preserve the stored refresh token / email when Microsoft returns none.
         ...(tokens.refresh_token ? { refresh_token: tokens.refresh_token } : {}),
         ...(tokens.account_email ? { account_email: tokens.account_email } : {}),
       },
     });
   } catch (err) {
     console.error("microsoft oauth callback failed", err);
-    return error("failed to connect microsoft calendar", 502);
+    return settingsRedirect(req.url, PROVIDER, "error", "exchange_failed");
   }
 
-  // Send the browser back to Settings, and expire the now-spent state cookie.
-  return new Response(null, {
-    status: 302,
-    headers: {
-      location: new URL(SETTINGS_REDIRECT, req.url).toString(),
-      "set-cookie": clearStateCookie(),
-    },
-  });
+  return settingsRedirect(req.url, PROVIDER, "connected");
 }
