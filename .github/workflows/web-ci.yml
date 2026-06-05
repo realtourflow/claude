@@ -64,3 +64,75 @@ jobs:
 
       - name: Unit + integration tests
         run: npm test
+
+  # Golden-path browser flow (T6-1 spec). A distinct job from `test` on purpose:
+  # a flaky browser run reports its own red/green and can't block unit merges.
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      # Playwright boots `next dev` via its `webServer`, which inherits these
+      # from the job env (it spawns with `{ ...process.env, ...webServer.env }`).
+      # DATABASE_URL points at the `realtourflow_e2e` DB the Postgres service
+      # auto-creates and the migrate step populates. AUTH0_* only satisfy
+      # lib/env.ts's schema — E2E auth uses an in-process RS256 keypair, gated on
+      # E2E_AUTH / NEXT_PUBLIC_E2E_AUTH (set by playwright.config.ts's webServer).
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/realtourflow_e2e?sslmode=disable
+      AUTH0_DOMAIN: test.auth0.com
+      AUTH0_AUDIENCE: https://api.test.local
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          # Auto-create the e2e DB at container init so migrate can target it
+          # directly — no psql/CREATE DATABASE step needed.
+          POSTGRES_DB: realtourflow_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install golang-migrate
+        run: |
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.18.1/migrate.linux-amd64.tar.gz | tar xvz
+          sudo mv migrate /usr/local/bin/migrate
+          migrate -version
+
+      - name: Migrate e2e database
+        run: migrate -path "$GITHUB_WORKSPACE/backend/migrations" -database "$DATABASE_URL" up
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Run golden-path E2E
+        run: npm run test:e2e
+
+      - name: Upload Playwright artifacts on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            web/playwright-report/
+            web/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
