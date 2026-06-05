@@ -4,7 +4,12 @@ import { Auth0Provider } from "@auth0/auth0-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactNode, useState } from "react";
 import AuthSetup from "@/components/AuthSetup";
+import TestAuthSetup from "@/components/TestAuthSetup";
 import { RoleSwitcher } from "@/components/RoleSwitcher";
+
+// E2E-only: when Playwright seeds a session we bypass Auth0 entirely (see
+// TestAuthSetup). Off in every normal/production build.
+const E2E_AUTH = process.env.NEXT_PUBLIC_E2E_AUTH === "1";
 
 /**
  * Client-side provider stack. Wraps everything in Auth0Provider so React Router
@@ -40,6 +45,17 @@ export function Providers({ children }: { children: ReactNode }) {
   // Skip Auth0 entirely until we know the redirect origin — prevents Auth0
   // from initializing with `window` undefined during SSR.
   if (!origin) return <>{children}</>;
+
+  // E2E: seeded session via cookie, no Auth0Provider. The E2E flow only visits
+  // protected pages (which read identity from the auth store), so nothing calls
+  // useAuth0 and we can drop the provider safely.
+  if (E2E_AUTH) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <TestAuthSetup>{children}</TestAuthSetup>
+      </QueryClientProvider>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>

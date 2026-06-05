@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { env } from "./env";
+import { getE2EVerifyOptions } from "./test-auth";
 
 export class AuthError extends Error {
   readonly status: 401 | 403;
@@ -32,6 +33,14 @@ let defaultOpts: VerifyOptions | undefined;
 
 function getDefaultOpts(): VerifyOptions {
   if (defaultOpts) return defaultOpts;
+  // E2E test-auth: verify locally-minted RS256 tokens instead of hitting Auth0.
+  // Gated on E2E_AUTH (set only by Playwright's webServer) so production is
+  // unaffected. A unit test that called setVerifyOptionsForTesting has already
+  // set `defaultOpts` above, so this never overrides an explicit test setup.
+  if (process.env.E2E_AUTH === "1") {
+    defaultOpts = getE2EVerifyOptions();
+    return defaultOpts;
+  }
   const e = env();
   const issuer = `https://${e.AUTH0_DOMAIN}/`;
   const jwks = createRemoteJWKSet(
