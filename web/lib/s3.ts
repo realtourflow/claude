@@ -68,6 +68,22 @@ export async function getDownloadUrl(input: { key: string }): Promise<string> {
   return getSignedUrl(client, cmd, { expiresIn: FIFTEEN_MINUTES_SECONDS });
 }
 
+/**
+ * Fetches the full object body as bytes. Used to hand a document's contents to
+ * DocuSign. Mirrors downloadS3Object in backend/internal/handlers/docusign.go.
+ */
+export async function getObjectBytes(key: string): Promise<Uint8Array> {
+  const { client, bucket } = getClient();
+  const result = await client.send(
+    new GetObjectCommand({ Bucket: bucket, Key: key })
+  );
+  if (!result.Body) {
+    throw new Error(`s3 get object ${key}: empty body`);
+  }
+  // v3 SDK exposes a stream helper that collects the whole body for us.
+  return result.Body.transformToByteArray();
+}
+
 /** Best-effort delete. Logs and swallows errors — matches Go behavior. */
 export async function deleteObject(key: string): Promise<void> {
   try {

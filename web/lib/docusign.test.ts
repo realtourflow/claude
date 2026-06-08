@@ -1,0 +1,196 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { generateKeyPairSync } from "node:crypto";
+import { DefaultDocusignClient, type FetchLike } from "@/lib/docusign";
+import { resetEnvForTesting } from "@/lib/env";
+
+// Exercise the REAL DefaultDocusignClient with an injected fetch, so the JWT
+// bearer-grant token flow + envelope create/status mapping are covered directly.
+// The route tests in tests/api/docusign.test.ts inject a whole fake client and
+// never touch this layer.
+
+const ENV_KEYS = [
+  "DOCUSIGN_INTEGRATION_KEY",
+  "DOCUSIGN_USER_ID",
+  "DOCUSIGN_ACCOUNT_ID",
+  "DOCUSIGN_PRIVATE_KEY",
+  "DOCUSIGN_BASE_URL",
+] as const;
+const saved: Record<string, string | undefined> = {};
+
+// A real RSA private key (PKCS1 PEM) so the client can actually sign the JWT.
+const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const PRIVATE_KEY_PEM = privateKey
+  .export({ type: "pkcs1", format: "pem" })
+  .toString();
+
+beforeAll(() => {
+  for (const k of ENV_KEYS) saved[k] = process.env[k];
+  process.env.DOCUSIGN_INTEGRATION_KEY = "test-integration-key";
+  process.env.DOCUSIGN_USER_ID = "test-user-id";
+  process.env.DOCUSIGN_ACCOUNT_ID = "test-account-id";
+  process.env.DOCUSIGN_PRIVATE_KEY = PRIVATE_KEY_PEM;
+  // "demo" routes to account-d.docusign.com for the OAuth host.
+  process.env.DOCUSIGN_BASE_URL = "https://demo.docusign.net";
+  resetEnvForTesting();
+});
+
+afterAll(() => {
+  for (const k of ENV_KEYS) {
+    if (saved[k] === undefined) delete process.env[k];
+    else process.env[k] = saved[k];
+  }
+  resetEnvForTesting();
+});
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+type Call = { url: string; init?: RequestInit };
+
+describe("DefaultDocusignClient.createEnvelope", () => {
+  it("mints a JWT bearer token then POSTs the envelope", async () => {
+    const calls: Call[] = [];
+    const fakeFetch: FetchLike = async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      if (url.includes("/envelopes")) {
+        return jsonResponse({ envelopeId: "env-123" }, 201);
+      }
+      throw new Error(`unexpected url ${url}`);
+    };
+
+    const client = new DefaultDocusignClient(fakeFetch);
+    const envelopeId = await client.createEnvelope(
+      "contract.pdf",
+      new Uint8Array([1, 2, 3]),
+      [{ email: "buyer@example.com", name: "Buyer One" }]
+    );
+
+    expect(envelopeId).toBe("env-123");
+
+    // Token endpoint: demo base → account-d host, urlencoded grant + assertion.
+    const tokenCall = calls.find((c) => c.url.endsWith("/oauth/token"));
+    expect(tokenCall?.url).toBe("https://account-d.docusign.com/oauth/token");
+    const tokenHeaders = tokenCall?.init?.headers as Record<string, string>;
+    expect(tokenHeaders["content-type"]).toBe(
+      "application/x-www-form-urlencoded"
+    );
+    const form = new URLSearchParams(tokenCall?.init?.body as string);
+    expect(form.get("grant_type")).toBe(
+      "urn:ietf:params:oauth:grant-type:jwt-bearer"
+    );
+    expect(form.get("assertion")).toBeTruthy();
+    // A JWT has three dot-separated segments.
+    expect((form.get("assertion") as string).split(".")).toHaveLength(3);
+
+    // Envelope endpoint: right URL, Bearer token, signer + document payload.
+    const envCall = calls.find((c) => c.url.includes("/envelopes"));
+    expect(envCall?.url).toBe(
+      "https://demo.docusign.net/restapi/v2.1/accounts/test-account-id/envelopes"
+    );
+    const envHeaders = envCall?.init?.headers as Record<string, string>;
+    expect(envHeaders.authorization).toBe("Bearer tok");
+    const sent = JSON.parse(envCall?.init?.body as string);
+    expect(sent.emailSubject).toBe("Please sign: contract.pdf");
+    expect(sent.status).toBe("sent");
+    expect(sent.documents[0].fileExtension).toBe("pdf");
+    expect(sent.documents[0].documentBase64).toBe(
+      Buffer.from([1, 2, 3]).toString("base64")
+    );
+    expect(sent.recipients.signers[0]).toMatchObject({
+      email: "buyer@example.com",
+      name: "Buyer One",
+      recipientId: "1",
+      routingOrder: "1",
+    });
+  });
+
+  it("throws on a non-201 envelope response", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      return new Response("bad request", { status: 400 });
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await expect(
+      client.createEnvelope("x.pdf", new Uint8Array([1]), [
+        { email: "a@b.com", name: "A" },
+      ])
+    ).rejects.toThrow(/400/);
+  });
+});
+
+describe("DefaultDocusignClient.getEnvelopeStatus", () => {
+  it("returns the envelope status", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      if (url.includes("/envelopes/")) {
+        return jsonResponse({ status: "completed" });
+      }
+      throw new Error(`unexpected url ${url}`);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    const status = await client.getEnvelopeStatus("env-123");
+    expect(status).toBe("completed");
+  });
+
+  it("throws on a non-2xx status response", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      return new Response("nope", { status: 404 });
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await expect(client.getEnvelopeStatus("missing")).rejects.toThrow(/404/);
+  });
+});
+
+describe("DefaultDocusignClient token caching", () => {
+  it("caches the bearer token across calls", async () => {
+    let tokenCalls = 0;
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        tokenCalls += 1;
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      if (url.includes("/envelopes/")) return jsonResponse({ status: "sent" });
+      if (url.includes("/envelopes"))
+        return jsonResponse({ envelopeId: "e" }, 201);
+      throw new Error(`unexpected url ${url}`);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await client.createEnvelope("a.pdf", new Uint8Array([1]), [
+      { email: "a@b.com", name: "A" },
+    ]);
+    await client.getEnvelopeStatus("e");
+    expect(tokenCalls).toBe(1);
+  });
+});
+
+describe("DefaultDocusignClient.enabled", () => {
+  it("is true when all required vars are set", () => {
+    expect(new DefaultDocusignClient().enabled()).toBe(true);
+  });
+
+  it("is false when a required var is empty", () => {
+    const prev = process.env.DOCUSIGN_USER_ID;
+    process.env.DOCUSIGN_USER_ID = "";
+    resetEnvForTesting();
+    try {
+      expect(new DefaultDocusignClient().enabled()).toBe(false);
+    } finally {
+      process.env.DOCUSIGN_USER_ID = prev;
+      resetEnvForTesting();
+    }
+  });
+});
