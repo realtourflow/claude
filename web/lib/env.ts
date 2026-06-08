@@ -64,3 +64,12 @@ export function env(): Env {
   }
   return cached;
 }
+
+/**
+ * Test seam — drops the cached parse so the next `env()` re-reads `process.env`.
+ * Call after mutating `process.env` in a test so the change is observed; the
+ * cache is a per-process snapshot otherwise.
+ */
+export function resetEnvForTesting(): void {
+  cached = undefined;
+}
