@@ -1925,7 +1925,7 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
       <InternalNotesCard deal={deal} />
 
       {/* Closing Fee — shown at post_close */}
-      {deal.stage === 'post_close' && <ClosingFeeCard deal={deal} />}
+      {deal.stage === 'post_close' && <ClosingFeeCard deal={deal} onRefresh={onRefresh} />}
 
       {/* Email-invite client to this deal */}
       {showInvite && (
@@ -1937,10 +1937,15 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
 
 // ─── Closing Fee Card ────────────────────────────────────────────────────────
 
-function ClosingFeeCard({ deal }: { deal: Deal }) {
+function ClosingFeeCard({ deal, onRefresh }: { deal: Deal; onRefresh?: () => void }) {
   const [loading, setLoading] = useState(false);
+  const [waiving, setWaiving] = useState(false);
+  const activeUser = useAuthStore((s) => s.activeUser);
+  // Mirror the server route's allowedRoles: ["admin", "tc"] (fee/waive/route.ts).
+  const canWaive = ['admin', 'tc'].includes(activeUser?.groupId ?? '');
   const feeStatus = deal.feeStatus ?? 'unpaid';
   const amount = ((deal.feeAmountCents ?? 7500) / 100).toFixed(2);
+  const isOpen = feeStatus === 'unpaid' || feeStatus === 'pending';
 
   async function handlePay() {
     setLoading(true);
@@ -1949,6 +1954,19 @@ function ClosingFeeCard({ deal }: { deal: Deal }) {
       window.location.href = res.checkout_url;
     } catch {
       setLoading(false);
+    }
+  }
+
+  async function handleWaive() {
+    if (!confirm('Waive the enrollment fee for this deal? This cannot be undone.')) return;
+    setWaiving(true);
+    try {
+      await api.post<{ status: string }>(`/deals/${deal.id}/fee/waive`, {});
+      onRefresh?.();
+    } catch {
+      // leave status unchanged; surface nothing destructive on failure
+    } finally {
+      setWaiving(false);
     }
   }
 
@@ -1975,13 +1993,23 @@ function ClosingFeeCard({ deal }: { deal: Deal }) {
           <span className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${STATUS_STYLES[feeStatus] ?? STATUS_STYLES.unpaid}`}>
             {feeStatus}
           </span>
-          {(feeStatus === 'unpaid' || feeStatus === 'pending') && (
+          {isOpen && (
             <button
               onClick={handlePay}
               disabled={loading}
               className="rounded-lg bg-brand-gold px-4 py-2 text-sm font-bold text-brand-navy hover:bg-brand-gold-dark transition-colors disabled:opacity-60"
             >
               {loading ? 'Redirecting…' : 'Pay Now'}
+            </button>
+          )}
+          {/* Admin/TC-only fee waiver. Server enforces allowedRoles; this gate is UX. */}
+          {isOpen && canWaive && (
+            <button
+              onClick={handleWaive}
+              disabled={waiving}
+              className="text-xs font-semibold text-gray-500 underline-offset-2 hover:text-gray-700 hover:underline disabled:opacity-60"
+            >
+              {waiving ? 'Waiving…' : 'Waive fee'}
             </button>
           )}
         </div>
