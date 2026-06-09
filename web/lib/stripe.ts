@@ -79,6 +79,46 @@ export async function createCheckoutSession(
   return { id: session.id, url: session.url ?? null };
 }
 
+export type CreateUpsellCheckoutInput = {
+  dealId: string;
+  dealTitle: string;
+  amountCents: number;
+  successUrl: string;
+  cancelUrl: string;
+};
+
+/**
+ * Smooth Exit concierge add-ons checkout. Unlike the fixed closing fee, the
+ * amount is dynamic (sum of selected upsells) and the metadata marks it as a
+ * smooth_exit_upsell. Mirrors EnrollSmoothExit in
+ * backend/internal/handlers/enrollment.go.
+ */
+export async function createSmoothExitUpsellCheckout(
+  input: CreateUpsellCheckoutInput
+): Promise<{ id: string; url: string | null }> {
+  const session = await client().checkout.sessions.create({
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: "Smooth Exit Add-ons",
+            description: `Concierge add-ons for: ${input.dealTitle}`,
+          },
+          unit_amount: input.amountCents,
+        },
+        quantity: 1,
+      },
+    ],
+    mode: "payment",
+    success_url: input.successUrl,
+    cancel_url: input.cancelUrl,
+    metadata: { deal_id: input.dealId, type: "smooth_exit_upsell" },
+  });
+  return { id: session.id, url: session.url ?? null };
+}
+
 export function constructEvent(
   payload: string | Buffer,
   signature: string
