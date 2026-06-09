@@ -59,6 +59,7 @@ import MetroMap from "@/components/MetroMap";
 import { MOCK_USERS } from "@/lib/data/mockUsers";
 import { useDealStageStore } from "@/lib/store/dealStageStore";
 import { useParticipants } from "@/hooks/useParticipants";
+import DealInviteModal from "@/components/DealInviteModal";
 import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
 import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
 import { useOffers } from "@/hooks/useOffers";
@@ -1777,6 +1778,7 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
   const { participants } = useParticipants(deal.id);
   const clientParticipant = participants.find((p) => p.role === 'buyer' || p.role === 'seller');
+  const [showInvite, setShowInvite] = useState(false);
 
   return (
     <div className="space-y-4">
@@ -1821,7 +1823,15 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
 
       {/* Onboarding Info */}
       <div className="rounded-xl bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">Onboarding Info</h3>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Onboarding Info</h3>
+          <button
+            onClick={() => setShowInvite(true)}
+            className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+          >
+            <Mail size={11} /> Invite by email
+          </button>
+        </div>
         <dl className="space-y-3 text-sm">
           <div>
             <dt className="text-gray-400 text-xs mb-0.5">Client</dt>
@@ -1913,6 +1923,11 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
 
       {/* Closing Fee — shown at post_close */}
       {deal.stage === 'post_close' && <ClosingFeeCard deal={deal} />}
+
+      {/* Email-invite client to this deal */}
+      {showInvite && (
+        <DealInviteModal dealId={deal.id} onClose={() => setShowInvite(false)} />
+      )}
     </div>
   );
 }
