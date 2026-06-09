@@ -2809,7 +2809,7 @@ function DocumentsTab({
                         </span>
                       ) : (
                         <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold flex-shrink-0 bg-gray-100 text-gray-500">
-                          Template
+                          Unsigned
                         </span>
                       )}
                     </div>
@@ -2825,7 +2825,7 @@ function DocumentsTab({
                         title="Send for Signature"
                         className="rounded-lg p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                       >
-                        <Send size={18} />
+                        <Send size={36} />
                       </button>
                     )}
                     {/* Refresh DocuSign status */}
@@ -2837,8 +2837,8 @@ function DocumentsTab({
                         className="rounded-lg p-2 text-gray-500 hover:text-brand-navy hover:bg-gray-100 transition-colors disabled:opacity-40"
                       >
                         {refreshingId === doc.id
-                          ? <Loader2 size={18} className="animate-spin" />
-                          : <RefreshCw size={18} />}
+                          ? <Loader2 size={36} className="animate-spin" />
+                          : <RefreshCw size={36} />}
                       </button>
                     )}
                     <button
@@ -2848,8 +2848,8 @@ function DocumentsTab({
                       className="rounded-lg p-2 text-gray-500 hover:text-brand-navy hover:bg-gray-100 transition-colors disabled:opacity-40"
                     >
                       {downloadingId === doc.id
-                        ? <Loader2 size={18} className="animate-spin" />
-                        : <Download size={18} />}
+                        ? <Loader2 size={36} className="animate-spin" />
+                        : <Download size={36} />}
                     </button>
                     <button
                       onClick={() => handleDelete(doc)}
@@ -2858,8 +2858,8 @@ function DocumentsTab({
                       className="rounded-lg p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
                     >
                       {deletingId === doc.id
-                        ? <Loader2 size={18} className="animate-spin" />
-                        : <Trash2 size={18} />}
+                        ? <Loader2 size={36} className="animate-spin" />
+                        : <Trash2 size={36} />}
                     </button>
                   </div>
                 </div>
