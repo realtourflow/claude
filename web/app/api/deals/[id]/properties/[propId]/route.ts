@@ -7,6 +7,9 @@ type Ctx = { params: Promise<{ id: string; propId: string }> };
 type PatchBody = {
   status?: string;
   thumbnail_url?: string;
+  buyer_note?: string | null;
+  agent_private_note?: string | null;
+  offer_requested?: boolean;
 };
 
 async function ownedByAgent(dealId: string, userId: string): Promise<boolean> {
@@ -30,9 +33,20 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     } catch {
       return error("invalid request body", 400);
     }
-    const data: { status?: string; thumbnail_url?: string } = {};
+    const data: {
+      status?: string;
+      thumbnail_url?: string;
+      buyer_note?: string | null;
+      agent_private_note?: string | null;
+      offer_requested?: boolean;
+    } = {};
     if (typeof body.status === "string") data.status = body.status;
     if (typeof body.thumbnail_url === "string") data.thumbnail_url = body.thumbnail_url;
+    if (body.buyer_note !== undefined) data.buyer_note = body.buyer_note;
+    if (body.agent_private_note !== undefined)
+      data.agent_private_note = body.agent_private_note;
+    if (typeof body.offer_requested === "boolean")
+      data.offer_requested = body.offer_requested;
 
     const result = await prisma.tracked_properties.updateMany({
       where: { id: propId, deal_id: dealId },

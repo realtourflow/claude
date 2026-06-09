@@ -105,27 +105,27 @@ export function useProperties(dealId: string | undefined) {
   }
 
   async function removeProperty(propertyId: string) {
-    await api.delete(`/properties/${propertyId}`);
+    await api.delete(`/deals/${dealId}/properties/${propertyId}`);
     update((prev) => prev.filter((p) => p.id !== propertyId));
   }
 
   async function updateStatus(propertyId: string, status: PropertyStatus) {
-    await api.patch(`/properties/${propertyId}`, { status });
+    await api.patch(`/deals/${dealId}/properties/${propertyId}`, { status });
     update((prev) => prev.map((p) => (p.id === propertyId ? { ...p, status } : p)));
   }
 
   async function updateBuyerNote(propertyId: string, buyerNote: string) {
-    await api.patch(`/properties/${propertyId}`, { buyer_note: buyerNote });
+    await api.patch(`/deals/${dealId}/properties/${propertyId}`, { buyer_note: buyerNote });
     update((prev) => prev.map((p) => (p.id === propertyId ? { ...p, buyerNote } : p)));
   }
 
   async function updateAgentNote(propertyId: string, agentPrivateNote: string) {
-    await api.patch(`/properties/${propertyId}`, { agent_private_note: agentPrivateNote });
+    await api.patch(`/deals/${dealId}/properties/${propertyId}`, { agent_private_note: agentPrivateNote });
     update((prev) => prev.map((p) => (p.id === propertyId ? { ...p, agentPrivateNote } : p)));
   }
 
   async function setOfferRequested(propertyId: string, offerRequested: boolean) {
-    await api.patch(`/properties/${propertyId}`, { offer_requested: offerRequested });
+    await api.patch(`/deals/${dealId}/properties/${propertyId}`, { offer_requested: offerRequested });
     update((prev) => prev.map((p) => (p.id === propertyId ? { ...p, offerRequested } : p)));
   }
 
