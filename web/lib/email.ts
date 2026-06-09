@@ -3,6 +3,8 @@
  *
  * - sendInviteEmail({...}) → delivers a deal-invite link to the invitee.
  * - sendAgentInviteEmail({...}) → delivers an agent-signup link to a new agent.
+ * - sendNotificationEmail({...}) → delivers a generic deal-activity notice
+ *   (new message / document shared / task assigned) linking back to the deal.
  *
  * Test seam: setEmailForTesting() injects a stub that bypasses the real Resend
  * client, so tests never hit the network (CI has no RESEND_API_KEY).
@@ -146,6 +148,56 @@ export async function sendAgentInviteEmail(
 </table>
 </body>
 </html>`;
+
+  const { error } = await client().emails.send({
+    from: env().RESEND_FROM,
+    to,
+    subject,
+    html,
+  });
+  if (error) throw new Error(`Resend send failed: ${error.message}`);
+}
+
+export type SendNotificationInput = {
+  to: string;
+  subject: string;
+  heading: string;
+  body: string;
+  dealUrl: string;
+};
+
+/**
+ * Delivers a generic deal-activity notification — a new message, a shared
+ * document, or a task assignment. Shares the email client + HTML template style
+ * of sendInviteEmail (heading, body paragraph, a button linking to the deal).
+ *
+ * Callers invoke this best-effort: a delivery failure must never block the
+ * underlying mutation. Like the invite helpers, an API-level `error` is turned
+ * into a throw so the caller's try/catch logs it uniformly.
+ */
+export async function sendNotificationEmail(
+  input: SendNotificationInput
+): Promise<void> {
+  const { to, subject, heading, body, dealUrl } = input;
+  const safeHeading = escapeHtml(heading);
+  const safeBody = escapeHtml(body);
+  const safeUrl = escapeHtml(dealUrl);
+  const html = `
+    <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2>${safeHeading}</h2>
+      <p>${safeBody}</p>
+      <p style="margin: 24px 0;">
+        <a href="${safeUrl}"
+           style="background: #2563eb; color: #fff; padding: 12px 20px; border-radius: 6px; text-decoration: none;">
+          View on RealTourFlow
+        </a>
+      </p>
+      <p style="color: #6b7280; font-size: 13px;">
+        If the button doesn't work, paste this link into your browser:<br />
+        <a href="${safeUrl}">${safeUrl}</a>
+      </p>
+    </div>
+  `;
 
   const { error } = await client().emails.send({
     from: env().RESEND_FROM,

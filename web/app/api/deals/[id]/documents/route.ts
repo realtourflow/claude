@@ -2,6 +2,7 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasDealAccess } from "@/lib/deals";
+import { emailDocumentUploaded } from "@/lib/notification-email";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -86,6 +87,20 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       JOIN users u ON u.id = i.uploaded_by
     `;
     const doc = rows[0];
+
+    // Best-effort email to the deal's client(s). Awaited (not detached) so it
+    // sends on Vercel; a throw must never block the response.
+    try {
+      await emailDocumentUploaded({
+        req,
+        dealId,
+        uploaderId: userId,
+        documentName: doc.name,
+      });
+    } catch (err) {
+      console.error("document notification email failed", err);
+    }
+
     return json({ ...doc, file_size: Number(doc.file_size) }, 201);
   })) as Response;
 }
