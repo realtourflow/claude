@@ -54,6 +54,9 @@ import {
   LogOut,
   PenLine,
   Send,
+  Download,
+  Trash2,
+  Check,
 } from 'lucide-react';
 import MetroMap from "@/components/MetroMap";
 import { MOCK_USERS } from "@/lib/data/mockUsers";
@@ -2799,9 +2802,14 @@ function DocumentsTab({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <div className="text-sm font-medium text-brand-navy truncate">{doc.name}</div>
-                      {dsMeta && (
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold flex-shrink-0 ${dsMeta.cls}`}>
+                      {dsMeta ? (
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold flex-shrink-0 ${dsMeta.cls}`}>
+                          {dsStatus === 'completed' && <Check size={12} strokeWidth={3} />}
                           {dsMeta.label}
+                        </span>
+                      ) : (
+                        <span className="rounded-full px-2.5 py-1 text-[11px] font-semibold flex-shrink-0 bg-gray-100 text-gray-500">
+                          Template
                         </span>
                       )}
                     </div>
@@ -2809,15 +2817,15 @@ function DocumentsTab({
                       {doc.uploaderName} · {formatFileSize(doc.fileSize)} · {new Date(doc.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
                     {/* Send for Signature — only if not already sent or completed */}
                     {(!dsStatus || dsStatus === 'declined' || dsStatus === 'voided') && (
                       <button
                         onClick={() => setSigningDoc(doc)}
                         title="Send for Signature"
-                        className="rounded-lg p-1.5 hover:bg-blue-50 transition-colors text-gray-400 hover:text-blue-600"
+                        className="rounded-lg p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors"
                       >
-                        <PenLine size={14} />
+                        <Send size={18} />
                       </button>
                     )}
                     {/* Refresh DocuSign status */}
@@ -2826,32 +2834,32 @@ function DocumentsTab({
                         onClick={() => handleRefreshStatus(doc)}
                         disabled={refreshingId === doc.id}
                         title="Refresh signature status"
-                        className="rounded-lg p-1.5 hover:bg-gray-100 transition-colors text-gray-400 hover:text-brand-navy disabled:opacity-40"
+                        className="rounded-lg p-2 text-gray-500 hover:text-brand-navy hover:bg-gray-100 transition-colors disabled:opacity-40"
                       >
                         {refreshingId === doc.id
-                          ? <Loader2 size={14} className="animate-spin" />
-                          : <RefreshCw size={14} />}
+                          ? <Loader2 size={18} className="animate-spin" />
+                          : <RefreshCw size={18} />}
                       </button>
                     )}
                     <button
                       onClick={() => handleDownload(doc)}
                       disabled={downloadingId === doc.id}
                       title="Download"
-                      className="rounded-lg p-1.5 hover:bg-gray-100 transition-colors text-gray-400 hover:text-brand-navy disabled:opacity-40"
+                      className="rounded-lg p-2 text-gray-500 hover:text-brand-navy hover:bg-gray-100 transition-colors disabled:opacity-40"
                     >
                       {downloadingId === doc.id
-                        ? <Loader2 size={14} className="animate-spin" />
-                        : <ExternalLink size={14} />}
+                        ? <Loader2 size={18} className="animate-spin" />
+                        : <Download size={18} />}
                     </button>
                     <button
                       onClick={() => handleDelete(doc)}
                       disabled={deletingId === doc.id}
                       title="Delete"
-                      className="rounded-lg p-1.5 hover:bg-red-50 transition-colors text-gray-400 hover:text-red-500 disabled:opacity-40"
+                      className="rounded-lg p-2 text-gray-500 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-40"
                     >
                       {deletingId === doc.id
-                        ? <Loader2 size={14} className="animate-spin" />
-                        : <X size={14} />}
+                        ? <Loader2 size={18} className="animate-spin" />
+                        : <Trash2 size={18} />}
                     </button>
                   </div>
                 </div>
