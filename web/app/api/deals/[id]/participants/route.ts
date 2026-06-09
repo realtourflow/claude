@@ -4,6 +4,17 @@ import { resolveUserId } from "@/lib/users";
 
 type Ctx = { params: Promise<{ id: string }> };
 
+// Valid participant roles — mirrors the user_role enum on deal_participants.role
+// (see backend/migrations/000001_init.up.sql + 000006_add_tc_role.up.sql).
+const PARTICIPANT_ROLES = [
+  "agent",
+  "buyer",
+  "seller",
+  "admin",
+  "tc",
+  "lending_partner",
+] as const;
+
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -41,7 +52,11 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   })) as Response;
 }
 
-type AddBody = { user_id?: string; role?: string };
+// Accepts either { user_id, role } (back-compat) or { email, role }. When an
+// email is supplied (and no user_id), we resolve it to an EXISTING RealTourFlow
+// user case-insensitively. No match → 404 so the UI can steer the agent toward
+// the invite flow.
+type AddBody = { user_id?: string; role?: string; email?: string };
 
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
@@ -59,15 +74,39 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     try {
       body = (await req.json()) as AddBody;
     } catch {
-      return error("user_id and role are required", 400);
+      return error("user_id or email, plus role, are required", 400);
     }
-    if (!body.user_id || !body.role) {
-      return error("user_id and role are required", 400);
+
+    const role = body.role;
+    if (!role || !(PARTICIPANT_ROLES as readonly string[]).includes(role)) {
+      return error(
+        `role is required and must be one of: ${PARTICIPANT_ROLES.join(", ")}`,
+        400
+      );
+    }
+
+    // Resolve the target user id from either user_id or email.
+    let targetUserId = body.user_id;
+    if (!targetUserId) {
+      if (!body.email) {
+        return error("user_id or email is required", 400);
+      }
+      const found = await prisma.users.findFirst({
+        where: { email: { equals: body.email.trim(), mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (!found) {
+        return error(
+          "No RealTourFlow account with that email — invite them first.",
+          404
+        );
+      }
+      targetUserId = found.id;
     }
 
     await prisma.$executeRaw`
       INSERT INTO deal_participants (deal_id, user_id, role)
-      VALUES (${dealId}::uuid, ${body.user_id}::uuid, ${body.role})
+      VALUES (${dealId}::uuid, ${targetUserId}::uuid, ${role})
       ON CONFLICT (deal_id, user_id) DO UPDATE SET role = EXCLUDED.role
     `;
     return json({ status: "ok" });

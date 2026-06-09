@@ -1891,6 +1891,9 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
         </dl>
       </div>
 
+      {/* Team & Participants — add co-agent / client by email, remove added participants */}
+      <TeamParticipantsCard deal={deal} />
+
       {/* Property Tracker — buy deals only */}
       {deal.type === 'buy' && <PropertyTrackingCard deal={deal} />}
 
@@ -1930,6 +1933,149 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
       {/* Email-invite client to this deal */}
       {showInvite && (
         <DealInviteModal dealId={deal.id} onClose={() => setShowInvite(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── Team & Participants Card ────────────────────────────────────────────────
+
+// Roles an agent can attach to a deal. Values must match the user_role enum the
+// participants route validates against (agent, buyer, seller, admin, tc,
+// lending_partner). "Co-agent" maps to the `agent` role value.
+const PARTICIPANT_ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'agent', label: 'Co-agent' },
+  { value: 'buyer', label: 'Buyer' },
+  { value: 'seller', label: 'Seller' },
+  { value: 'tc', label: 'Transaction Coordinator' },
+  { value: 'lending_partner', label: 'Lending Partner' },
+];
+
+const ROLE_LABELS: Record<string, string> = Object.fromEntries(
+  PARTICIPANT_ROLE_OPTIONS.map((o) => [o.value, o.label]),
+);
+
+function TeamParticipantsCard({ deal }: { deal: Deal }) {
+  const activeUser = useAuthStore((s) => s.activeUser);
+  // Match how other agent-only controls gate (e.g. canAdvanceStage). The server
+  // still enforces agent-ownership; this is UX only.
+  const canManage = ['agent', 'tc', 'admin'].includes(activeUser?.groupId ?? '');
+
+  const { participants, addParticipant, removeParticipant, adding } = useParticipants(deal.id);
+
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState(PARTICIPANT_ROLE_OPTIONS[0].value);
+  const [err, setErr] = useState('');
+
+  async function handleAdd() {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      setErr('Enter an email address.');
+      return;
+    }
+    setErr('');
+    try {
+      await addParticipant({ email: trimmed, role });
+      setEmail('');
+    } catch (e: unknown) {
+      // Surface the route's message (404 → "No RealTourFlow account…").
+      setErr(e instanceof Error ? e.message : 'Could not add participant — please try again.');
+    }
+  }
+
+  async function handleRemove(userId: string, name: string) {
+    if (!confirm(`Remove ${name} from this deal?`)) return;
+    try {
+      await removeParticipant(userId);
+    } catch {
+      // Refetch on success handles the happy path; failures leave the row in place.
+    }
+  }
+
+  return (
+    <div className="rounded-xl bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <Users size={14} className="text-gray-400" />
+        <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Team &amp; Participants</h3>
+      </div>
+
+      {participants.length === 0 ? (
+        <p className="text-sm text-gray-400">No participants yet.</p>
+      ) : (
+        <ul className="space-y-2">
+          {participants.map((p) => {
+            // Never offer remove on the deal's owning agent (the primary agent
+            // is the deal.agentId, not normally a participant row — guard anyway).
+            const isPrimaryAgent = p.id === deal.agentId;
+            return (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-brand-navy">{p.name}</p>
+                  <p className="truncate text-xs text-gray-400">{p.email}</p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="rounded-full bg-brand-navy/10 px-2.5 py-0.5 text-[11px] font-medium text-brand-navy">
+                    {ROLE_LABELS[p.role] ?? p.role}
+                  </span>
+                  {canManage && !isPrimaryAgent && (
+                    <button
+                      onClick={() => handleRemove(p.id, p.name)}
+                      title="Remove participant"
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-gray-300 hover:bg-red-50 hover:text-red-500 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {canManage && (
+        <div className="mt-4 border-t pt-4">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-500">
+            Add participant / co-agent
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex flex-1 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 focus-within:border-brand-navy/40 focus-within:ring-2 focus-within:ring-brand-navy/10">
+              <Mail size={14} className="flex-shrink-0 text-gray-400" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleAdd(); }}
+                placeholder="person@email.com"
+                className="min-w-0 flex-1 bg-transparent text-sm text-brand-navy outline-none placeholder:text-gray-300"
+              />
+            </div>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-brand-navy outline-none focus:border-brand-navy/40 focus:ring-2 focus:ring-brand-navy/10"
+            >
+              {PARTICIPANT_ROLE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleAdd}
+              disabled={adding || !email.trim()}
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-brand-navy px-4 py-2 text-sm font-bold text-white hover:bg-brand-navy/90 disabled:opacity-40 transition-colors"
+            >
+              <Plus size={14} /> {adding ? 'Adding…' : 'Add'}
+            </button>
+          </div>
+          {err && <p className="mt-2 text-xs text-red-500">{err}</p>}
+          <p className="mt-2 text-[11px] text-gray-400">
+            They must already have a RealTourFlow account. No account?{' '}
+            <span className="font-medium text-brand-navy">Use “Invite by email”</span> above to send a join link.
+          </p>
+        </div>
       )}
     </div>
   );
