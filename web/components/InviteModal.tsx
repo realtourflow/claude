@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from 'react';
-import { X, Copy, Check, UserPlus, Home } from 'lucide-react';
+import { X, Copy, Check, UserPlus, Home, Mail, Send } from 'lucide-react';
+import { sendClientInviteEmail } from '@/hooks/useInvites';
 
 type Props = {
   agentId: string;
@@ -13,6 +14,11 @@ type InviteType = 'buyer' | 'seller' | null;
 export default function InviteModal({ agentId, onClose }: Props) {
   const [selected, setSelected] = useState<InviteType>(null);
   const [copied, setCopied] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sentTo, setSentTo] = useState('');
+  const [err, setErr] = useState('');
 
   const base = window.location.origin;
   const link = selected ? `${base}/onboard/${selected}?agent=${agentId}` : '';
@@ -23,6 +29,36 @@ export default function InviteModal({ agentId, onClose }: Props) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  }
+
+  async function handleEmail() {
+    if (!selected || !name.trim() || !email.trim()) {
+      setErr('Fill in both name and email.');
+      return;
+    }
+    setSending(true);
+    setErr('');
+    setSentTo('');
+    try {
+      await sendClientInviteEmail({
+        email: email.trim(),
+        name: name.trim(),
+        role: selected,
+      });
+      setSentTo(email.trim());
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Failed to send — please try again.');
+    }
+    setSending(false);
+  }
+
+  // Reset the email sub-form (incl. the success/error notice) when the role
+  // changes, so a prior "Emailed to …" confirmation can't linger under a
+  // different role's onboarding link.
+  function pickRole(r: InviteType) {
+    setSelected(r);
+    setSentTo('');
+    setErr('');
   }
 
   return (
@@ -53,7 +89,7 @@ export default function InviteModal({ agentId, onClose }: Props) {
             <p className="mb-3 text-sm font-medium text-gray-600">Who are you inviting?</p>
             <div className="grid grid-cols-2 gap-3">
               <button
-                onClick={() => setSelected('buyer')}
+                onClick={() => pickRole('buyer')}
                 className={[
                   'flex flex-col items-center gap-2 rounded-xl border-2 px-4 py-4 text-sm font-semibold transition-all',
                   selected === 'buyer'
@@ -66,7 +102,7 @@ export default function InviteModal({ agentId, onClose }: Props) {
                 <span className="text-[11px] font-normal text-gray-400">Home search → pipeline</span>
               </button>
               <button
-                onClick={() => setSelected('seller')}
+                onClick={() => pickRole('seller')}
                 className={[
                   'flex flex-col items-center gap-2 rounded-xl border-2 px-4 py-4 text-sm font-semibold transition-all',
                   selected === 'seller'
@@ -103,6 +139,56 @@ export default function InviteModal({ agentId, onClose }: Props) {
               <p className="text-[11px] text-gray-400">
                 This link is tied to your account. When your client completes onboarding they&apos;ll appear in your pipeline automatically.
               </p>
+
+              {/* Or email it to them */}
+              <div className="space-y-3 border-t pt-4">
+                <p className="text-sm font-medium text-gray-600">Or email it to them</p>
+
+                {/* Name */}
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">
+                    Name <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Jordan Smith"
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none text-brand-navy placeholder:text-gray-300 focus:border-brand-navy/40 focus:ring-2 focus:ring-brand-navy/10"
+                  />
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">
+                    Email <span className="text-red-400">*</span>
+                  </label>
+                  <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 focus-within:border-brand-navy/40 focus-within:ring-2 focus-within:ring-brand-navy/10">
+                    <Mail size={14} className="text-gray-400 flex-shrink-0" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="client@email.com"
+                      className="flex-1 text-sm outline-none bg-transparent text-brand-navy placeholder:text-gray-300 min-w-0"
+                    />
+                  </div>
+                </div>
+
+                {err && <p className="text-xs text-red-500">{err}</p>}
+                {sentTo && (
+                  <p className="text-xs font-medium text-green-600">
+                    Emailed to {sentTo} ✓
+                  </p>
+                )}
+
+                <button
+                  onClick={handleEmail}
+                  disabled={sending || name.trim() === '' || email.trim() === ''}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-navy px-5 py-2 text-sm font-bold text-white hover:bg-brand-navy/90 disabled:opacity-40 transition-colors"
+                >
+                  <Send size={13} /> {sending ? 'Sending…' : 'Invite by email'}
+                </button>
+              </div>
             </div>
           )}
         </div>
