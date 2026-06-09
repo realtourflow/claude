@@ -6,38 +6,50 @@
 
 ---
 
-## ⚠️ Migration In Progress: Next.js + Prisma rewrite at `web/`
+## ✅ Launch Target: the `web/` app (Next.js 16 + Prisma 7)
 
-As of PR #1 (branch `nextjs-prisma-rewrite`) the entire Go backend and the
-React+Vite frontend have been ported to a single Next.js 16 + Prisma 7 app
-under `web/`. Both Phase 11 (frontend) and the API port (Phases 0–10) build
-clean and have a Vercel preview deploy. The original `backend/` (Go) and
-`frontend/` (Vite) directories are still in the repo unchanged — they keep
-running production until the Vercel cutover happens.
+**The product we are launching is the single Next.js app under `web/`.** It serves
+both the UI and the API. All new work goes here. The legacy Go backend (`backend/`)
+and React+Vite frontend (`frontend/`) are **being retired** — do not build features in
+them.
 
-**Current production:**
-- API: Go on ECS Fargate (built from `backend/`)
-- UI: React+Vite on Vercel (built from `frontend/`)
+> Earlier drafts of this file called the legacy stack "production." That framing is
+> retired. Trust this section: **`web/` is the launch target.** The `backend/` sections
+> further down are kept as **port reference** (the `web/` API mirrors them) and for the
+> infra that still serves traffic until DNS flips at cutover — they are **not** the place
+> to add code.
 
-**New stack (in `web/`, Vercel preview only for now):**
-- Single Next.js 16 App Router app — same project serves UI + API
-- Prisma 7 (driver-adapter, introspected from the live DB)
-- Auth0 SPA flow via `@auth0/auth0-react` (unchanged token shape)
-- Tailwind 4 with the same brand theme tokens
+**Launch stack (`web/`):**
+- Single Next.js 16 App Router app (UI + API in one project) on Vercel
+- Prisma 7 (driver-adapter, introspected from the live Postgres)
+- Auth0 (same JWT / token shape as before)
+- Tailwind 4
+- Tests: Vitest (unit/integration) + Playwright (E2E), enforced by `.github/workflows/web-ci.yml`
 
-**Cutover sequence (when ready):**
-1. Promote the Vercel preview of `web/` to a production deployment
+**Remaining launch work** is tracked in the **Launch v1** GitHub milestone — start at the
+tracking issue **#18** in `realtourflow/claude`. Every launch ticket targets `web/`.
+
+**`web/` conventions (read before coding):**
+- This is **Next.js 16** with breaking changes — read `node_modules/next/dist/docs/`
+  first (`web/AGENTS.md` mandates it). Route handlers are async `(req, ctx)` where
+  `ctx.params` is a `Promise`.
+- External clients expose a `setXForTesting()` seam (see `web/lib/stripe.ts`,
+  `web/lib/arive.ts`); tests inject fakes and never hit real APIs (CI has no secrets).
+- **Migrations:** still golang-migrate SQL in `backend/migrations/00003X_*.{up,down}.sql`,
+  then `npm run prisma:pull` to sync `web/prisma/schema.prisma`. Do **not** use
+  `prisma migrate` yet — CI runs golang-migrate. (Flips to `prisma migrate deploy` only at
+  cutover step 5 below.)
+- Develop on **Node 22** (`web/.nvmrc`).
+
+**Cutover sequence (legacy → `web/`):**
+1. Promote the `web/` Vercel preview to a production deployment
 2. Switch DNS so traffic hits Vercel
-3. Drain ECS, then delete `backend/` and the deploy.yml workflow
+3. Drain ECS, then delete `backend/` and the `deploy.yml` workflow
 4. Delete `frontend/`
-5. Switch `make migrate` to `prisma migrate deploy` and stop using golang-migrate
+5. Switch migrations to `prisma migrate deploy` and stop using golang-migrate
 
-Until step 1 lands, both stacks coexist. Anything that says "backend/" or
-"frontend/" below describes the live production app and is still accurate.
-The Next.js port lives under `web/` with its own README, env, CI, and
-Vercel project.
-
-See `web/FRONTEND_MIGRATION.md` for the original migration plan.
+See `web/FRONTEND_MIGRATION.md` for the original migration plan and the **Launch v1**
+milestone (tracker #18) for the live punch-list.
 
 ---
 
@@ -56,17 +68,24 @@ and integrates with ARIVE (loan milestone sync) for Mountain Mortgage / Fast Pas
 
 ## Stack
 
+**Launch stack — `web/` (this is what we ship):**
+
 | Layer | Technology |
 |---|---|
-| Frontend | React + Vite + TypeScript, Tailwind CSS, Zustand state, React Router |
-| Backend | Go 1.23, chi router, database/sql + pgx driver |
-| Database | PostgreSQL 16.13 (AWS RDS) |
-| Auth | Auth0 (SPA + API, JWT RS256, JWKS validation) |
-| Hosting | AWS ECS Fargate (backend), frontend not yet deployed to production |
-| Container registry | AWS ECR |
-| Secrets | AWS Secrets Manager |
-| CI/CD | GitHub Actions — push to `main` → build → ECR → ECS deploy |
+| App | Next.js 16 (App Router) — serves UI **and** API in one project |
+| ORM / DB access | Prisma 7 (driver-adapter) |
+| Database | PostgreSQL 16 (AWS RDS) |
+| Auth | Auth0 (JWT RS256, JWKS validation) |
+| UI | React (Server + Client Components), Tailwind 4 |
+| Tests | Vitest (unit/integration) + Playwright (E2E), enforced in CI |
+| Hosting | Vercel |
+| CI/CD | GitHub Actions `web-ci.yml` (typecheck → lint → Vitest) |
 | Local DB | Docker Compose (postgres:16-alpine) |
+
+**Legacy stack — being retired (reference only, do not extend):** Go 1.23 + chi on
+AWS ECS Fargate (`backend/`), React + Vite on Vercel (`frontend/`). Still serves
+current production traffic until the cutover DNS flip; details below are kept for the
+port and for running infra during coexistence.
 
 ---
 
@@ -99,23 +118,26 @@ the live frontend can call the API. No production frontend deployment exists yet
 ## Local Development
 
 ### Prerequisites
-- Go 1.23+
-- Node 20+
+- **Node 22** (`web/.nvmrc`) — for the `web/` app
 - Docker Desktop (for local Postgres)
-- `golang-migrate` CLI: `brew install golang-migrate`
+- `golang-migrate` CLI (`brew install golang-migrate`) — migrations run via golang-migrate until cutover
+- Go 1.23+ — only if touching the legacy `backend/` during coexistence
 
-### Run everything
+### Run everything (the `web/` app)
 
 ```bash
 # 1. Start local Postgres
 make db
 
-# 2. Apply migrations to local DB
+# 2. Apply migrations to local DB (golang-migrate)
 DATABASE_URL="postgres://postgres:postgres@localhost:5432/realtourflow?sslmode=disable" make migrate
 
-# 3. Start backend + frontend in parallel
-make dev
+# 3. Install deps + start the Next.js app (UI + API)
+make install   # cd web && npm install
+make dev       # cd web && npm run dev  → http://localhost:3000
 ```
+
+> `make dev`, `make test`, `make typecheck`, `make lint`, `make build` all target `web/`.
 
 ### Environment files
 
@@ -217,6 +239,20 @@ https://realtourflow.com/roles: ["agent"]  // or buyer, seller, admin, lending_p
 
 This tracks what's wired to the real database vs what still uses mock data.
 **Before touching any feature, check this table.**
+
+> ⚠️ **This inventory describes the LEGACY `frontend/` (React + Vite) stack, which is being retired — NOT the launched `web/` Next.js app.** In `web/`, several features marked "Closed/wired" below were never ported and **404'd in production** until **EPIC #56**. As of those ports (all merged), the following are now **live in `web/`** end-to-end:
+>
+> | Feature | web/ status | Issue |
+> |---|---|---|
+> | Vendor directory | ✅ live (`/api/vendors`) | #49 |
+> | MLS / SimplyRETS creds + listing search | ✅ live (`/api/me/mls`, `/api/deals/:id/listings/search`) | #48 |
+> | Agent doc-templates | ✅ live (`/api/me/doc-templates`) | #50 |
+> | TC settings | ✅ live (`/api/me/tc`, `/api/me/agents`) | #51 |
+> | Property mutations (status / notes / offer-request / delete) | ✅ live (`/api/deals/:id/properties/:propId`) | #52 |
+> | Agent invites | ✅ live (`/api/admin/agent-invites`, `/api/agent-invites/:token`) | #45 |
+> | Fast Pass collect / Smooth Exit enroll | ✅ live (`/api/deals/:id/fastpass/collect`, `/api/deals/:id/smoothexit`) | #46, #47 |
+>
+> The **API Endpoints** section above and the EPIC #56 issues are authoritative for `web/`. The legacy-stack table below is kept only for the retirement window.
 
 ### Wired to real API ✅
 
