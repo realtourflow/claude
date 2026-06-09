@@ -6,6 +6,7 @@ import {
   listMessages,
 } from "@/lib/messages";
 import { createNotification } from "@/lib/notifications";
+import { emailNewMessage } from "@/lib/notification-email";
 import { prisma } from "@/lib/db";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -99,6 +100,23 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         console.error("message notification fan-out failed", err);
       }
     })();
+
+    // Best-effort email to the other party — only on the client thread. Awaited
+    // (not detached) so it actually sends on Vercel; a throw must never block
+    // the response.
+    if (channel === "client_thread") {
+      try {
+        await emailNewMessage({
+          req,
+          dealId,
+          senderId: userId,
+          senderIsAgent: access.isAgent,
+          body: text,
+        });
+      } catch (err) {
+        console.error("message notification email failed", err);
+      }
+    }
 
     return json(message, 201);
   })) as Response;
