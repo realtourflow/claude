@@ -45,3 +45,24 @@ export async function sendDealInvite(
   });
   return apiInviteToFrontend(i);
 }
+
+/**
+ * Emails an agent-scoped onboarding link to a prospective client. Unlike
+ * sendDealInvite this is not tied to a deal — the backend builds a stateless
+ * `/onboard/{role}?agent=...` link and sends it best-effort.
+ */
+export async function sendClientInviteEmail({
+  email,
+  name,
+  role,
+}: {
+  email: string;
+  name: string;
+  role: "buyer" | "seller";
+}): Promise<{ ok: boolean; inviteUrl: string }> {
+  return api.post<{ ok: boolean; inviteUrl: string }>("/me/client-invite", {
+    email,
+    name,
+    role,
+  });
+}
