@@ -46,6 +46,16 @@ export function makeS3Key(dealId: string, fileName: string): string {
   return `deals/${dealId}/${Date.now()}/${safe}`;
 }
 
+/**
+ * Generates an agent-scoped S3 key for a doc template, with a timestamp prefix
+ * to avoid collisions. Mirrors agentDocS3Key in
+ * backend/internal/handlers/agent_docs.go.
+ */
+export function makeAgentDocS3Key(agentId: string, fileName: string): string {
+  const safe = fileName.split("/").pop()!.replace(/\s+/g, "-");
+  return `agent-templates/${agentId}/${Date.now()}/${safe}`;
+}
+
 export async function getUploadUrl(input: {
   key: string;
   contentType?: string;
