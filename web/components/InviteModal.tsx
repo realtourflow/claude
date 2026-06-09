@@ -52,6 +52,15 @@ export default function InviteModal({ agentId, onClose }: Props) {
     setSending(false);
   }
 
+  // Reset the email sub-form (incl. the success/error notice) when the role
+  // changes, so a prior "Emailed to …" confirmation can't linger under a
+  // different role's onboarding link.
+  function pickRole(r: InviteType) {
+    setSelected(r);
+    setSentTo('');
+    setErr('');
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -80,7 +89,7 @@ export default function InviteModal({ agentId, onClose }: Props) {
             <p className="mb-3 text-sm font-medium text-gray-600">Who are you inviting?</p>
             <div className="grid grid-cols-2 gap-3">
               <button
-                onClick={() => setSelected('buyer')}
+                onClick={() => pickRole('buyer')}
                 className={[
                   'flex flex-col items-center gap-2 rounded-xl border-2 px-4 py-4 text-sm font-semibold transition-all',
                   selected === 'buyer'
@@ -93,7 +102,7 @@ export default function InviteModal({ agentId, onClose }: Props) {
                 <span className="text-[11px] font-normal text-gray-400">Home search → pipeline</span>
               </button>
               <button
-                onClick={() => setSelected('seller')}
+                onClick={() => pickRole('seller')}
                 className={[
                   'flex flex-col items-center gap-2 rounded-xl border-2 px-4 py-4 text-sm font-semibold transition-all',
                   selected === 'seller'
