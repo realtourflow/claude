@@ -2,6 +2,7 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { getDocusignClient, type DocusignSigner } from "@/lib/docusign";
+import { sendDocumentEnvelope } from "@/lib/docusign-documents";
 import { getObjectBytes } from "@/lib/s3";
 
 type Ctx = { params: Promise<{ id: string; documentId: string }> };
@@ -53,20 +54,16 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
     let envelopeId: string;
     try {
-      envelopeId = await docusign.createEnvelope(doc.name, bytes, signers);
+      ({ envelopeId } = await sendDocumentEnvelope({
+        documentId,
+        docName: doc.name,
+        bytes,
+        signers,
+      }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return error("failed to create envelope: " + msg, 502);
     }
-
-    await prisma.documents.update({
-      where: { id: documentId },
-      data: {
-        docusign_envelope_id: envelopeId,
-        docusign_status: "sent",
-        docusign_sent_at: new Date(),
-      },
-    });
 
     return json({ envelope_id: envelopeId, status: "sent" });
   })) as Response;
