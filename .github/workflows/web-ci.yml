@@ -65,6 +65,13 @@ jobs:
       - name: Unit + integration tests
         run: npm test
 
+      # Catch production-build breakage before Vercel does (#84). Last on
+      # purpose: the build is the slowest signal, so the cheap checks above
+      # fail fast first. Needs no extra env — lib/db.ts and lib/env.ts are
+      # lazy, so page-data collection never touches a database or secrets.
+      - name: Production build
+        run: npm run build
+
   # Golden-path browser flow (T6-1 spec). A distinct job from `test` on purpose:
   # a flaky browser run reports its own red/green and can't block unit merges.
   e2e:
