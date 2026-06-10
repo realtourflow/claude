@@ -33,17 +33,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Resolve base ref
+        id: refs
+        run: |
+          if [ -n "${{ github.base_ref }}" ]; then
+            echo "base=${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.pull_request.base.ref }}" ]; then
+            echo "base=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
+            BASE=$(gh pr view "$PR_NUM" --repo "${{ github.repository }}" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo "main")
+            echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Load review prompt
         id: prompt
         run: |
           {
             echo 'content<<PROMPT_EOF'
-            cat .github/opencode/review-prompt.md
+            sed "s|\${BASE_REF}|${{ steps.refs.outputs.base }}|g" .github/opencode/review-prompt.md
             echo ''
             echo '---'
             echo ''
             echo "PR #${{ github.event.pull_request.number || github.event.issue.number }} in ${{ github.repository }}."
-            echo "Base ref: ${{ github.base_ref || 'unknown' }}"
+            echo "Base ref: ${{ steps.refs.outputs.base }}"
             echo PROMPT_EOF
           } >> "$GITHUB_OUTPUT"
 
