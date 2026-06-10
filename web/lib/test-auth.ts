@@ -11,10 +11,12 @@
  * (`getE2EVerifyOptions`). Because both live in the same process, the signer
  * and verifier always agree — no key material is committed to the repo.
  *
- * EVERYTHING here is inert unless `E2E_AUTH === "1"`. That flag is only ever set
- * by Playwright's webServer (see `playwright.config.ts`); it MUST NOT be set in
- * production. The token-minting route 404s without it and `getDefaultOpts` only
- * routes here when it is set.
+ * EVERYTHING here is inert unless `e2eAuthEnabled()` returns true: the
+ * `E2E_AUTH === "1"` flag is only ever set by Playwright's webServer (see
+ * `playwright.config.ts`), and as a backstop the helper hard-disables itself
+ * in Vercel production (`VERCEL_ENV === "production"`) even if the flag is
+ * mistakenly set there. The token-minting route 404s without it and
+ * `getDefaultOpts` only routes here when it is enabled.
  */
 import { SignJWT } from "jose";
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
@@ -24,9 +26,21 @@ export const E2E_ISSUER = "https://e2e.realtourflow.local/";
 export const E2E_AUDIENCE = "https://api.e2e.realtourflow.local";
 const ROLE_CLAIM = "https://realtourflow.com/roles";
 
-/** True only when E2E test-auth has been explicitly enabled for this process. */
+/**
+ * True only when E2E test-auth has been explicitly enabled for this process
+ * AND we are not running in Vercel production. The single source of truth for
+ * the seam — `lib/auth.ts` (verifier swap) and `app/api/test-auth/route.ts`
+ * (token mint) both gate on this.
+ *
+ * The `VERCEL_ENV` backstop means one mistakenly-set `E2E_AUTH=1` in the
+ * Vercel production environment can never open the unauthenticated admin
+ * mint. Playwright's webServer runs `next dev` with no `VERCEL_ENV`, so the
+ * E2E path keeps working everywhere it is meant to (local, CI, previews).
+ */
 export function e2eAuthEnabled(): boolean {
-  return process.env.E2E_AUTH === "1";
+  return (
+    process.env.E2E_AUTH === "1" && process.env.VERCEL_ENV !== "production"
+  );
 }
 
 let keys: { publicKey: KeyObject; privateKey: KeyObject } | undefined;

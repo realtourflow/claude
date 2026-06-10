@@ -1,11 +1,20 @@
 import { z } from "zod";
 
 // Dev fallback for the OAuth CSRF state-cookie HMAC key. Used when the env var
-// is unset OR explicitly empty (e.g. copied from .env.example). Production
-// should set a strong random OAUTH_STATE_SECRET.
+// is unset OR explicitly empty (e.g. copied from .env.example) — but NEVER in
+// Vercel production: this string is committed, so falling back there would let
+// anyone forge the OAuth state cookie. See the superRefine below.
 const DEV_OAUTH_STATE_SECRET = "rtf-dev-oauth-state-secret-change-in-prod";
 
-const schema = z.object({
+const MIN_OAUTH_STATE_SECRET_LENGTH = 32;
+
+const shape = z.object({
+  // Vercel deployment environment: "production" | "preview" | "development",
+  // unset outside Vercel (local dev, vitest, CI, Playwright's `next dev`).
+  // This is the signal for "are we in real production" — fail-closed checks
+  // key off it.
+  VERCEL_ENV: z.string().default(""),
+
   DATABASE_URL: z.string().url(),
 
   AUTH0_DOMAIN: z.string().min(1),
@@ -45,13 +54,12 @@ const schema = z.object({
   GOOGLE_OAUTH_REDIRECT_URL: z.string().default(""),
 
   // HMAC key for the short-lived, signed CSRF state cookie used by the calendar
-  // OAuth connect flows (lib/oauth-state.ts). Falls back to a dev value when
-  // unset or empty so local and CI work without config; set a strong random
-  // value in production.
-  OAUTH_STATE_SECRET: z
-    .string()
-    .default(DEV_OAUTH_STATE_SECRET)
-    .transform((s) => s || DEV_OAUTH_STATE_SECRET),
+  // OAuth connect flows (lib/oauth-state.ts). Outside Vercel production it
+  // falls back to a dev value when unset or empty so local dev / CI / previews
+  // work without config. In production (VERCEL_ENV=production) it is REQUIRED
+  // with at least 32 chars — enforced by the superRefine below, which makes
+  // env() throw instead of silently using the committed fallback.
+  OAUTH_STATE_SECRET: z.string().default(""),
 
   MICROSOFT_OAUTH_CLIENT_ID: z.string().default(""),
   MICROSOFT_OAUTH_CLIENT_SECRET: z.string().default(""),
@@ -69,6 +77,37 @@ const schema = z.object({
   // <invites@realtourflow.com>") in production.
   RESEND_FROM: z.string().default("RealTourFlow <onboarding@resend.dev>"),
 });
+
+const schema = shape
+  // Fail closed in production: the committed dev fallback must never sign
+  // real OAuth state cookies. env() is lazy (called at request time, not
+  // import time), so a missing secret surfaces as a thrown ZodError on the
+  // first request that touches env() — the message below lands in the
+  // function logs and names the variable.
+  .superRefine((vals, ctx) => {
+    if (
+      vals.VERCEL_ENV === "production" &&
+      vals.OAUTH_STATE_SECRET.length < MIN_OAUTH_STATE_SECRET_LENGTH
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["OAUTH_STATE_SECRET"],
+        message:
+          `OAUTH_STATE_SECRET must be set to a random value of at least ` +
+          `${MIN_OAUTH_STATE_SECRET_LENGTH} characters when ` +
+          `VERCEL_ENV=production — refusing to fall back to the committed ` +
+          `dev secret. Set OAUTH_STATE_SECRET in the Vercel project ` +
+          `environment variables.`,
+      });
+    }
+  })
+  // Dev/test/preview convenience: unset or empty resolves to the dev value.
+  // Unreachable in production — the refine above already rejected anything
+  // shorter than 32 chars there.
+  .transform((vals) => ({
+    ...vals,
+    OAUTH_STATE_SECRET: vals.OAUTH_STATE_SECRET || DEV_OAUTH_STATE_SECRET,
+  }));
 
 export type Env = z.infer<typeof schema>;
 

@@ -1,6 +1,6 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { env } from "./env";
-import { getE2EVerifyOptions } from "./test-auth";
+import { e2eAuthEnabled, getE2EVerifyOptions } from "./test-auth";
 
 export class AuthError extends Error {
   readonly status: 401 | 403;
@@ -34,10 +34,12 @@ let defaultOpts: VerifyOptions | undefined;
 function getDefaultOpts(): VerifyOptions {
   if (defaultOpts) return defaultOpts;
   // E2E test-auth: verify locally-minted RS256 tokens instead of hitting Auth0.
-  // Gated on E2E_AUTH (set only by Playwright's webServer) so production is
-  // unaffected. A unit test that called setVerifyOptionsForTesting has already
-  // set `defaultOpts` above, so this never overrides an explicit test setup.
-  if (process.env.E2E_AUTH === "1") {
+  // Gated on e2eAuthEnabled() — E2E_AUTH is set only by Playwright's webServer,
+  // and the helper additionally hard-disables itself when VERCEL_ENV is
+  // "production", so this swap can never happen in real production. A unit
+  // test that called setVerifyOptionsForTesting has already set `defaultOpts`
+  // above, so this never overrides an explicit test setup.
+  if (e2eAuthEnabled()) {
     defaultOpts = getE2EVerifyOptions();
     return defaultOpts;
   }
