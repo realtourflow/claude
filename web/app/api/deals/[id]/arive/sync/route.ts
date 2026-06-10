@@ -2,6 +2,7 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { getAriveClient } from "@/lib/arive";
+import { enqueuePushDealClosingEvent } from "@/lib/jobs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -31,6 +32,16 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         arive_synced_at: new Date(),
       },
     });
+
+    // Calendar push is best-effort but must be AWAITED, not detached: on Vercel
+    // the function can freeze after the response is sent, killing a stray
+    // promise. Swallow errors so a calendar hiccup never fails the sync.
+    try {
+      await enqueuePushDealClosingEvent(dealId);
+    } catch (err) {
+      console.error("calendar push (closing event) failed", err);
+    }
+
     return json({ ok: true, synced_at: new Date().toISOString() });
   })) as Response;
 }

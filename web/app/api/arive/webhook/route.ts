@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { getAriveClient } from "@/lib/arive";
+import { enqueuePushDealClosingEvent } from "@/lib/jobs";
 
 type Payload = {
   loanId?: string;
@@ -35,6 +36,24 @@ export async function POST(req: Request): Promise<Response> {
           arive_synced_at: new Date(),
         },
       });
+
+      // Calendar push (closing event) for every deal tied to this loan — same
+      // best-effort contract as the sync route. This block is already detached
+      // from the response; swallow per-deal so one failure can't block another.
+      const affected = await prisma.deals.findMany({
+        where: { arive_loan_id: loanId },
+        select: { id: true },
+      });
+      for (const d of affected) {
+        try {
+          await enqueuePushDealClosingEvent(d.id);
+        } catch (err) {
+          console.error("calendar push (closing event) failed", {
+            dealId: d.id,
+            err,
+          });
+        }
+      }
     } catch (err) {
       console.error("arive webhook sync failed", { loanId, err });
     }
