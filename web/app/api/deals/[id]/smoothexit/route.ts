@@ -69,7 +69,8 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       estimated_sale_price: body.estimated_sale_price ?? 0,
       fee_cents: body.fee_cents ?? 0,
       survey_answers: (body.survey_answers ?? null) as object | null,
-      selected_upsells: selectedUpsells,
+      // Dedupe what we store so the JSONB matches what was actually charged.
+      selected_upsells: [...new Set(selectedUpsells)],
       upsell_total_cents: upsellTotalCents,
       upsells_paid: false,
       enrolled_at: new Date().toISOString(),

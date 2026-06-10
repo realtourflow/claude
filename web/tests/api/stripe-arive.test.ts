@@ -203,15 +203,16 @@ describe("POST /api/stripe/webhook", () => {
   it("smooth_exit_upsell payment sets upsells_paid and does NOT touch the closing fee", async () => {
     const agent = await createUser({ role: "agent" });
     const deal = await createDeal({ agent_id: agent.id });
-    // Seed an enrollment the way POST /deals/[id]/smoothexit persists it.
+    // Seed an enrollment shaped like POST /deals/[id]/smoothexit persists it
+    // (catalog key + the server-computed total for it).
     await prisma.deals.update({
       where: { id: deal.id },
       data: {
         smooth_exit: {
           status: "active",
           payment_option: "from_proceeds",
-          selected_upsells: ["staging"],
-          upsell_total_cents: 25000,
+          selected_upsells: ["staging_consult"],
+          upsell_total_cents: 24700,
           upsells_paid: false,
           enrolled_at: new Date().toISOString(),
         },
