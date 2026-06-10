@@ -3,21 +3,64 @@ name: opencode-review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: review-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      (github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request != null &&
+        github.event.comment.body == '/review' &&
+        (github.event.comment.author_association == 'OWNER' ||
+         github.event.comment.author_association == 'MEMBER' ||
+         github.event.comment.author_association == 'COLLABORATOR'))
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       id-token: write
       contents: read
       pull-requests: write
-      issues: write
+      issues: read
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve base ref
+        id: refs
+        run: |
+          if [ -n "${{ github.base_ref }}" ]; then
+            echo "base=${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.pull_request.base.ref }}" ]; then
+            echo "base=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
+            BASE=$(gh pr view "$PR_NUM" --repo "${{ github.repository }}" --json baseRefName --jq '.baseRefName' 2>/dev/null || echo "main")
+            echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load review prompt
+        id: prompt
+        run: |
+          {
+            echo 'content<<PROMPT_EOF'
+            sed "s|\${BASE_REF}|${{ steps.refs.outputs.base }}|g" .github/opencode/review-prompt.md
+            echo ''
+            echo '---'
+            echo ''
+            echo "PR #${{ github.event.pull_request.number || github.event.issue.number }} in ${{ github.repository }}."
+            echo "Base ref: ${{ steps.refs.outputs.base }}"
+            echo PROMPT_EOF
+          } >> "$GITHUB_OUTPUT"
 
       - uses: anomalyco/opencode/github@latest
         env:
@@ -26,86 +69,4 @@ jobs:
         with:
           model: openrouter/deepseek/deepseek-v4-pro
           use_github_token: true
-          prompt: |
-            You are a senior code reviewer. Perform a thorough review of this pull request.
-
-            ## Process
-
-            1. Read CLAUDE.md first for architecture, conventions, and known boundaries.
-            2. Run: `git diff origin/${{ github.base_ref }}...HEAD` to see the full diff.
-            3. Read the full changed files and any related files (interfaces, callers, services, tests) to understand context.
-
-            ## Review — Inline Findings
-
-            For each issue found, provide:
-            - **File:line** reference (e.g. `backend/internal/handlers/handlers.go:42`)
-            - **Severity**: 🔴 Bug / 🟡 Warning / 🔵 Suggestion
-            - **Description**: Short, actionable explanation (1-2 sentences max)
-            - **Suggestion**: Concrete replacement code if applicable, or "N/A" if not
-
-            Focus on:
-            - Potential bugs or logical errors (verify by reading surrounding code)
-            - Security vulnerabilities (trace the full request flow before flagging)
-            - Incorrect error handling or missing edge cases
-            - Race conditions or concurrency issues
-            - Broken or missing type safety
-            - API contract violations (wrong request/response shapes)
-            - Missing or incorrect database operations (N+1, missing transactions, SQL injection)
-            - Broken tests or tests that don't cover the changed behavior
-
-            ## Conservative Review Rules — IMPORTANT
-
-            False positives waste developer time. Before flagging anything:
-            - Performance concern? Confirm caching/batching/indexing doesn't already exist nearby.
-            - Missing validation? Confirm it's not handled upstream in middleware or a caller.
-            - Security concern? Trace the full request flow — auth, middleware, handler.
-            - "Missing" feature? Confirm it isn't in a sibling file, parent class, or utility module.
-            - If you are not 90%+ sure after verification, DO NOT flag it.
-
-            Do NOT comment on:
-            - Code style, formatting, naming conventions, or documentation
-            - Hypothetical issues without concrete evidence in the diff
-            - Things that work correctly but you would have written differently
-            - Obvious or trivial changes (imports, constants, config)
-
-            ## Summary
-
-            After the inline findings, provide a summary section:
-
-            - **What was done well** (1-2 sentences on good patterns in the PR)
-            - **Most important issues** (if any, ranked by severity)
-            - **Overall assessment**: Approve / Request changes / LGTM with minor suggestions
-
-            ## Test Coverage Assessment
-
-            As a separate section:
-            - Identify which existing tests cover the changed code paths
-            - Assess whether the test coverage is sufficient for these changes
-            - Do NOT run the tests — just reason about coverage from reading test files
-            - If coverage is insufficient, suggest specific test cases
-
-            ## Output Format
-
-            Structure your review as markdown with these exact sections:
-
-            ```
-            ## 🔍 Inline Findings
-
-            ### [file:line] — Severity
-            Description
-            ```suggestion
-            code (or N/A)
-            ```
-
-            (repeat for each finding)
-
-            ---
-
-            ## 📋 Summary
-            (what was done well, key issues, overall assessment)
-
-            ## 🧪 Test Coverage
-            (assessment of test coverage for the changes)
-            ```
-
-            If no issues are found, say "No issues found. LGTM." with a brief note on what looked good.
+          prompt: ${{ steps.prompt.outputs.content }}
