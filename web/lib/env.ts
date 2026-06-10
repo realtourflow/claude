@@ -58,6 +58,11 @@ const schema = z.object({
   MICROSOFT_OAUTH_REDIRECT_URL: z.string().default(""),
   MICROSOFT_OAUTH_TENANT: z.string().default("common"),
 
+  // Shared secret for the cron-invoked job sweep (/api/jobs/process). When the
+  // env var exists, Vercel automatically sends `Authorization: Bearer <value>`
+  // on cron invocations. Empty = the sweep endpoint is disabled (503).
+  CRON_SECRET: z.string().default(""),
+
   RESEND_API_KEY: z.string().default(""),
   // From-address for transactional email. Defaults to Resend's shared sandbox
   // sender; set to a verified-domain address (e.g. "RealTourFlow

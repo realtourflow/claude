@@ -8,8 +8,11 @@
  * agent connected to both gets one event per provider from a single trigger,
  * idempotently (calendar_event_map is keyed per-provider).
  *
- * Best-effort: callers treat failures as non-fatal (a missed push self-heals on
- * the next mutation because the upsert patches the same event by internal_uid).
+ * Failure contract: fanOutUpsert/fanOutDelete attempt every provider, then
+ * throw if any failed — the durable queue (lib/queue.ts) relies on the throw to
+ * schedule a retry. Mutation-path callers (lib/jobs.ts) swallow the inline
+ * failure; a missed push also self-heals on the next mutation because the
+ * upsert patches the same event by internal_uid.
  *
  * Test seam: setCalendarHttpForTesting() injects a fake `fetch` (mirrors
  * lib/stripe.ts) so tests never hit real Google / Microsoft.
@@ -319,25 +322,44 @@ function providers(): CalendarProvider[] {
   return [googleProvider, microsoftProvider];
 }
 
-/** Best-effort upsert to every connected calendar. Per-provider errors are logged, never thrown. */
+/**
+ * Upsert to every connected calendar. Every provider is ATTEMPTED (one failing
+ * never blocks the other), then any collected failure is rethrown so the
+ * durable queue (lib/queue.ts) can retry the job with backoff. Retrying a
+ * partially-succeeded fan-out is safe: the provider that succeeded just gets
+ * an idempotent PATCH of the same event (calendar_event_map).
+ *
+ * Mutation-path callers stay best-effort — lib/jobs.ts swallows the inline
+ * failure and leaves the job queued for the cron sweep.
+ */
 export async function fanOutUpsert(userId: string, ev: CalendarEvent): Promise<void> {
+  const errors: unknown[] = [];
   for (const p of providers()) {
     try {
       await p.upsert(userId, ev);
     } catch (err) {
       console.error(`calendar push to ${p.provider} for user ${userId} failed`, err);
+      errors.push(err);
     }
+  }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, `calendar upsert failed for ${errors.length} provider(s)`);
   }
 }
 
-/** Best-effort delete from every connected calendar. */
+/** Delete from every connected calendar. Same attempt-all-then-throw contract as fanOutUpsert. */
 export async function fanOutDelete(userId: string, internalUid: string): Promise<void> {
+  const errors: unknown[] = [];
   for (const p of providers()) {
     try {
       await p.delete(userId, internalUid);
     } catch (err) {
       console.error(`calendar delete on ${p.provider} for user ${userId} failed`, err);
+      errors.push(err);
     }
+  }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, `calendar delete failed for ${errors.length} provider(s)`);
   }
 }
 
