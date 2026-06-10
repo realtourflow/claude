@@ -21,8 +21,9 @@ export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
     if (!row) return error("document not found", 404);
 
     await prisma.documents.delete({ where: { id: docId } });
-    // Best-effort S3 cleanup. Never fails the request.
-    void deleteObject(row.s3_key);
+    // Best-effort S3 cleanup — awaited so Vercel can't freeze the function
+    // before it runs (deleteObject swallows errors; never fails the request).
+    await deleteObject(row.s3_key);
 
     return new Response(null, { status: 204 });
   })) as Response;
