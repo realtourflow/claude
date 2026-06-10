@@ -32,15 +32,14 @@ const ROLE_CLAIM = "https://realtourflow.com/roles";
  * the seam — `lib/auth.ts` (verifier swap) and `app/api/test-auth/route.ts`
  * (token mint) both gate on this.
  *
- * The `VERCEL_ENV` backstop means one mistakenly-set `E2E_AUTH=1` in the
- * Vercel production environment can never open the unauthenticated admin
- * mint. Playwright's webServer runs `next dev` with no `VERCEL_ENV`, so the
- * E2E path keeps working everywhere it is meant to (local, CI, previews).
+ * The `VERCEL_ENV` backstop means a mistakenly-set `E2E_AUTH=1` on Vercel —
+ * where dashboard env vars default to ALL environments and preview URLs are
+ * publicly reachable — can never open the unauthenticated admin mint.
+ * Playwright's webServer runs `next dev` with no `VERCEL_ENV`, so the E2E
+ * path keeps working everywhere it is meant to (local + CI only).
  */
 export function e2eAuthEnabled(): boolean {
-  return (
-    process.env.E2E_AUTH === "1" && process.env.VERCEL_ENV !== "production"
-  );
+  return process.env.E2E_AUTH === "1" && !process.env.VERCEL_ENV;
 }
 
 let keys: { publicKey: KeyObject; privateKey: KeyObject } | undefined;

@@ -65,10 +65,10 @@ describe("e2eAuthEnabled()", () => {
     expect(e2eAuthEnabled()).toBe(false);
   });
 
-  it("is true when E2E_AUTH=1 on a Vercel preview", () => {
+  it("is false when E2E_AUTH=1 on a Vercel preview — preview URLs are public and dashboard env vars default to all environments", () => {
     process.env.E2E_AUTH = "1";
     process.env.VERCEL_ENV = "preview";
-    expect(e2eAuthEnabled()).toBe(true);
+    expect(e2eAuthEnabled()).toBe(false);
   });
 });
 
