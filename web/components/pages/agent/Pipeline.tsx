@@ -4,7 +4,6 @@ import { useState } from 'react';
 import Link from "next/link";
 import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, DealType } from "@/lib/data/mockDeals";
-import { MOCK_TASKS } from "@/lib/data/mockTasks";
 import { useDeals, type ApiDeal } from "@/hooks/useDeals";
 import { api } from "@/lib/api-client";
 import { ArrowRight, MapPin, Calendar, Clock, Zap, Plus, X } from 'lucide-react';
@@ -332,10 +331,9 @@ function NewDealModal({
 
 // ─── Deal Card ───────────────────────────────────────────────────────────────
 
-function DealCard({ deal }: { deal: Deal }) {
-  const tasks = MOCK_TASKS.filter((t) => t.dealId === deal.id);
-  const openTasks = tasks.filter((t) => t.status !== 'completed');
-  const overdueTasks = tasks.filter((t) => t.status === 'overdue');
+export function DealCard({ deal }: { deal: Deal }) {
+  const openTasks = deal.openTaskCount ?? 0;
+  const overdueTasks = deal.overdueTaskCount ?? 0;
 
   return (
     <Link
@@ -348,9 +346,9 @@ function DealCard({ deal }: { deal: Deal }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 mb-0.5">
               <span className="font-bold text-brand-navy text-base truncate">{deal.clientName}</span>
-              {overdueTasks.length > 0 && (
+              {overdueTasks > 0 && (
                 <span className="flex-shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600 uppercase">
-                  {overdueTasks.length} overdue
+                  {overdueTasks} overdue
                 </span>
               )}
             </div>
@@ -387,9 +385,9 @@ function DealCard({ deal }: { deal: Deal }) {
         <div className="flex items-center justify-between gap-2">
           <div className="flex flex-wrap gap-1.5">
             {/* Task summary pill */}
-            {openTasks.length > 0 ? (
+            {openTasks > 0 ? (
               <span className="rounded-full bg-brand-bg px-2.5 py-0.5 text-[11px] font-medium text-gray-600">
-                {openTasks.length} open task{openTasks.length !== 1 ? 's' : ''}
+                {openTasks} open task{openTasks !== 1 ? 's' : ''}
               </span>
             ) : (
               <span className="rounded-full bg-green-50 px-2.5 py-0.5 text-[11px] font-medium text-green-600">
