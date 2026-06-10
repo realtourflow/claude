@@ -80,7 +80,7 @@ export async function POST(req: Request): Promise<Response> {
             created_by: userId,
           },
         })) as unknown as PromoRow;
-        logAudit({
+        await logAudit({
           actorId: userId,
           eventType: "promo_create",
           targetId: row.id,

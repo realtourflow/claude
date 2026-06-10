@@ -19,7 +19,7 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
         return error("user not found or already deactivated", 404);
       }
       const actorId = await resolveUserId(claims.sub);
-      logAudit({
+      await logAudit({
         actorId: actorId ?? undefined,
         eventType: "user_deactivate",
         targetId: id,

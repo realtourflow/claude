@@ -50,7 +50,7 @@ export async function PUT(req: Request): Promise<Response> {
           updated_by: userId,
         },
       });
-      logAudit({ actorId: userId, eventType: "config_update" });
+      await logAudit({ actorId: userId, eventType: "config_update" });
       return json({
         config: row.config,
         updated_at: row.updated_at.toISOString(),

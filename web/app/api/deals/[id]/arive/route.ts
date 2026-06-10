@@ -35,12 +35,13 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
       data: { arive_loan_id: body.arive_loan_id, arive_linked: true },
     });
 
-    // Best-effort initial sync.
-    void (async () => {
-      try {
-        const client = getAriveClient();
-        if (!client.enabled()) return;
-        const loan = await client.fetchLoan(body.arive_loan_id!);
+    // Best-effort initial sync — AWAITED (T15, #83): a detached promise may
+    // never run on Vercel once the response is sent. A sync failure is
+    // swallowed and never fails the link itself.
+    try {
+      const client = getAriveClient();
+      if (client.enabled()) {
+        const loan = await client.fetchLoan(body.arive_loan_id);
         await prisma.deals.update({
           where: { id: dealId },
           data: {
@@ -50,10 +51,10 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
             arive_synced_at: new Date(),
           },
         });
-      } catch (err) {
-        console.error("arive initial sync failed", err);
       }
-    })();
+    } catch (err) {
+      console.error("arive initial sync failed", err);
+    }
 
     return json({ ok: true });
   })) as Response;
