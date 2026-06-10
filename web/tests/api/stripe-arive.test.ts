@@ -144,6 +144,28 @@ describe("POST /api/deals/[id]/fee/waive", () => {
 });
 
 describe("POST /api/stripe/webhook", () => {
+  // Injects a checkout.session.completed event with the given session shape.
+  function setSessionCompleted(session: Record<string, unknown>) {
+    setStripeForTesting({
+      checkout: { sessions: { create: async () => ({ id: "x", url: null }) } },
+      webhooks: {
+        constructEvent: () =>
+          ({
+            type: "checkout.session.completed",
+            data: { object: session as unknown as Stripe.Checkout.Session },
+          }) as unknown as Stripe.Event,
+      },
+    });
+  }
+
+  function webhookReq() {
+    return new Request("http://localhost/api/stripe/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "t=fake,v1=fake" },
+      body: "{}",
+    });
+  }
+
   it("checkout.session.completed marks deal paid", async () => {
     const agent = await createUser({ role: "agent" });
     const deal = await createDeal({ agent_id: agent.id });
@@ -176,6 +198,93 @@ describe("POST /api/stripe/webhook", () => {
     const row = await prisma.deals.findUnique({ where: { id: deal.id } });
     expect(row?.fee_status).toBe("paid");
     expect(row?.fee_paid_at).not.toBeNull();
+  });
+
+  it("smooth_exit_upsell payment sets upsells_paid and does NOT touch the closing fee", async () => {
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    // Seed an enrollment the way POST /deals/[id]/smoothexit persists it.
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: {
+        smooth_exit: {
+          status: "active",
+          payment_option: "from_proceeds",
+          selected_upsells: ["staging"],
+          upsell_total_cents: 25000,
+          upsells_paid: false,
+          enrolled_at: new Date().toISOString(),
+        },
+      },
+    });
+
+    setSessionCompleted({
+      id: "cs_upsell_1",
+      payment_status: "paid",
+      metadata: { deal_id: deal.id, type: "smooth_exit_upsell" },
+    });
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.$queryRaw<
+      {
+        status: string;
+        upsells_paid: boolean;
+        session_id: string | null;
+        paid_at: string | null;
+      }[]
+    >`
+      SELECT smooth_exit->>'status'                        AS status,
+             (smooth_exit->>'upsells_paid')::boolean       AS upsells_paid,
+             smooth_exit->>'upsells_checkout_session_id'   AS session_id,
+             smooth_exit->>'upsells_paid_at'               AS paid_at
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].upsells_paid).toBe(true);
+    expect(rows[0].session_id).toBe("cs_upsell_1");
+    expect(rows[0].paid_at).toBeTruthy();
+    // Sibling enrollment fields survive the merge.
+    expect(rows[0].status).toBe("active");
+
+    // The closing fee must be untouched by an upsell payment.
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fee_status).toBe("unpaid");
+    expect(row?.fee_checkout_session_id).toBeNull();
+    expect(row?.fee_paid_at).toBeNull();
+  });
+
+  it("payment_status !== 'paid' changes nothing", async () => {
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    setSessionCompleted({
+      id: "cs_async_1",
+      payment_status: "unpaid",
+      metadata: { deal_id: deal.id, type: "closing_fee" },
+    });
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fee_status).toBe("unpaid");
+    expect(row?.fee_checkout_session_id).toBeNull();
+    expect(row?.fee_paid_at).toBeNull();
+  });
+
+  it("unknown or missing session type is a no-op", async () => {
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    setSessionCompleted({
+      id: "cs_untyped_1",
+      payment_status: "paid",
+      metadata: { deal_id: deal.id },
+    });
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fee_status).toBe("unpaid");
+    expect(row?.fee_paid_at).toBeNull();
+    expect(row?.smooth_exit).toBeNull();
   });
 
   it("invalid signature returns 400", async () => {
@@ -213,7 +322,9 @@ describe("POST /api/stripe/webhook", () => {
               object: {
                 id: "cs_x",
                 payment_status: "paid",
-                metadata: { deal_id: deal.id },
+                // type must be closing_fee so this exercises the waived
+                // guard, not the unknown-type no-op.
+                metadata: { deal_id: deal.id, type: "closing_fee" },
               } as unknown as Stripe.Checkout.Session,
             },
           }) as unknown as Stripe.Event,

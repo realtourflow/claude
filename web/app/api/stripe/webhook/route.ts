@@ -22,27 +22,28 @@ export async function POST(req: Request): Promise<Response> {
       }
       const dealId = session.metadata?.deal_id;
       if (dealId) {
-        await prisma.deals.updateMany({
-          where: { id: dealId, fee_status: { not: "waived" } },
-          data: {
-            fee_status: "paid",
-            fee_checkout_session_id: session.id,
-            fee_paid_at: new Date(),
-          },
-        });
+        // The session's metadata.type (set by its creator in lib/stripe.ts)
+        // decides which product was bought. Ports the type switch in
+        // backend/internal/handlers/stripe.go, except unknown/missing types
+        // are a logged no-op here instead of defaulting to the closing fee.
+        const type = session.metadata?.type;
+        if (type === "closing_fee") {
+          await markFeePaid(dealId, session.id);
+        } else if (type === "smooth_exit_upsell") {
+          await markSmoothExitUpsellPaid(dealId, session.id);
+        } else {
+          console.warn(
+            `stripe webhook: unhandled checkout session type ${JSON.stringify(
+              type ?? null
+            )} for deal ${dealId}`
+          );
+        }
       }
     } else if (event.type === "payment_intent.succeeded") {
       const pi = event.data.object as Stripe.PaymentIntent;
       const dealId = pi.metadata?.deal_id;
       if (dealId) {
-        await prisma.deals.updateMany({
-          where: { id: dealId, fee_status: { not: "waived" } },
-          data: {
-            fee_status: "paid",
-            fee_checkout_session_id: pi.id,
-            fee_paid_at: new Date(),
-          },
-        });
+        await markFeePaid(dealId, pi.id);
       }
     }
   } catch (err) {
@@ -51,4 +52,36 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   return new Response(null, { status: 200 });
+}
+
+async function markFeePaid(dealId: string, sessionId: string): Promise<void> {
+  await prisma.deals.updateMany({
+    where: { id: dealId, fee_status: { not: "waived" } },
+    data: {
+      fee_status: "paid",
+      fee_checkout_session_id: sessionId,
+      fee_paid_at: new Date(),
+    },
+  });
+}
+
+// Ports markSmoothExitUpsellPaid (backend/internal/handlers/stripe.go), plus
+// records which session paid and when so the payment is traceable from the
+// enrollment JSONB. COALESCE preserves the payment evidence even if the
+// enrollment was cleared between checkout and webhook delivery.
+async function markSmoothExitUpsellPaid(
+  dealId: string,
+  sessionId: string
+): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE deals
+    SET smooth_exit = jsonb_set(
+      jsonb_set(
+        jsonb_set(COALESCE(smooth_exit, '{}'::jsonb), '{upsells_paid}', 'true'),
+        '{upsells_checkout_session_id}', to_jsonb(${sessionId}::text)
+      ),
+      '{upsells_paid_at}', to_jsonb(NOW()::text)
+    )
+    WHERE id = ${dealId}::uuid
+  `;
 }
