@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth0 } from '@auth0/auth0-react';
 import { api } from "@/lib/api-client";
@@ -87,6 +88,11 @@ export default function AgentSignupPage() {
           >
             Log in
           </button>
+          <p className="mt-3 text-center text-xs text-gray-400">
+            <Link href="/forgot-password" className="font-semibold text-brand-navy hover:underline">
+              Forgot password?
+            </Link>
+          </p>
         </div>
       </div>
     );
@@ -157,6 +163,11 @@ export default function AgentSignupPage() {
                 >
                   I already have an account
                 </button>
+                <p className="text-center text-xs text-gray-400">
+                  <Link href="/forgot-password" className="font-semibold text-brand-navy hover:underline">
+                    Forgot password?
+                  </Link>
+                </p>
               </div>
             )}
           </div>
