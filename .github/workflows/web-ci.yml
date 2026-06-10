@@ -7,15 +7,21 @@ on:
       - "web/**"
       - "backend/migrations/**"
       - ".github/workflows/web-ci.yml"
+  # No paths filter on PRs: `test` is a required check under branch protection,
+  # and a paths-skipped workflow reports no check at all, leaving out-of-paths
+  # PRs (docs, other workflows, legacy code) permanently unmergeable. Docs-only
+  # PRs just get a cheap green run instead.
   pull_request:
-    paths:
-      - "web/**"
-      - "backend/migrations/**"
-      - ".github/workflows/web-ci.yml"
+
+# One run per branch — rapid pushes to a PR cancel the stale run.
+concurrency:
+  group: web-ci-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -24,6 +30,7 @@ jobs:
       TEST_ADMIN_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
       AUTH0_DOMAIN: test.auth0.com
       AUTH0_AUDIENCE: https://api.test.local
+      NEXT_TELEMETRY_DISABLED: "1"
     services:
       postgres:
         image: postgres:16-alpine
