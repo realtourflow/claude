@@ -32,6 +32,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import InviteModal from '../InviteModal';
+import VerifyEmailBanner from '../VerifyEmailBanner';
 import { useNotifications } from "@/hooks/useNotifications";
 
 function NotificationBell() {
@@ -279,6 +280,8 @@ function AgentLayout({ children }: { children: ReactNode }) {
             Invite Client
           </button>
         </div>
+        {/* Email-verification banner — only shows while unverified */}
+        <VerifyEmailBanner />
         {/* Setup banner — only shows if setup incomplete */}
         <SetupBanner />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
@@ -311,6 +314,7 @@ function AdminLayout({ children }: { children: ReactNode }) {
             )}
           </div>
         </div>
+        <VerifyEmailBanner />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
@@ -337,6 +341,7 @@ function TCLayout({ children }: { children: ReactNode }) {
             )}
           </div>
         </div>
+        <VerifyEmailBanner />
         <main className="flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
@@ -349,6 +354,7 @@ function ClientLayout({ children, roleLabel }: { children: ReactNode; roleLabel:
   return (
     <div className="flex min-h-screen flex-col bg-brand-bg">
       <TopHeader roleLabel={roleLabel} roleBgClass="bg-brand-gold/20 text-brand-gold" />
+      <VerifyEmailBanner />
       <main className="flex-1 px-4 py-6 sm:px-6">{children}</main>
     </div>
   );

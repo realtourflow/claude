@@ -11,6 +11,17 @@ const schema = z.object({
   AUTH0_DOMAIN: z.string().min(1),
   AUTH0_AUDIENCE: z.string().min(1),
 
+  // Public (SPA) client id — same value the browser uses in Providers.tsx.
+  // Server-side it feeds Auth0's public dbconnections/change_password call and
+  // the client_id on verification-email jobs (so links use this app's settings).
+  NEXT_PUBLIC_AUTH0_CLIENT_ID: z.string().default(""),
+  // Auth0 database connection that password resets go against.
+  AUTH0_DB_CONNECTION: z.string().default("Username-Password-Authentication"),
+  // Auth0 Management API M2M credentials (scopes: read:users, update:users).
+  // Used for email-verification state + resend; empty = feature disabled.
+  AUTH0_MGMT_CLIENT_ID: z.string().default(""),
+  AUTH0_MGMT_CLIENT_SECRET: z.string().default(""),
+
   AWS_REGION: z.string().default(""),
   S3_BUCKET: z.string().default(""),
 
