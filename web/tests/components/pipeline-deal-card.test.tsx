@@ -59,6 +59,11 @@ describe("Pipeline DealCard task pills", () => {
     expect(screen.queryByText(/overdue/i)).toBeNull();
   });
 
+  it("uses the singular form for exactly one open task", () => {
+    render(<DealCard deal={makeDeal({ openTaskCount: 1, overdueTaskCount: 0 })} />);
+    expect(screen.getByText("1 open task")).toBeTruthy();
+  });
+
   it("shows 'All tasks done' only when openTaskCount === 0", () => {
     render(<DealCard deal={makeDeal({ openTaskCount: 0, overdueTaskCount: 0 })} />);
     expect(screen.getByText("All tasks done")).toBeTruthy();
