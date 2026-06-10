@@ -12,7 +12,8 @@ export type ApiDeal = {
   health: 'green' | 'yellow' | 'red';
   title: string;
   address: string | null;
-  price: number | null;
+  /** Postgres DECIMAL serialized as text by the API (`price::text`). */
+  price: string | null;
   arive_linked: boolean;
   arive_loan_id?: string | null;
   arive_milestones?: AriveTracker[] | null;
@@ -26,7 +27,8 @@ export type ApiDeal = {
   smooth_exit?: SmoothExitApiData | null;
   pre_approved?: boolean;
   baa_signed?: boolean;
-  commission_pct?: number;
+  /** Postgres DECIMAL serialized as text by the API (`commission_pct::text`). */
+  commission_pct?: string | null;
   created_at: string;
   updated_at: string;
   agent_name?: string;
@@ -119,8 +121,21 @@ function ariveMilestonesFromTrackers(
   };
 }
 
+/**
+ * Numeric deal columns (DECIMAL) arrive over the wire as text. Parse
+ * null-safely: null, empty string, and garbage stay null — callers apply
+ * the client-type default at the assignment site.
+ */
+function parseNumeric(v: string | null | undefined): number | null {
+  if (v == null || v.trim() === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function apiDealToFrontend(d: ApiDeal): Deal {
-  const price = d.price ?? 0;
+  // Deal.property.price is a plain number; 0 is the client's TBD sentinel.
+  const price = parseNumeric(d.price) ?? 0;
+  const commissionPct = parseNumeric(d.commission_pct) ?? 3;
 
   let loanMilestones: LoanMilestones | undefined;
   if (d.arive_linked && d.arive_milestones && d.arive_milestones.length > 0) {
@@ -161,8 +176,8 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     },
     flags: d.arive_linked ? ['mountain_mortgage'] : [],
     status: 'active',
-    estimatedCommission: Math.round(price * ((d.commission_pct ?? 3) / 100)),
-    commissionPct: d.commission_pct ?? 3,
+    estimatedCommission: Math.round(price * (commissionPct / 100)),
+    commissionPct,
     agentName: d.agent_name,
     agentEmail: d.agent_email,
     agentPhone: d.agent_phone,
