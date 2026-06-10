@@ -94,6 +94,26 @@ export async function getObjectBytes(key: string): Promise<Uint8Array> {
   return result.Body.transformToByteArray();
 }
 
+/**
+ * Uploads bytes directly to S3 (server-side put, no pre-signed URL). Used to
+ * store server-generated files such as merged disclosure packets.
+ */
+export async function putObjectBytes(
+  key: string,
+  bytes: Uint8Array,
+  contentType: string
+): Promise<void> {
+  const { client, bucket } = getClient();
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: bytes,
+      ContentType: contentType,
+    })
+  );
+}
+
 /** Best-effort delete. Logs and swallows errors — matches Go behavior. */
 export async function deleteObject(key: string): Promise<void> {
   try {

@@ -117,6 +117,20 @@ export async function sendForSignature(
   return api.post(`/deals/${dealId}/documents/${documentId}/send-for-signature`, { signers });
 }
 
+// Merges the selected PDFs into one packet document and sends it for
+// signature to a single recipient. Returns the new packet document row.
+export async function sendDisclosurePacket(
+  dealId: string,
+  documentIds: string[],
+  signer: { email: string; name: string },
+): Promise<Document> {
+  const d = await api.post<ApiDocument>(`/deals/${dealId}/disclosure-packet`, {
+    document_ids: documentIds,
+    signer,
+  });
+  return apiDocToFrontend(d);
+}
+
 export async function refreshDocuSignStatus(
   dealId: string,
   documentId: string,
