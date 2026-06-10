@@ -39,6 +39,7 @@ function fakeAriveClient(): AriveClient {
   return {
     enabled: () => true,
     fetchLoan: async () => ({
+      loanId: "loan-1",
       status: "processing",
       milestones: [],
       keyDates: { estimatedFundingDate: "2026-09-15" },
