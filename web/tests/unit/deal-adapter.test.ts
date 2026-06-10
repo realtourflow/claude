@@ -62,4 +62,19 @@ describe("apiDealToFrontend numeric parsing (#85)", () => {
     expect(deal.commissionPct).toBe(2.5);
     expect(deal.estimatedCommission).toBe(11250);
   });
+
+  it("defaults commissionPct to 3 when commission_pct is absent from the wire", () => {
+    const deal = apiDealToFrontend(wireDeal({ price: "100000" }));
+    expect(deal.commissionPct).toBe(3);
+    expect(deal.estimatedCommission).toBe(3000);
+  });
+
+  it("treats garbage and whitespace-only numerics as absent — client defaults apply", () => {
+    expect(apiDealToFrontend(wireDeal({ price: "abc" })).property.price).toBe(0);
+    expect(apiDealToFrontend(wireDeal({ price: "  " })).property.price).toBe(0);
+    expect(
+      apiDealToFrontend(wireDeal({ price: "100000", commission_pct: "abc" }))
+        .commissionPct,
+    ).toBe(3);
+  });
 });

@@ -127,7 +127,7 @@ function ariveMilestonesFromTrackers(
  * the client-type default at the assignment site.
  */
 function parseNumeric(v: string | null | undefined): number | null {
-  if (v == null || v === '') return null;
+  if (v == null || v.trim() === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
