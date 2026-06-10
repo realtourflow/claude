@@ -339,6 +339,21 @@ describe("POST /api/stripe/webhook", () => {
     const row = await prisma.deals.findUnique({ where: { id: deal.id } });
     expect(row?.fee_status).toBe("waived");
   });
+
+  it("DB failure during a closing_fee update → 5xx so Stripe redelivers", async () => {
+    // Injection: metadata.deal_id is a malformed uuid, so markFeePaid's
+    // WHERE id = ... comparison throws in Postgres (22P02 invalid input
+    // syntax for type uuid) — landing in the same catch block a transient
+    // DB outage would. Swallowing it with a 200 would eat the payment:
+    // money taken in Stripe, fee never marked paid, no redelivery.
+    setSessionCompleted({
+      id: "cs_dbfail_1",
+      payment_status: "paid",
+      metadata: { deal_id: "not-a-uuid", type: "closing_fee" },
+    });
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBeGreaterThanOrEqual(500);
+  });
 });
 
 describe("ARIVE link + sync + webhook", () => {

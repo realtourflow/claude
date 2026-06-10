@@ -45,7 +45,7 @@ describe("POST /api/deals/[id]/smoothexit", () => {
         estimated_sale_price: 450000,
         fee_cents: 450000,
         survey_answers: { goal: "upsize", timeline: "asap" },
-        selected_upsells: ["staging"],
+        selected_upsells: [],
         upsell_total_cents: 0,
       }),
     });
@@ -88,7 +88,7 @@ describe("POST /api/deals/[id]/smoothexit", () => {
     expect(row.upsell_total_cents).toBe("0");
     expect(row.upsells_paid).toBe(false);
     expect(row.survey_goal).toBe("upsize");
-    expect(row.selected_upsells).toEqual(["staging"]);
+    expect(row.selected_upsells).toEqual([]);
     expect(row.enrolled_at).toBeTruthy();
   });
 
@@ -127,8 +127,9 @@ describe("POST /api/deals/[id]/smoothexit", () => {
         estimated_sale_price: 600000,
         fee_cents: 600000,
         survey_answers: { goal: "downsize" },
-        selected_upsells: ["staging", "photography"],
-        upsell_total_cents: 125000,
+        // staging_consult (24700) + photography_upgrade (19700) = 44400
+        selected_upsells: ["staging_consult", "photography_upgrade"],
+        upsell_total_cents: 44400,
       }),
     });
     const res = await smoothExitRoute(r, ctx(deal.id));
@@ -137,10 +138,10 @@ describe("POST /api/deals/[id]/smoothexit", () => {
     expect(json.ok).toBe(true);
     expect(json.checkout_url).toBe("https://stripe.test/checkout/cs_smoothexit_1");
 
-    // Stripe received the dynamic amount, correct product, and metadata.
+    // Stripe received the catalog amount, correct product, and metadata.
     expect(captured).toBeDefined();
     const lineItem = captured!.line_items?.[0];
-    expect(lineItem?.price_data?.unit_amount).toBe(125000);
+    expect(lineItem?.price_data?.unit_amount).toBe(44400);
     expect(lineItem?.price_data?.product_data?.name).toBe("Smooth Exit Add-ons");
     expect(lineItem?.price_data?.product_data?.description).toBe(
       "Concierge add-ons for: 456 Oak Ave"
@@ -157,14 +158,139 @@ describe("POST /api/deals/[id]/smoothexit", () => {
       `/smooth-exit/survey?deal_id=${deal.id}&cancelled=1`
     );
 
-    // Enrollment is still persisted (upsells_paid stays false until webhook).
-    const rows = await prisma.$queryRaw<{ status: string; upsells_paid: boolean }[]>`
+    // Enrollment is still persisted (upsells_paid stays false until webhook)
+    // with the SERVER-computed total.
+    const rows = await prisma.$queryRaw<
+      { status: string; upsells_paid: boolean; upsell_total_cents: string }[]
+    >`
       SELECT smooth_exit->>'status' AS status,
-             (smooth_exit->>'upsells_paid')::boolean AS upsells_paid
+             (smooth_exit->>'upsells_paid')::boolean AS upsells_paid,
+             smooth_exit->>'upsell_total_cents' AS upsell_total_cents
       FROM deals WHERE id = ${deal.id}::uuid
     `;
     expect(rows[0].status).toBe("active");
     expect(rows[0].upsells_paid).toBe(false);
+    expect(rows[0].upsell_total_cents).toBe("44400");
+  });
+
+  it("tampered upsell_total_cents is ignored — server prices from the catalog", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "789 Pine Ln" });
+
+    let captured: Stripe.Checkout.SessionCreateParams | undefined;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async (params: Stripe.Checkout.SessionCreateParams) => {
+            captured = params;
+            return {
+              id: "cs_smoothexit_2",
+              url: "https://stripe.test/checkout/cs_smoothexit_2",
+            };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/smoothexit`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        payment_option: "from_proceeds",
+        estimated_sale_price: 500000,
+        fee_cents: 500000,
+        // Hostile client claims the add-ons cost 1 cent.
+        selected_upsells: ["staging_consult", "photography_upgrade"],
+        upsell_total_cents: 1,
+      }),
+    });
+    const res = await smoothExitRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok?: boolean; checkout_url?: string };
+    expect(json.checkout_url).toBe("https://stripe.test/checkout/cs_smoothexit_2");
+
+    // Stripe is charged the catalog total, not the client's number.
+    expect(captured).toBeDefined();
+    expect(captured!.line_items?.[0]?.price_data?.unit_amount).toBe(44400);
+
+    // And the JSONB stores the server-computed total.
+    const rows = await prisma.$queryRaw<{ upsell_total_cents: string }[]>`
+      SELECT smooth_exit->>'upsell_total_cents' AS upsell_total_cents
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].upsell_total_cents).toBe("44400");
+  });
+
+  it("unknown upsell key → 400, no Stripe call, existing enrollment untouched", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    // Seed a prior enrollment so we can prove the bad request doesn't clobber it.
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: {
+        smooth_exit: {
+          status: "active",
+          payment_option: "from_proceeds",
+          selected_upsells: [],
+          upsell_total_cents: 0,
+          upsells_paid: false,
+          enrolled_at: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    });
+
+    let stripeCalled = false;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async () => {
+            stripeCalled = true;
+            return { id: "cs_nope", url: "https://stripe.test/nope" };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/smoothexit`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        payment_option: "buyer_concession",
+        selected_upsells: ["staging_consult", "free_money"],
+        upsell_total_cents: 1,
+      }),
+    });
+    const res = await smoothExitRoute(r, ctx(deal.id));
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("free_money");
+    expect(stripeCalled).toBe(false);
+
+    // Validation happens BEFORE persisting — the seeded enrollment survives.
+    const rows = await prisma.$queryRaw<
+      { payment_option: string; enrolled_at: string }[]
+    >`
+      SELECT smooth_exit->>'payment_option' AS payment_option,
+             smooth_exit->>'enrolled_at'    AS enrolled_at
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].payment_option).toBe("from_proceeds");
+    expect(rows[0].enrolled_at).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("403 when caller is not the deal owner", async () => {
