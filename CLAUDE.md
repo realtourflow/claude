@@ -2,54 +2,31 @@
 
 > This file is the authoritative orientation guide for every Claude session.
 > Read this before writing any code. Keep it updated whenever architecture, migrations, or
-> real/mock boundaries change.
+> the feature surface change.
 
 ---
 
-## ✅ Launch Target: the `web/` app (Next.js 16 + Prisma 7)
+## The App: `web/` (Next.js 16 + Prisma 7 on Vercel)
 
-**The product we are launching is the single Next.js app under `web/`.** It serves
-both the UI and the API. All new work goes here. The legacy Go backend (`backend/`)
-and React+Vite frontend (`frontend/`) are **being retired** — do not build features in
-them.
+**RealTourFlow is a single Next.js 16 app under `web/`** — one project serving both the UI
+and the API, deployed on Vercel. There is no separate backend or frontend.
 
-> Earlier drafts of this file called the legacy stack "production." That framing is
-> retired. Trust this section: **`web/` is the launch target.** The `backend/` sections
-> further down are kept as **port reference** (the `web/` API mirrors them) and for the
-> infra that still serves traffic until DNS flips at cutover — they are **not** the place
-> to add code.
-
-**Launch stack (`web/`):**
-- Single Next.js 16 App Router app (UI + API in one project) on Vercel
-- Prisma 7 (driver-adapter, introspected from the live Postgres)
-- Auth0 (same JWT / token shape as before)
-- Tailwind 4
-- Tests: Vitest (unit/integration) + Playwright (E2E), enforced by `.github/workflows/web-ci.yml`
-
-**Remaining launch work** is tracked in the **Launch v1** GitHub milestone — start at the
-tracking issue **#18** in `realtourflow/claude`. Every launch ticket targets `web/`.
+> The legacy stack — Go + chi API (`backend/`) and React + Vite SPA (`frontend/`) — has
+> been **removed** from the repo. Its golang-migrate SQL was relocated to the top-level
+> `migrations/` directory (still the schema source of truth). The old AWS ECS service is
+> no longer deployed to by CI and is pending infrastructure teardown (see Infrastructure).
 
 **`web/` conventions (read before coding):**
-- This is **Next.js 16** with breaking changes — read `node_modules/next/dist/docs/`
-  first (`web/AGENTS.md` mandates it). Route handlers are async `(req, ctx)` where
-  `ctx.params` is a `Promise`.
-- External clients expose a `setXForTesting()` seam (see `web/lib/stripe.ts`,
-  `web/lib/arive.ts`); tests inject fakes and never hit real APIs (CI has no secrets).
-- **Migrations:** still golang-migrate SQL in `backend/migrations/00003X_*.{up,down}.sql`,
-  then `npm run prisma:pull` to sync `web/prisma/schema.prisma`. Do **not** use
-  `prisma migrate` yet — CI runs golang-migrate. (Flips to `prisma migrate deploy` only at
-  cutover step 5 below.)
+- **Next.js 16** has breaking changes — read `node_modules/next/dist/docs/` first
+  (`web/AGENTS.md` mandates it). Route handlers are async `(req, ctx)` where `ctx.params`
+  is a `Promise`.
+- External clients expose a `setXForTesting()` seam (e.g. `web/lib/stripe.ts`,
+  `web/lib/arive.ts`, `web/lib/auth0.ts`, `web/lib/docusign.ts`); tests inject fakes and
+  never hit real APIs (CI has no secrets).
+- **Migrations:** golang-migrate SQL in `migrations/{version}_*.{up,down}.sql`, then
+  `npm run prisma:pull` to sync `web/prisma/schema.prisma`. Not `prisma migrate` (see
+  Database Migrations).
 - Develop on **Node 22** (`web/.nvmrc`).
-
-**Cutover sequence (legacy → `web/`):**
-1. Promote the `web/` Vercel preview to a production deployment
-2. Switch DNS so traffic hits Vercel
-3. Drain ECS, then delete `backend/` and the `deploy.yml` workflow
-4. Delete `frontend/`
-5. Switch migrations to `prisma migrate deploy` and stop using golang-migrate
-
-See `web/FRONTEND_MIGRATION.md` for the original migration plan and the **Launch v1**
-milestone (tracker #18) for the live punch-list.
 
 ---
 
@@ -68,258 +45,174 @@ and integrates with ARIVE (loan milestone sync) for Mountain Mortgage / Fast Pas
 
 ## Stack
 
-**Launch stack — `web/` (this is what we ship):**
-
 | Layer | Technology |
 |---|---|
 | App | Next.js 16 (App Router) — serves UI **and** API in one project |
-| ORM / DB access | Prisma 7 (driver-adapter) |
+| ORM / DB access | Prisma 7 (driver-adapter, introspection-only) |
 | Database | PostgreSQL 16 (AWS RDS) |
+| File storage | AWS S3 (documents) via pre-signed URLs |
 | Auth | Auth0 (JWT RS256, JWKS validation) |
 | UI | React (Server + Client Components), Tailwind 4 |
+| Background jobs | pg-boss durable queue + a Vercel Cron sweep (calendar push) |
 | Tests | Vitest (unit/integration) + Playwright (E2E), enforced in CI |
 | Hosting | Vercel |
-| CI/CD | GitHub Actions `web-ci.yml` (typecheck → lint → Vitest) |
-| Local DB | Docker Compose (postgres:16-alpine) |
+| CI/CD | GitHub Actions `web-ci.yml` (typecheck → lint → Vitest → build; Playwright E2E) |
+| Local DB | Docker Compose (`postgres:16-alpine`) |
 
-**Legacy stack — being retired (reference only, do not extend):** Go 1.23 + chi on
-AWS ECS Fargate (`backend/`), React + Vite on Vercel (`frontend/`). Still serves
-current production traffic until the cutover DNS flip; details below are kept for the
-port and for running infra during coexistence.
+The legacy Go + chi backend and React + Vite frontend have been removed.
 
 ---
 
-## Infrastructure (Production)
+## Infrastructure
+
+**Current (serves production):**
 
 | Resource | Value |
 |---|---|
-| AWS Account | 508859666048 |
-| Region | us-east-1 |
-| ECS Cluster | realtourflow |
-| ECS Service | realtourflow-api |
-| ECR Repo | 508859666048.dkr.ecr.us-east-1.amazonaws.com/realtourflow-api |
-| Task Execution Role | arn:aws:iam::508859666048:role/realtourflow-task-execution-role |
-| CloudWatch Log Group | /ecs/realtourflow-api |
+| App hosting | Vercel — production domain `app.realtourflow.com` |
+| Database | PostgreSQL 16 on AWS RDS (account 508859666048, us-east-1) |
+| Document storage | AWS S3 bucket `realtourflow-documents` (CORS allows `https://app.realtourflow.com`) |
 | Auth0 Tenant | dev-30md8ukv8qd3u27c.us.auth0.com |
 | Auth0 Audience | https://api.realtourflow.com |
-| Auth0 Client ID | JMIZVqGbZ6KRmJGHyowg5kopHRmHGVhe |
+| Auth0 SPA Client ID | JMIZVqGbZ6KRmJGHyowg5kopHRmHGVhe |
+| Secrets | Vercel project env vars (Production / Preview) |
 
-**Secrets Manager ARNs** (used verbatim in task-definition.json):
-- DATABASE_URL: `arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/database-url-DvT938`
-- AUTH0_DOMAIN: `arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-domain-hHsuRD`
-- AUTH0_AUDIENCE: `arn:aws:secretsmanager:us-east-1:508859666048:secret:realtourflow/auth0-audience-vsItjS`
-
-**Known issue:** `ALLOWED_ORIGINS` in `backend/task-definition.json` is currently set to
-`http://localhost:5173`. This must be updated to the real production frontend URL before
-the live frontend can call the API. No production frontend deployment exists yet.
+**Legacy AWS (pending decommission — no longer deployed to):** the ECS service
+`realtourflow-api` (cluster `realtourflow`), its ALB, the ECR repo, the
+`/ecs/realtourflow-api` CloudWatch log group, the `realtourflow/*` Secrets Manager
+secrets, and the `api.realtourflow.com` DNS record still exist and the old Go API still
+answers, but CI no longer redeploys it (the `deploy.yml` workflow was deleted). Draining
+and deleting that infra is an open ops task that needs AWS credentials. **Keep RDS and the
+S3 bucket** — `web/` uses them.
 
 ---
 
 ## Local Development
 
 ### Prerequisites
-- **Node 22** (`web/.nvmrc`) — for the `web/` app
-- Docker Desktop (for local Postgres)
-- `golang-migrate` CLI (`brew install golang-migrate`) — migrations run via golang-migrate until cutover
-- Go 1.23+ — only if touching the legacy `backend/` during coexistence
+- **Node 22** (`web/.nvmrc`)
+- Docker Desktop (local Postgres)
+- `golang-migrate` CLI (`brew install golang-migrate`)
 
-### Run everything (the `web/` app)
-
+### Run it
 ```bash
-# 1. Start local Postgres
-make db
-
-# 2. Apply migrations to local DB (golang-migrate)
+make db        # start local Postgres (docker compose)
 DATABASE_URL="postgres://postgres:postgres@localhost:5432/realtourflow?sslmode=disable" make migrate
-
-# 3. Install deps + start the Next.js app (UI + API)
 make install   # cd web && npm install
 make dev       # cd web && npm run dev  → http://localhost:3000
 ```
+`make dev | test | typecheck | lint | build` target `web/`; `make migrate` runs
+golang-migrate against `migrations/`.
 
-> `make dev`, `make test`, `make typecheck`, `make lint`, `make build` all target `web/`.
-
-### Environment files
-
-**Backend** — copy `.env.example` to `.env` and fill in:
-```
-PORT=8080
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/realtourflow?sslmode=disable
-ALLOWED_ORIGINS=http://localhost:5173
-AUTH0_DOMAIN=dev-30md8ukv8qd3u27c.us.auth0.com
-AUTH0_AUDIENCE=https://api.realtourflow.com
-```
-
-**Frontend** — copy `frontend/.env.example` to `frontend/.env.local` and fill in:
-```
-VITE_API_URL=http://localhost:8080/api
-VITE_AUTH0_DOMAIN=dev-30md8ukv8qd3u27c.us.auth0.com
-VITE_AUTH0_CLIENT_ID=JMIZVqGbZ6KRmJGHyowg5kopHRmHGVhe
-VITE_AUTH0_AUDIENCE=https://api.realtourflow.com
-```
+### Environment
+`web/` reads env from `web/.env.local` (gitignored). See `web/.env.example` for the keys —
+Auth0 (incl. the Management API M2M for email verification), `DATABASE_URL`, S3/AWS,
+Stripe, ARIVE, DocuSign, Resend, calendar OAuth, and `CRON_SECRET`. Production values live
+in the Vercel project env.
 
 ---
 
 ## Database Migrations
 
-### Protocol — follow this every time
+### Protocol
+1. Write `migrations/{version}_{title}.up.sql` + `.down.sql` (6-digit zero-padded, e.g.
+   `000034_...`). The next version is one above the highest number in `migrations/`.
+2. Apply locally: `DATABASE_URL="..." make migrate`.
+3. Sync Prisma: `cd web && npm run prisma:pull` (regenerates `web/prisma/schema.prisma`
+   from the live schema). Commit both the SQL and the schema change.
+4. CI applies the migrations to fresh throwaway DBs for the `test` and `e2e` jobs.
 
-1. Write migration files: `backend/migrations/{version}_{title}.up.sql` + `.down.sql`
-   - Naming: `000001_init`, `000002_add_task_fields`, `000003_...`  (6-digit zero-padded)
-2. Test locally: `DATABASE_URL="..." make migrate`
-3. Push code — **migrations run automatically on ECS startup** (golang-migrate in main.go)
-4. Verify: hit the relevant endpoint, check CloudWatch logs if anything errors.
+> **Engine:** golang-migrate (a standalone SQL runner), NOT `prisma migrate`. The SQL in
+> `migrations/` is the schema source of truth; Prisma is introspection-only here.
 
-> **No manual CLI access needed.** The server calls `migrate.Up()` before accepting requests.
-> ErrNoChange is handled gracefully — already-applied migrations are skipped automatically.
-
-### Migration state
-
-| Migration | Description | Local | **Production** |
-|---|---|---|---|
-| 000001_init | Full schema: users, deals, tasks, documents, messages, deal_stage_history | ✅ Applied | ✅ Applied |
-| 000002_add_task_fields | Adds priority, source, stage_context, role columns to tasks | ✅ Applied | ✅ Applied |
-| 000003_add_message_channel | Adds channel column (client_thread / internal) to messages | ✅ Applied | ✅ Applied |
-| 000004_add_document_fields | Adds mime_type, file_size columns to documents | ✅ Applied | ✅ Applied |
-| 000005_add_vendors | Creates preferred_vendors table with sort_order and is_featured | ✅ Applied | ✅ Applied on next deploy |
-| 000006_add_tc_role | Adds 'tc' value to user_role enum | ✅ Applied | ✅ Applied on next deploy |
-| 000007_add_checklist_items | Creates checklist_items table with checklist_assignee enum | ✅ Applied | ✅ Applied on next deploy |
-| 000008-000032 | Various — see backend/migrations/ for details (deal_invites, notifications, contingencies, deal_notes, user_settings, arive_loan_data, stripe_fees, enrollment_columns, deal_flags, tracked_properties, showing_availability, offers, net_sheets, tc_assignment, agent_doc_templates, user_deactivated, system_config, promo_codes, audit_log, commission_pct, calendar_token, mls_creds, docusign, onboarding_complete, agent_invites) | ✅ Applied | ✅ Applied on next deploy |
-| 000033_add_oauth_tokens | Creates `oauth_tokens` + `calendar_event_map` tables for per-agent Google Calendar / Microsoft Graph OAuth | ⏳ Pending | ⏳ Pending |
+> ⚠️ **Production application is a known gap.** The retired ECS server used to auto-run
+> `migrate.Up()` on startup; with ECS no longer deployed to (`deploy.yml` deleted), **new**
+> migrations no longer reach prod RDS automatically. Until a replacement exists (a CI /
+> Vercel deploy step, or the deferred switch to `prisma migrate deploy`), apply new
+> migrations to prod manually:
+> `migrate -path migrations -database "$PROD_DATABASE_URL" up`. (No migrations are pending
+> as of this writing — relocating the files did not change the applied schema.)
 
 ---
 
 ## API Endpoints
 
-All routes are mounted at `/api`. Protected routes require `Authorization: Bearer <Auth0 JWT>`.
+Routes are Next.js App Router handlers under `web/app/api/**/route.ts`, mounted at `/api`.
+Protected routes require `Authorization: Bearer <Auth0 JWT>`. This lists the **core**
+surface — it is not exhaustive; browse `web/app/api/` for everything else (vendors, MLS,
+TC settings, doc-templates, participants, fastpass/smoothexit, disclosure-packet,
+password-reset, verification, jobs/process, docusign, stripe/arive webhooks, …).
 
-| Method | Path | Auth | Handler | Notes |
+| Method | Path | Auth | Operation | Notes |
 |---|---|---|---|---|
 | GET | /health | — | Health | Returns `{"status":"ok"}` |
 | POST | /users/sync | ✅ | SyncUser | Upserts user from JWT; requires role in Auth0 custom claim |
-| GET | /users | ✅ | ListUsers | Admin-only; returns all platform users ordered by role, name |
-| GET | /deals | ✅ | ListDeals | Returns agent's deals ordered by updated_at desc |
+| GET | /users | ✅ | ListUsers | Admin-only; all platform users ordered by role, name |
+| GET | /deals | ✅ | ListDeals | Agent's deals ordered by updated_at desc |
 | POST | /deals | ✅ | CreateDeal | Creates deal at intake stage |
 | GET | /deals/:dealId | ✅ | GetDeal | Ownership-checked |
 | PATCH | /deals/:dealId/stage | ✅ | AdvanceStage | Writes deal_stage_history row |
 | GET | /deals/:dealId/tasks | ✅ | ListTasks | Ownership-checked via deal |
-| POST | /deals/:dealId/tasks | ✅ | CreateTask | Creates task; auto-tasks posted here on stage advance |
+| POST | /deals/:dealId/tasks | ✅ | CreateTask | Auto-tasks posted here on stage advance; optional `assigned_to` |
 | PATCH | /tasks/:taskId/status | ✅ | UpdateTaskStatus | Ownership-checked via deal join |
-| GET | /deals/:dealId/messages | ✅ | ListMessages | `?channel=client_thread\|internal`; JOIN users for sender name/role |
-| POST | /deals/:dealId/messages | ✅ | CreateMessage | CTE insert+join; returns full message with sender info |
-| GET | /deals/:dealId/documents | ✅ | ListDocuments | Ownership-checked via deal; returns docs with uploader name |
-| POST | /deals/:dealId/documents/upload-url | ✅ | GetUploadURL | Returns S3 pre-signed PUT URL (15 min) + s3_key |
+| GET | /deals/:dealId/messages | ✅ | ListMessages | `?channel=client_thread\|internal`; joins sender name/role |
+| POST | /deals/:dealId/messages | ✅ | CreateMessage | Returns full message with sender info |
+| GET | /deals/:dealId/documents | ✅ | ListDocuments | Ownership-checked; returns docs with uploader name |
+| POST | /deals/:dealId/documents/upload-url | ✅ | GetUploadURL | S3 pre-signed PUT URL + s3_key |
 | POST | /deals/:dealId/documents | ✅ | CreateDocument | Confirms upload; stores name, s3_key, mime_type, file_size |
-| GET | /documents/:documentId/download-url | ✅ | GetDownloadURL | Returns S3 pre-signed GET URL (15 min) |
-| DELETE | /documents/:documentId | ✅ | DeleteDocument | Deletes DB record + best-effort S3 object delete |
+| GET | /documents/:documentId/download-url | ✅ | GetDownloadURL | S3 pre-signed GET URL |
+| DELETE | /documents/:documentId | ✅ | DeleteDocument | DB record + best-effort S3 delete |
 | GET | /vendors | ✅ | ListVendors | Agent-scoped; ordered by category, sort_order |
-| POST | /vendors | ✅ | CreateVendor | Auto-sets sort_order = max in category + 1 |
-| PATCH | /vendors/:vendorId | ✅ | UpdateVendor | Partial update — company, contact, phone, email, website, notes, is_featured, sort_order |
-| DELETE | /vendors/:vendorId | ✅ | DeleteVendor | Ownership-checked |
-| GET | /me/deals | ✅ | ListMyDeals | Returns deals where JWT user is a participant; includes agent name/email/phone |
-| GET | /deals/:dealId/participants | ✅ | ListParticipants | Agent or any participant may call |
-| POST | /deals/:dealId/participants | ✅ | AddParticipant | Agent-only; body: `{user_id, role}` |
+| POST/PATCH/DELETE | /vendors[/:vendorId] | ✅ | Vendor CRUD | Agent-scoped |
+| GET | /me/deals | ✅ | ListMyDeals | Deals where the JWT user is a participant; includes agent contact |
+| GET | /deals/:dealId/participants | ✅ | ListParticipants | Agent or any participant |
+| POST | /deals/:dealId/participants | ✅ | AddParticipant | Agent-only; body `{user_id\|email, role}` |
 | DELETE | /deals/:dealId/participants/:userId | ✅ | RemoveParticipant | Agent-only |
-| GET | /deals/:dealId/checklist | ✅ | ListChecklist | TC/admin/agent/participant; auto-seeds 17 defaults on under_contract+ stages |
-| POST | /deals/:dealId/checklist | ✅ | CreateChecklistItem | Adds custom item |
-| PATCH | /deals/:dealId/checklist/:itemId | ✅ | UpdateChecklistItem | Updates checked, assigned_to, due_date |
-| DELETE | /deals/:dealId/checklist/:itemId | ✅ | DeleteChecklistItem | Removes item |
+| GET/POST/PATCH/DELETE | /deals/:dealId/checklist[/:itemId] | ✅ | Checklist | TC/admin/agent/participant; auto-seeds defaults at under_contract+ |
 
 ### Auth0 JWT custom claims
-
-The Post-Login Action in Auth0 injects roles into the JWT under:
+The Post-Login Action injects roles into the JWT:
 ```
-https://realtourflow.com/roles: ["agent"]  // or buyer, seller, admin, lending_partner
+https://realtourflow.com/roles: ["agent"]  // or buyer, seller, admin, tc, lending_partner
 ```
 `SyncUser` reads this claim. A user with no role gets 403.
 
 ---
 
-## Real vs Mock Inventory
+## Auth Architecture
 
-This tracks what's wired to the real database vs what still uses mock data.
-**Before touching any feature, check this table.**
-
-> ⚠️ **This inventory describes the LEGACY `frontend/` (React + Vite) stack, which is being retired — NOT the launched `web/` Next.js app.** In `web/`, several features marked "Closed/wired" below were never ported and **404'd in production** until **EPIC #56**. As of those ports (all merged), the following are now **live in `web/`** end-to-end:
->
-> | Feature | web/ status | Issue |
-> |---|---|---|
-> | Vendor directory | ✅ live (`/api/vendors`) | #49 |
-> | MLS / SimplyRETS creds + listing search | ✅ live (`/api/me/mls`, `/api/deals/:id/listings/search`) | #48 |
-> | Agent doc-templates | ✅ live (`/api/me/doc-templates`) | #50 |
-> | TC settings | ✅ live (`/api/me/tc`, `/api/me/agents`) | #51 |
-> | Property mutations (status / notes / offer-request / delete) | ✅ live (`/api/deals/:id/properties/:propId`) | #52 |
-> | Agent invites | ✅ live (`/api/admin/agent-invites`, `/api/agent-invites/:token`) | #45 |
-> | Fast Pass collect / Smooth Exit enroll | ✅ live (`/api/deals/:id/fastpass/collect`, `/api/deals/:id/smoothexit`) | #46, #47 |
->
-> The **API Endpoints** section above and the EPIC #56 issues are authoritative for `web/`. The legacy-stack table below is kept only for the retirement window.
-
-### Wired to real API ✅
-
-| Feature | Endpoints used |
-|---|---|
-| Pipeline deal list | GET /deals |
-| New deal creation | POST /deals |
-| Deal detail load | GET /deals/:id |
-| Stage advance / retreat | PATCH /deals/:id/stage |
-| Task list per deal | GET /deals/:id/tasks |
-| Toggle task complete | PATCH /tasks/:id/status |
-| Stage auto-tasks on advance | POST /deals/:id/tasks |
-| User sync on login | POST /users/sync |
-| Messages per deal | GET/POST /deals/:id/messages |
-| Documents per deal | GET /deals/:id/documents, POST /deals/:id/documents/upload-url, POST /deals/:id/documents, GET /documents/:id/download-url, DELETE /documents/:id |
-| Vendor directory | GET /vendors, POST /vendors, PATCH /vendors/:id, DELETE /vendors/:id |
-| Buyer/Seller portals — deal + tasks + messages | GET /me/deals, GET /deals/:id/tasks, GET/POST /deals/:id/messages |
-| TC Dashboard — deals, checklists, agent contacts | GET /deals (all deals for TC), GET/POST/PATCH/DELETE /deals/:id/checklist |
-
-### Still on mock data ⚠️
-
-| Feature | Mock file | Notes |
-|---|---|---|
-| authStore (active user) | ~~wired to real Auth0~~ | **Closed.** `setFromAuth0()` populates authStore from `/users/sync` response. `RoleSwitcher` is dev-only. |
-| Messages tab | ~~wired to real API~~ | **Closed.** `GET/POST /deals/:id/messages?channel=` live. 10s polling. Send wired. |
-| Documents tab | ~~DEAL_DOCS mock~~ | **Closed.** S3 pre-signed upload/download/delete wired. `useDocuments` hook. |
-| Vendor directory | ~~vendorStore.ts~~ | **Closed.** `useVendors` hook. GET/POST/PATCH/DELETE /vendors live. SettingsPage, VendorDirectory, DealDetail all wired. |
-| Buyer/Seller portals | ~~BuyerView.tsx, SellerView.tsx~~ | **Closed.** `useMyDeals()` hook; deal + tasks + messages wired to real API. Agent contact info included. |
-| Admin Dashboard | ~~MOCK_DEALS, MOCK_TASKS, MOCK_USERS~~ | **Closed.** All sections use `useDeals()` (returns all deals for admin role). UserManagement uses `GET /users`. FastPass/SmoothExit/AriveStatus/PendingDisclosures show empty state (deferred features). |
-| Loan milestones | `data/mockDeals.ts` | ARIVE integration not yet built |
-| Properties / offers | `store/propertyStore.ts`, `store/offerStore.ts` | Full UI, writes nowhere |
-| Net sheet | `store/netSheetStore.ts` | Full UI, writes nowhere |
-| Deal health (green/yellow/red) | Hardcoded in mock deals | Should be computed server-side |
-| Notifications | `store/notificationStore.ts` | In-memory only |
-| TC Dashboard | ~~TCDashboard.tsx~~ | **Closed.** Deals from real API (TC sees all); checklists from real DB (auto-seeded on under_contract); agent contacts from deal response. Contingencies/loan milestones/task-deadline calendar still in-memory. |
-| Admin Dashboard | `AdminDashboard.tsx` | Reads mock deals |
-| Onboarding flows | `store/intakeStore.ts`, `store/clientContactStore.ts` | Writes to in-memory stores only |
-| Fast Pass / Smooth Exit | `mockFastPass.ts`, `mockSmoothExit.ts` | Full UI, no payment/backend |
-| Checklist (TC) | `store/checklistStore.ts` | In-memory only |
-| Settings (all tabs) | Various stores | Writes to in-memory stores |
-| Deal stage store | `store/dealStageStore.ts` | Keeps local overrides in memory on top of API stage; server is authoritative on reload |
+Auth0 JWT is the source of truth end-to-end.
+- `Auth0Provider` is configured in `web/components/Providers.tsx` (reads `NEXT_PUBLIC_AUTH0_*`).
+- On login the client calls `POST /api/users/sync` to upsert the user; the response
+  (DB UUID, name, email, role) drives the client identity store.
+- Server routes validate every protected request via JWKS — `web/lib/auth.ts` plus
+  `withAuth` in `web/lib/http.ts`.
+- Roles: `agent`, `buyer`, `seller`, `admin`, `tc`, `lending_partner`. Server-side scoping
+  is the security boundary; client-side role gating is UX only.
+- Forgot-password and resend-verification live under `web/app/api/auth/*`
+  (`web/lib/auth0.ts` wraps the public change-password endpoint + the Management API).
 
 ---
 
-## Auth Architecture
+## Feature Status
 
-Single unified identity system — Auth0 JWT is the source of truth end-to-end.
+The app is wired to the real API + database end-to-end. (The old `frontend/` mock-data
+inventory was retired with that stack.) Features ported into `web/` during EPIC #56 and the
+fast-follow milestone, now live:
 
-**Auth0 JWT (backend-facing)**
-- `Auth0Provider` in `main.tsx` wraps the whole app
-- `AuthSetup.tsx` calls `setTokenGetter(getAccessTokenSilently)` so all `api.*` calls attach a real Bearer token
-- The backend validates every protected request via JWKS
-
-**authStore (frontend-facing)**
-- On login, `AuthSetup.tsx` calls `POST /users/sync` to upsert the user in the DB
-- The sync response (DB UUID, name, email, role) is passed to `authStore.setFromAuth0()`
-- `authStore.activeUser` is now the real Auth0-authenticated user — name, email, DB UUID, groupId, permissions
-- `usePermission` / `PermissionGate` derive from `activeUser.groupId` (mapped from Auth0 role claim)
-- `authStore.isLoaded` is `false` until the sync completes; `RootRedirect` waits on this before routing
-
-**Role → GroupId mapping** (in `authStore.ts`):
-- `agent` → `agent`, `buyer` → `buyer`, `seller` → `seller`, `admin` → `admin`, `tc` → `tc`, `lending_partner` → `agent`
-
-**Dev RoleSwitcher**
-- Still present in dev (`import.meta.env.DEV`) for testing buyer/seller/TC views
-- Calls `setActiveUser(mockId)` to override identity with a mock user; navigate is handled by the switcher itself
-- Invisible / no-op in production builds
+| Feature | Endpoint(s) / module |
+|---|---|
+| Vendor directory | `/api/vendors` |
+| MLS / SimplyRETS creds + listing search | `/api/me/mls`, `/api/deals/:id/listings/search` |
+| Agent doc-templates | `/api/me/doc-templates` |
+| TC settings | `/api/me/tc`, `/api/me/agents` |
+| Property mutations (status / notes / offer-request / delete) | `/api/deals/:id/properties/:propId` |
+| Agent invites | `/api/admin/agent-invites`, `/api/agent-invites/:token` |
+| Fast Pass collect / Smooth Exit enroll | `/api/deals/:id/fastpass/collect`, `/api/deals/:id/smoothexit` |
+| Notification emails (message / doc / task) | `web/lib/notification-email.ts` (Resend, best-effort) |
+| Password reset + email verification | `/api/auth/password-reset`, `/api/auth/verification` |
+| Durable calendar push | pg-boss queue (`web/lib/queue.ts`) + `/api/jobs/process` cron sweep |
+| Disclosure packet (merge PDFs + e-sign) | `/api/deals/:id/disclosure-packet` |
 
 ---
 
@@ -327,132 +220,93 @@ Single unified identity system — Auth0 JWT is the source of truth end-to-end.
 
 | File | Purpose |
 |---|---|
-| `backend/cmd/api/main.go` | Entry point, wires config → DB → chi router → handlers |
-| `backend/internal/config/config.go` | Reads env vars; add new config here |
-| `backend/internal/middleware/auth0.go` | JWT validation + custom claims extraction |
-| `backend/internal/handlers/handlers.go` | Route registration — add new routes here |
-| `backend/internal/models/` | Go structs for DB types |
-| `backend/migrations/` | golang-migrate SQL files |
-| `backend/task-definition.json` | ECS task definition — update ALLOWED_ORIGINS before prod frontend launch |
-| `frontend/src/main.tsx` | Auth0Provider + AuthSetup wrapper |
-| `frontend/src/api/client.ts` | All HTTP calls — uses tokenGetter for Bearer tokens |
-| `frontend/src/api/AuthSetup.tsx` | Wires Auth0 token getter + fires /users/sync on login |
-| `frontend/src/hooks/useDeals.ts` | `useDeals()`, `useDeal()`, `apiDealToFrontend()`, `patchStage()` |
-| `frontend/src/hooks/useTasks.ts` | `useTasks()`, `patchTaskStatus()`, `postTask()` |
-| `frontend/src/store/authStore.ts` | Real identity — `AppUser` type, `setFromAuth0()`, `isLoaded` flag |
-| `frontend/src/data/mockDeals.ts` | Frontend `Deal` type definition (authoritative) |
-| `frontend/src/data/mockTasks.ts` | Frontend `Task` type definition (authoritative) |
-| `frontend/src/pages/agent/Pipeline.tsx` | Deal list page — uses `useDeals()` |
-| `frontend/src/pages/agent/DealDetail.tsx` | Deal detail + tasks — uses `useDeal()` + `useTasks()` |
-| `BACKEND_TODO.md` | Full backlog of unbuilt backend features |
-| `UAT.md` | Mermaid flowcharts of every user flow (based on mock state) |
+| `web/app/api/**/route.ts` | API route handlers (one directory per resource) |
+| `web/lib/http.ts` | `withAuth`, `json`, `error` helpers |
+| `web/lib/db.ts` | Prisma client (lazy driver-adapter) |
+| `web/lib/users.ts` / `web/lib/roles.ts` / `web/lib/auth.ts` | `resolveUserId`/`upsertUser`, `hasRole`, JWKS verification |
+| `web/lib/s3.ts` | S3 pre-signed URLs + get/put/delete object |
+| `web/lib/{stripe,arive,docusign,simplyrets,auth0,email}.ts` | External clients (each with a `setXForTesting()` seam) |
+| `web/lib/{jobs,queue,calendar}.ts` | Calendar push + durable pg-boss queue |
+| `web/lib/{disclosures,docusign-documents}.ts` | Disclosure-packet merge + shared DocuSign envelope send |
+| `web/prisma/schema.prisma` | Prisma schema (introspected — never hand-author tables) |
+| `web/components/pages/agent/DealDetail.tsx` | Deal detail + tabs (tasks, docs, messages, vendors, participants) |
+| `web/tests/setup/{global-setup,db}.ts` | Test DB bootstrap (runs golang-migrate from `migrations/`) |
+| `migrations/` | golang-migrate SQL (schema source of truth) |
+| `web/AGENTS.md` | "This is not the Next.js you know" — read the Next 16 docs first |
 
 ---
 
 ## Deploy Protocol
 
-Follow this checklist on every push that includes backend changes:
-
-1. **Pre-push**
-   - `cd backend && go build ./...` — must compile clean
-   - `cd frontend && npx tsc --noEmit` — must have zero type errors
-   - If new migrations: test locally with `make migrate` against local Docker DB
-
-2. **Push to main**
-   - GitHub Actions builds Docker image → pushes to ECR → deploys to ECS
-   - Wait for CI green (≈3–5 min)
-
-3. **Migrations run automatically** — server applies all pending migrations on startup before accepting requests. Check CloudWatch logs for `migrations up to date`.
-
-4. **Smoke test**
-   - Hit `GET /api/health` → expect `{"status":"ok"}`
-   - Log in via Auth0 → expect `/users/sync` to return 200
-   - Create a deal → verify it appears in Pipeline
-   - Advance a stage → verify it persists on reload
-
-5. **Update this file**
-   - If real/mock boundaries changed, update the inventory table
-   - If new endpoints were added, add them to the endpoints table
-
----
-
-## Logical Next Steps
-
-In rough priority order:
-
-1. **Update ALLOWED_ORIGINS** — set real production frontend domain in task-definition.json once frontend is deployed
-2. **Documents backend** — S3 upload, `POST /deals/:id/documents`, `GET /deals/:id/documents`
-5. **Documents backend** — S3 upload, `POST /deals/:id/documents`, `GET /deals/:id/documents`
-6. **Vendor persistence** — `GET/POST/PATCH/DELETE /vendors`, agent-scoped preferred vendor list
-7. **Deal health computation** — server-side scoring: green/yellow/red based on task status + days in stage
-8. **Buyer/Seller user accounts** — invite flow, onboarding writes to DB, client portal reads real data
-9. **ARIVE integration** — webhook or polling for Mountain Mortgage loan milestones (only for arive_linked=true deals)
+`web/` deploys via Vercel (the project tracks `main`).
+1. **Pre-push:** `make typecheck && make lint && make test` green. For new migrations,
+   `make migrate` locally + `npm run prisma:pull`.
+2. **PR → CI** (`web-ci.yml`): typecheck → lint → Vitest → production build, plus the
+   Playwright E2E job. Merge on green.
+3. **Vercel** builds + deploys `web/` on merge to `main`.
+4. **Migrations:** apply to prod RDS per the Database Migrations note (not automatic).
+5. **Smoke test** on `app.realtourflow.com`: log in (Auth0 → `/api/users/sync` 200), create
+   a deal, advance a stage, reload to confirm persistence.
+6. **Update this file** when architecture, migrations, or the feature surface change.
 
 ---
 
 ## Calendar OAuth Setup (Google + Microsoft)
 
-The Settings → Integrations page lets agents connect their Google Calendar and/or Outlook so RealTourFlow pushes closing dates and task deadlines into their personal calendar. The full code path is built — `oauth_tokens` table, refresh-on-expiry, FanOut into Google Calendar API and Microsoft Graph from `AdvanceStage` / `SyncAriveLoan` / `CreateTask` / `UpdateTaskStatus`. What's left is registering OAuth apps with each provider and adding the credentials.
+Settings → Integrations lets agents connect Google Calendar / Outlook so RealTourFlow
+pushes closing dates + task deadlines into their calendar. The code path is built
+(`oauth_tokens` table, refresh-on-expiry, fan-out from stage advance / ARIVE sync / task
+create+update via the pg-boss queue). What's left is registering the OAuth apps + adding
+credentials.
 
 ### Google Cloud — OAuth client
-1. Go to https://console.cloud.google.com/apis/credentials
-2. Create OAuth 2.0 Client ID, type **Web application**
-3. Authorized redirect URIs:
-   - Production: `https://api.realtourflow.com/api/integrations/google-calendar/callback`
-   - Local: `http://localhost:8080/api/integrations/google-calendar/callback`
-4. Enable the **Google Calendar API** for the project
-5. Add OAuth consent screen scopes: `auth/calendar.events`, `auth/userinfo.email`, `openid`
-6. Copy the Client ID and Client Secret
+1. https://console.cloud.google.com/apis/credentials → Create OAuth 2.0 Client ID, **Web application**
+2. Authorized redirect URIs:
+   - Production: `https://app.realtourflow.com/api/integrations/google-calendar/callback`
+   - Local: `http://localhost:3000/api/integrations/google-calendar/callback`
+3. Enable the **Google Calendar API**
+4. Consent-screen scopes: `auth/calendar.events`, `auth/userinfo.email`, `openid`
+5. Copy the Client ID + Secret
 
 ### Microsoft Azure — App registration
-1. Go to https://portal.azure.com → Azure Active Directory → App registrations → New registration
-2. Supported account types: **Accounts in any organizational directory and personal Microsoft accounts** (= `common` tenant)
+1. https://portal.azure.com → App registrations → New registration
+2. Accounts in any org directory + personal Microsoft accounts (`common` tenant)
 3. Redirect URI (Web):
-   - Production: `https://api.realtourflow.com/api/integrations/microsoft-calendar/callback`
-   - Local: `http://localhost:8080/api/integrations/microsoft-calendar/callback`
-4. API permissions → Add → Microsoft Graph → **Delegated**: `Calendars.ReadWrite`, `User.Read`, `offline_access`
-5. Certificates & secrets → New client secret
-6. Copy the Application (client) ID and client secret value
+   - Production: `https://app.realtourflow.com/api/integrations/microsoft-calendar/callback`
+   - Local: `http://localhost:3000/api/integrations/microsoft-calendar/callback`
+4. API permissions → Microsoft Graph → Delegated: `Calendars.ReadWrite`, `User.Read`, `offline_access`
+5. Certificates & secrets → New client secret → copy the Application (client) ID + secret value
 
-### Backend env vars
-Add to local `.env`:
+### Credentials
+Add to `web/.env.local` (and the Vercel project env for prod):
 ```
 GOOGLE_OAUTH_CLIENT_ID=...
 GOOGLE_OAUTH_CLIENT_SECRET=...
-GOOGLE_OAUTH_REDIRECT_URL=http://localhost:8080/api/integrations/google-calendar/callback
+GOOGLE_OAUTH_REDIRECT_URL=https://app.realtourflow.com/api/integrations/google-calendar/callback
 MICROSOFT_OAUTH_CLIENT_ID=...
 MICROSOFT_OAUTH_CLIENT_SECRET=...
-MICROSOFT_OAUTH_REDIRECT_URL=http://localhost:8080/api/integrations/microsoft-calendar/callback
+MICROSOFT_OAUTH_REDIRECT_URL=https://app.realtourflow.com/api/integrations/microsoft-calendar/callback
 MICROSOFT_OAUTH_TENANT=common
 ```
-
-For production:
-1. Create AWS Secrets Manager secrets:
-   - `realtourflow/google-oauth-client-id`
-   - `realtourflow/google-oauth-client-secret`
-   - `realtourflow/microsoft-oauth-client-id`
-   - `realtourflow/microsoft-oauth-client-secret`
-2. Add each to `backend/task-definition.json` under `secrets`, mirroring the existing ARIVE entries
-3. Add the redirect URLs and tenant under `environment`:
-```
-GOOGLE_OAUTH_REDIRECT_URL = https://api.realtourflow.com/api/integrations/google-calendar/callback
-MICROSOFT_OAUTH_REDIRECT_URL = https://api.realtourflow.com/api/integrations/microsoft-calendar/callback
-MICROSOFT_OAUTH_TENANT = common
-```
-4. Redeploy. The `GET /me/integrations` endpoint will now report `configured: true` for both calendars and the Settings UI Connect buttons go live.
+(Use the `http://localhost:3000/...` redirect URLs locally.)
 
 ### How event push works
-- Tables: `oauth_tokens` stores per-agent access/refresh tokens; `calendar_event_map` records the external event ID returned by Google/Microsoft so subsequent updates patch the same event instead of duplicating.
+- `oauth_tokens` stores per-agent access/refresh tokens; `calendar_event_map` records the
+  external event ID so updates patch the same event instead of duplicating.
 - Triggers: deal stage advance, ARIVE sync (when key dates update), task create/update.
-- Push is best-effort and runs in a goroutine — calendar failures never block a deal mutation. Errors land in CloudWatch.
-- Idempotent: pushing the same closing event multiple times patches one event. Marking a task complete deletes the event from both calendars.
+- Push is durable: enqueued to pg-boss, attempted inline, and retried by the
+  `/api/jobs/process` cron sweep on transient failure. Idempotent via `calendar_event_map`.
 
 ---
 
 ## Design Principles (Don't Drift From These)
 
-- **ARIVE scope:** The ARIVE API integration is only for deals where the buyer uses Mountain Mortgage / Fast Pass. Outside lender deals are manual updates. Do not build ARIVE logic for deals where `arive_linked = false`.
-- **Role enforcement:** All data scoping happens server-side. Agents only see their own deals. The frontend filter is a UX convenience only, not a security control.
-- **Stage history:** Every stage transition — advance or retreat — writes a row to `deal_stage_history`. Never update stage without this.
-- **No mock IDs in real API calls:** The mock user IDs (`agent-sarah`, `buyer-smith`, etc.) are frontend-only. The database uses UUIDs. Never send a mock ID to the backend.
-- **Migration discipline:** Never alter a production table by hand. Every schema change goes through a numbered migration file.
+- **ARIVE scope:** ARIVE integration is only for deals where the buyer uses Mountain
+  Mortgage / Fast Pass (`arive_linked = true`). Outside-lender deals are manual updates.
+- **Role enforcement:** all data scoping is server-side. Client-side role gating is UX
+  convenience, never a security control.
+- **Stage history:** every stage transition — advance or retreat — writes a
+  `deal_stage_history` row. Never update stage without it.
+- **UUIDs only:** the database uses UUIDs; never send placeholder/mock IDs to the API.
+- **Migration discipline:** never alter a production table by hand — every schema change is
+  a numbered migration in `migrations/`, then `npm run prisma:pull`.

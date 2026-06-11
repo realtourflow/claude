@@ -2,11 +2,10 @@
 
 The launch product: a single **Next.js 16 (App Router) + Prisma 7** app that serves
 **both the UI and the API**. This is the only app we ship — the legacy Go `backend/`
-and Vite `frontend/` are being retired.
+and Vite `frontend/` have been removed.
 
 This README is the developer runbook: clone → running → tests passing. For architecture,
-the real/mock inventory, and the legacy-cutover plan, read the repo-root
-[`CLAUDE.md`](../CLAUDE.md).
+the feature surface, and infrastructure, read the repo-root [`CLAUDE.md`](../CLAUDE.md).
 
 ---
 
@@ -144,14 +143,15 @@ set by Playwright.
 
 ## Database & migrations
 
-**Migrations are golang-migrate SQL, not `prisma migrate`.** CI and production both apply
-migrations with golang-migrate, so Prisma's schema is **introspected** from the database,
-never the other way around.
+**Migrations are golang-migrate SQL, not `prisma migrate`.** CI applies migrations with
+golang-migrate to throwaway test databases, so Prisma's schema is **introspected** from the
+database, never the other way around. (Production application is a manual step — see the
+repo-root [`CLAUDE.md`](../CLAUDE.md).)
 
 To add a schema change:
 
-1. Write the pair under `backend/migrations/` — 6-digit zero-padded, e.g. the next one
-   after `000033` is `000034_add_thing.up.sql` and `000034_add_thing.down.sql`.
+1. Write the pair under `migrations/` — 6-digit zero-padded, e.g. the next one after the
+   highest existing number is `000034_add_thing.up.sql` and `000034_add_thing.down.sql`.
 2. Apply it locally:
    ```bash
    DATABASE_URL="postgres://postgres:postgres@localhost:5432/realtourflow?sslmode=disable" make migrate
@@ -161,9 +161,8 @@ To add a schema change:
    cd web && npm run prisma:pull   # introspects the DB → prisma/schema.prisma
    ```
 
-> **Do not run `prisma migrate`.** It is wrong for this repo until the post-cutover step
-> that flips migrations over to `prisma migrate deploy`. Until then, golang-migrate is the
-> single source of truth for schema.
+> **Do not run `prisma migrate`.** golang-migrate is the single source of truth for schema;
+> a future change may flip to `prisma migrate deploy`.
 
 ---
 
@@ -190,9 +189,8 @@ Tests inject a fake in `beforeEach` and reset it after.
 
 ---
 
-## Deploy & cutover
+## Deploy
 
-Deployment is to **Vercel**. The legacy → `web/` cutover sequence (promote preview to
-production, flip DNS, drain ECS, delete `backend/`/`frontend/`, switch migrations to
-`prisma migrate deploy`) is owned by the repo-root [`CLAUDE.md`](../CLAUDE.md) — follow it
-there rather than duplicating it here.
+Deployment is to **Vercel** (the project tracks `main`). See the repo-root
+[`CLAUDE.md`](../CLAUDE.md) for the deploy protocol, migration application, and the
+remaining AWS infrastructure teardown.
