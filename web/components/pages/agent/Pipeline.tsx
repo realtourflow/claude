@@ -367,7 +367,7 @@ export function DealCard({ deal }: { deal: Deal }) {
         </div>
 
         {/* Middle row: price + timeline */}
-        <div className="flex items-center gap-4 mb-3 text-sm">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-sm">
           <span className="font-semibold text-brand-navy">${deal.property.price.toLocaleString()}</span>
           <span className="flex items-center gap-1 text-gray-400 text-xs">
             <Clock size={11} />
