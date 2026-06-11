@@ -41,6 +41,27 @@ const UTILITY_OPTIONS = [
 
 const TOTAL_SCREENS = 4;
 
+// SmoothExitDetail stashes its payload in sessionStorage before router.push —
+// Next.js has no react-router `{ state }` second arg. Read it once on mount;
+// cleared only after a successful enrollment submit.
+export const HANDOFF_KEY = 'smoothExitSurveyState';
+
+type SurveyHandoff = {
+  dealId?: string | null;
+  selectedUpsells?: string[];
+  upsellTotal?: number;
+};
+
+function readHandoff(): SurveyHandoff | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(HANDOFF_KEY);
+    return raw ? (JSON.parse(raw) as SurveyHandoff) : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Shared UI ─────────────────────────────────────────────────────────────────
 
 function Question({ text, note }: { text: string; note?: string }) {
@@ -328,9 +349,10 @@ const PAYMENT_OPTIONS: { value: SmoothExitPaymentOption; title: string; badge: s
   },
 ];
 
-function ConfirmScreen({ data, submitting, onSubmit }: {
+function ConfirmScreen({ data, submitting, submitError, onSubmit }: {
   data: SurveyData;
   submitting?: boolean;
+  submitError?: boolean;
   onSubmit: (paymentOption: SmoothExitPaymentOption) => void;
 }) {
   const [paymentOption, setPaymentOption] = useState<SmoothExitPaymentOption | null>(null);
@@ -427,6 +449,13 @@ function ConfirmScreen({ data, submitting, onSubmit }: {
           </div>
         </div>
 
+        {submitError && (
+          <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+            <p className="text-sm font-semibold text-red-700">We couldn&apos;t submit your enrollment.</p>
+            <p className="text-xs text-red-400">Nothing was charged — please try again.</p>
+          </div>
+        )}
+
         <button
           onClick={() => paymentOption && !submitting && onSubmit(paymentOption)}
           disabled={!paymentOption || submitting}
@@ -486,14 +515,25 @@ export default function SmoothExitSurvey() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
-  const locationState = (null as unknown) as { dealId?: string | null; selectedUpsells?: string[]; upsellTotal?: number } | null;
-  const dealId = locationState?.dealId ?? null;
-  const selectedUpsells = locationState?.selectedUpsells ?? [];
-  const upsellTotal = locationState?.upsellTotal ?? 0;
+  const [handoff] = useState(readHandoff);
+  // A query dealId marks a direct entry point that skips SmoothExitDetail's
+  // upsell picker — SellerView "Get Started" or Stripe's ?deal_id= cancel-return.
+  // Detail's own push carries no query param, so its fresh stash wins there.
+  const queryDealId = searchParams.get('dealId') ?? searchParams.get('deal_id');
+  const dealId = queryDealId ?? handoff?.dealId ?? null;
+  // Only trust the stash's add-ons when it belongs to the deal being enrolled.
+  // A query dealId that disagrees means a stale stash from a prior visit; the
+  // ConfirmScreen never re-shows those add-ons, so charging for them would be
+  // a silent upsell.
+  const stashMatches =
+    handoff != null && (queryDealId == null || handoff.dealId === queryDealId);
+  const selectedUpsells = stashMatches ? handoff?.selectedUpsells ?? [] : [];
+  const upsellTotal = stashMatches ? handoff?.upsellTotal ?? 0 : 0;
   const [screen, setScreen] = useState(0);
   const [data, setData] = useState<SurveyData>(EMPTY);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
   const [chosenPayment, setChosenPayment] = useState<SmoothExitPaymentOption>('from_proceeds');
 
   const progress = Math.min(((screen + 1) / TOTAL_SCREENS) * 100, 100);
@@ -514,7 +554,7 @@ export default function SmoothExitSurvey() {
   function next() { setScreen((s) => Math.min(s + 1, TOTAL_SCREENS - 1)); }
   function back() {
     if (screen === 0) {
-      if (fromOnboarding) router.push('/smooth-exit?fromOnboarding=true');
+      if (fromOnboarding) router.push(`/smooth-exit?fromOnboarding=true${dealId ? `&dealId=${dealId}` : ''}`);
       else router.back();
     } else {
       setScreen((s) => Math.max(s - 1, 0));
@@ -549,10 +589,12 @@ export default function SmoothExitSurvey() {
           <ConfirmScreen
             data={data}
             submitting={submitting}
+            submitError={submitError}
             onSubmit={async (opt) => {
               setChosenPayment(opt);
               if (dealId) {
                 setSubmitting(true);
+                setSubmitError(false);
                 try {
                   const price = parseFloat(data.estimatedSalePrice) || 0;
                   const res = await api.post<{ ok?: boolean; checkout_url?: string }>(`/deals/${dealId}/smoothexit`, {
@@ -564,14 +606,21 @@ export default function SmoothExitSurvey() {
                     upsell_total_cents: Math.round(upsellTotal * 100),
                   });
                   if (res.checkout_url) {
+                    // Navigating to Stripe — stay disabled (page is unloading)
+                    // so a double-click can't double-post. Keep the handoff:
+                    // Stripe's cancel URL returns here for a resubmit.
                     window.location.href = res.checkout_url;
                     return;
                   }
+                  sessionStorage.removeItem(HANDOFF_KEY);
                 } catch {
-                  // fall through to show submitted screen
-                } finally {
+                  // Enrollment did not persist — show the error, never the
+                  // success screen, and keep the handoff so retry works.
+                  setSubmitError(true);
                   setSubmitting(false);
+                  return;
                 }
+                setSubmitting(false);
               }
               setSubmitted(true);
             }}

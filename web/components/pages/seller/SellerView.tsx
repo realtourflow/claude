@@ -1151,7 +1151,7 @@ function StageCard({ deal, firstName }: { deal: Deal; firstName: string }) {
 
 // ─── Smooth Exit pitch ────────────────────────────────────────────────────────
 
-function SmoothExitPitch() {
+function SmoothExitPitch({ dealId }: { dealId: string }) {
   const router = useRouter();
   return (
     <div className="rounded-2xl overflow-hidden border-2 border-purple-200 bg-purple-50">
@@ -1173,13 +1173,13 @@ function SmoothExitPitch() {
       </div>
       <div className="border-t border-purple-200 px-5 py-3 flex items-center gap-3">
         <button
-          onClick={() => router.push('/smooth-exit')}
+          onClick={() => router.push(`/smooth-exit?dealId=${dealId}`)}
           className="text-xs font-semibold text-purple-700 hover:text-purple-900 transition-colors"
         >
           Learn more →
         </button>
         <button
-          onClick={() => router.push('/smooth-exit/survey')}
+          onClick={() => router.push(`/smooth-exit/survey?dealId=${dealId}`)}
           className="ml-auto rounded-xl bg-purple-700 px-5 py-2 text-xs font-bold text-white hover:bg-purple-800 transition-colors active:scale-[0.98]"
         >
           Get Started
@@ -1300,7 +1300,7 @@ export default function SellerView() {
 
       {/* Smooth Exit pitch — only if not enrolled */}
       {!deal.smoothExit?.status && !isFallenThrough && deal.stage !== 'post_close' && (
-        <SmoothExitPitch />
+        <SmoothExitPitch dealId={deal.id} />
       )}
 
       {/* Offer comparison — only at offer_active stage */}

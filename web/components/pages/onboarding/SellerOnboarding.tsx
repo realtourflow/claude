@@ -370,15 +370,17 @@ export default function SellerOnboarding() {
 
   const activeUser = useAuthStore((s) => s.activeUser);
   const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
+  const [dealId, setDealId] = useState<string | null>(null);
 
   const [data, setData] = useState<SellerData>(EMPTY);
   const [screenIndex, setScreenIndex] = useState(0);
 
-  // Fetch invite details from token to get real agentName.
+  // Fetch invite details from token to get real agentName + the seller's deal
+  // (threaded into the Smooth Exit pitch links below).
   useEffect(() => {
     if (!token) return;
     api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
-      .then((inv) => { setAgentName(inv.agent_name); })
+      .then((inv) => { setAgentName(inv.agent_name); setDealId(inv.deal_id ?? null); })
       .catch(() => {});
   }, [token]);
 
@@ -669,14 +671,14 @@ export default function SellerOnboarding() {
               </div>
               <div className="border-t border-purple-200 px-5 py-3 flex items-center gap-3">
                 <button
-                  onClick={() => router.push('/smooth-exit?fromOnboarding=true')}
+                  onClick={() => router.push(`/smooth-exit?fromOnboarding=true${dealId ? `&dealId=${dealId}` : ''}`)}
                   className="text-xs font-semibold text-purple-700 hover:text-purple-900 transition-colors"
                 >
                   Learn more →
                 </button>
                 <div className="flex-1" />
                 <button
-                  onClick={() => router.push('/smooth-exit/survey?fromOnboarding=true')}
+                  onClick={() => router.push(`/smooth-exit/survey?fromOnboarding=true${dealId ? `&dealId=${dealId}` : ''}`)}
                   className="rounded-xl bg-purple-700 px-4 py-2 text-xs font-bold text-white hover:bg-purple-800 transition-colors"
                 >
                   Get Started
