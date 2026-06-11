@@ -95,11 +95,41 @@ describe("POST /api/deals/[id]/documents/upload-url", () => {
     expect(res.status).toBe(400);
   });
 
-  it("404 when caller does not own the deal", async () => {
-    const agent = await createUser({ role: "agent" });
-    const other = await createUser({ role: "agent", auth0_id: "auth0|other" });
+  it("lets a deal participant (buyer) request a pre-signed url", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|b" });
     const deal = await createDeal({ agent_id: agent.id });
-    void other;
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/documents/upload-url`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|b", ["buyer"]),
+        },
+        body: JSON.stringify({
+          file_name: "preapproval.pdf",
+          mime_type: "application/pdf",
+        }),
+      }
+    );
+    const res = await uploadUrlRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { upload_url: string; s3_key: string };
+    expect(body.upload_url).toMatch(/^https:\/\/.*\.s3\..+\.amazonaws\.com\//);
+    expect(body.s3_key).toMatch(
+      new RegExp(`^deals/${deal.id}/\\d+/preapproval\\.pdf$`)
+    );
+  });
+
+  it("404 when caller is neither the agent nor a participant", async () => {
+    const agent = await createUser({ role: "agent" });
+    const stranger = await createUser({ role: "agent", auth0_id: "auth0|other" });
+    const deal = await createDeal({ agent_id: agent.id });
+    void stranger;
     const req = new Request(
       `http://localhost/api/deals/${deal.id}/documents/upload-url`,
       {
@@ -162,6 +192,84 @@ describe("POST /api/deals/[id]/documents", () => {
     });
     const res = await createDocRoute(req, ctx(deal.id));
     expect(res.status).toBe(400);
+  });
+
+  it("400 when s3_key belongs to a different deal (no cross-deal confirm)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const dealA = await createDeal({ agent_id: agent.id });
+    const dealB = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${dealA.id}/documents`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      // Key points at deal B while confirming under deal A.
+      body: JSON.stringify({
+        name: "sneaky.pdf",
+        s3_key: `deals/${dealB.id}/123/sneaky.pdf`,
+      }),
+    });
+    const res = await createDocRoute(req, ctx(dealA.id));
+    expect(res.status).toBe(400);
+    const count = await prisma.documents.count({ where: { deal_id: dealA.id } });
+    expect(count).toBe(0);
+  });
+
+  it("lets a deal participant (buyer) confirm an upload (uploaded_by = buyer)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|b",
+      name: "Bob Buyer",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|b", ["buyer"]),
+      },
+      body: JSON.stringify({
+        name: "preapproval.pdf",
+        s3_key: `deals/${deal.id}/123/preapproval.pdf`,
+        mime_type: "application/pdf",
+        file_size: 4321,
+      }),
+    });
+    const res = await createDocRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      name: string;
+      uploaded_by: string;
+      uploader_name: string;
+    };
+    expect(body.name).toBe("preapproval.pdf");
+    expect(body.uploaded_by).toBe(buyer.id);
+    expect(body.uploader_name).toBe("Bob Buyer");
+  });
+
+  it("404 when caller is neither the agent nor a participant", async () => {
+    const agent = await createUser({ role: "agent" });
+    const stranger = await createUser({ role: "agent", auth0_id: "auth0|other" });
+    const deal = await createDeal({ agent_id: agent.id });
+    void stranger;
+    const req = new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|other", ["agent"]),
+      },
+      body: JSON.stringify({
+        name: "x.pdf",
+        s3_key: "k",
+      }),
+    });
+    const res = await createDocRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
   });
 });
 

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { error, json, withAuth } from "@/lib/http";
 import { resolveUserId } from "@/lib/users";
+import { hasDealAccess } from "@/lib/deals";
 import { enqueuePushTaskDueEvent } from "@/lib/jobs";
 import type { TaskStatus } from "@/lib/stages";
 
@@ -47,11 +48,22 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
       return error("invalid status", 400);
     }
 
+    // Authorize by deal access (agent owner OR participant), not agent-only:
+    // resolve the task's deal first, then gate on hasDealAccess so buyers/sellers
+    // on the deal can update their own tasks. A missing task or a caller without
+    // access both 404 — same not-found semantics as before.
+    const taskDeal = await prisma.tasks.findUnique({
+      where: { id: taskId },
+      select: { deal_id: true },
+    });
+    if (!taskDeal || !(await hasDealAccess(taskDeal.deal_id, userId))) {
+      return error("task not found", 404);
+    }
+
     const rows = await prisma.$queryRaw<TaskRow[]>`
       UPDATE tasks
       SET status = ${body.status}::task_status, updated_at = NOW()
       WHERE id = ${taskId}::uuid
-        AND deal_id IN (SELECT id FROM deals WHERE agent_id = ${userId}::uuid)
       RETURNING id, deal_id, assigned_to, title, description,
                 status::text AS status, priority, source, stage_context, role,
                 due_date::text AS due_date, created_at, updated_at

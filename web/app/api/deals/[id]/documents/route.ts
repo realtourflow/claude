@@ -55,11 +55,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
 
-    const owned = await prisma.deals.findFirst({
-      where: { id: dealId, agent_id: userId },
-      select: { id: true },
-    });
-    if (!owned) return error("deal not found", 404);
+    // Agent owner OR deal participant (buyer/seller) may add a document.
+    const access = await hasDealAccess(dealId, userId);
+    if (!access) return error("deal not found", 404);
 
     let body: CreateBody;
     try {
@@ -69,6 +67,13 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     }
     if (!body.name || !body.s3_key) {
       return error("name and s3_key are required", 400);
+    }
+    // The key must live under this deal's prefix (upload-url only ever issues
+    // `deals/<dealId>/...`). Without this, a member of deal A could confirm a
+    // row pointing at deal B's object — now reachable by participants, not just
+    // the agent, so harden it here.
+    if (!body.s3_key.startsWith(`deals/${dealId}/`)) {
+      return error("s3_key does not belong to this deal", 400);
     }
 
     const rows = await prisma.$queryRaw<DocumentRow[]>`
