@@ -18,7 +18,7 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
         return error("user not found", 404);
       }
       const actorId = await resolveUserId(claims.sub);
-      logAudit({
+      await logAudit({
         actorId: actorId ?? undefined,
         eventType: "user_activate",
         targetId: id,

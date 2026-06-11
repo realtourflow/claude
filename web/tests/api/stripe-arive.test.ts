@@ -466,7 +466,7 @@ describe("ARIVE link + sync + webhook", () => {
     expect(res.status).toBe(503);
   });
 
-  it("webhook 200s immediately and (best-effort) updates deal", async () => {
+  it("webhook 200s and has synced the deal by the time it responds", async () => {
     const agent = await createUser({ role: "agent" });
     const deal = await createDeal({ agent_id: agent.id });
     await prisma.deals.update({
@@ -481,5 +481,13 @@ describe("ARIVE link + sync + webhook", () => {
     });
     const res = await ariveWebhook(req);
     expect(res.status).toBe(200);
+
+    // T15 (#83): the sync is awaited before the ack — the deal row must be
+    // updated by the time the response resolves (no waitFor, no polling).
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.arive_loan_status).toBe("active");
+    expect(row?.arive_milestones).toEqual({ contract: true });
+    expect(row?.arive_key_dates).toEqual({ closing: "2026-06-15" });
+    expect(row?.arive_synced_at).not.toBeNull();
   });
 });

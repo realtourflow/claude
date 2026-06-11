@@ -46,7 +46,10 @@ export function setAriveForTesting(c: AriveClient | undefined): void {
   stub = c;
 }
 
-const defaultFetch: FetchLike = (url, init) => fetch(url, init);
+// 10s cap so a hung (not erroring) ARIVE can't ride a webhook ack or link
+// request to the platform timeout — both call sites swallow the rejection.
+const defaultFetch: FetchLike = (url, init) =>
+  fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
 
 export class DefaultAriveClient implements AriveClient {
   private accessToken = "";

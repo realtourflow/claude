@@ -13,7 +13,7 @@ export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
       const result = await prisma.promo_codes.deleteMany({ where: { id: codeId } });
       if (result.count === 0) return error("not found", 404);
       const actorId = await resolveUserId(claims.sub);
-      logAudit({
+      await logAudit({
         actorId: actorId ?? undefined,
         eventType: "promo_delete",
         targetId: codeId,
