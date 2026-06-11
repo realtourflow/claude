@@ -6,13 +6,13 @@ let started: StartedPostgreSqlContainer | undefined;
 let dbUrl: string | undefined;
 
 /**
- * Boots an ephemeral Postgres container, runs the existing Go-side migrations
+ * Boots an ephemeral Postgres container, runs the SQL migrations
  * via golang-migrate (which is the source of truth for schema), and returns
  * the connection URL. Call once per test suite via `beforeAll`.
  *
- * Why golang-migrate and not `prisma migrate`: until cutover (Phase 12), the
- * migrations in backend/migrations/ are authoritative. After cutover, we can
- * switch to Prisma migrations.
+ * Why golang-migrate and not `prisma migrate`: the SQL migrations in
+ * migrations/ are authoritative. A future cutover may switch to Prisma
+ * migrations.
  */
 export async function startTestDb(): Promise<string> {
   if (dbUrl) return dbUrl;
@@ -24,7 +24,7 @@ export async function startTestDb(): Promise<string> {
     .start();
 
   const url = started.getConnectionUri();
-  const migrationsPath = path.resolve(__dirname, "../../../backend/migrations");
+  const migrationsPath = path.resolve(__dirname, "../../../migrations");
 
   // Run migrations via golang-migrate CLI (must be installed on the host: `brew install golang-migrate`).
   execSync(
