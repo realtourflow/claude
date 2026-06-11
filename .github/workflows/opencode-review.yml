@@ -38,7 +38,7 @@ jobs:
             ## Review — Inline Findings
 
             For each issue found, provide:
-            - **File:line** reference (e.g. `backend/internal/handlers/handlers.go:42`)
+            - **File:line** reference (e.g. `web/lib/jobs.ts:42`)
             - **Severity**: 🔴 Bug / 🟡 Warning / 🔵 Suggestion
             - **Description**: Short, actionable explanation (1-2 sentences max)
             - **Suggestion**: Concrete replacement code if applicable, or "N/A" if not
