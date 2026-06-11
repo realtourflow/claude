@@ -1780,7 +1780,7 @@ export default function BuyerView() {
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
-  const { deals, loading: dealsLoading, refresh: refreshDeals } = useMyDeals();
+  const { deals, loading: dealsLoading, error: dealsError, refresh: refreshDeals } = useMyDeals();
   const deal = deals.find((d) => d.type === 'buy');
   const { tasks } = useTasks(deal?.id ?? '');
   const buyerTasks = tasks.filter((t) => t.assignedTo === 'buyer');
@@ -1794,6 +1794,20 @@ export default function BuyerView() {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <Loader2 size={24} className="text-brand-navy animate-spin" />
+      </div>
+    );
+  }
+
+  if (dealsError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
+        <p className="text-sm text-gray-400">Unable to load your deal.</p>
+        <button
+          onClick={refreshDeals}
+          className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
+        >
+          Try again
+        </button>
       </div>
     );
   }

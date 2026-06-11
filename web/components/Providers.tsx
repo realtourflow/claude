@@ -3,6 +3,7 @@
 import { Auth0Provider } from "@auth0/auth0-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactNode, useState } from "react";
+import { ApiError } from "@/lib/api-client";
 import AuthSetup from "@/components/AuthSetup";
 import TestAuthSetup from "@/components/TestAuthSetup";
 import { RoleSwitcher } from "@/components/RoleSwitcher";
@@ -34,9 +35,15 @@ export function Providers({ children }: { children: ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 30_000, // 30s — matches our previous manual-refresh cadence
-            refetchOnWindowFocus: false, // keep parity with existing useEffect+useState hooks
-            retry: 1,
+            staleTime: 30_000,
+            refetchOnWindowFocus: false,
+            // Never retry auth errors (401/403) — they're permanent until the user
+            // re-authenticates. Cap all other errors at 2 retries (issue #108).
+            retry: (failureCount: number, error: unknown) => {
+              if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return false;
+              return failureCount < 2;
+            },
+            retryDelay: (attempt: number) => Math.min(1_000 * 2 ** attempt, 30_000),
           },
         },
       }),
