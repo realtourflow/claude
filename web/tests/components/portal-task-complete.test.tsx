@@ -15,7 +15,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Mock } from "vitest";
+import type { ReactElement } from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Task } from "@/lib/data/mockTasks";
 import type { MyDeal } from "@/hooks/useMyDeals";
 
@@ -68,6 +70,21 @@ const mockConfirmUpload = confirmUpload as Mock;
 
 const DEAL_ID = "5f0f6f6a-9b1c-4f6e-8a2d-3c4b5a697e01";
 const TASK_ID = "a1b2c3d4-0000-4f6e-8a2d-3c4b5a697e22";
+
+/**
+ * BuyerView now calls useQueryClient (to invalidate the documents query after a
+ * task upload), so it must render under a QueryClientProvider. The data hooks
+ * are still mocked above — this client only services that invalidation.
+ */
+function renderBuyer(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return {
+    client,
+    ...render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>),
+  };
+}
 
 function makeDeal(): MyDeal {
   return {
@@ -125,7 +142,7 @@ beforeEach(() => {
 describe("Buyer portal task completion", () => {
   it("calls patchTaskStatus(taskId, 'completed') exactly once when a task is confirmed", async () => {
     mockPatch.mockResolvedValue(undefined);
-    render(<BuyerView />);
+    renderBuyer(<BuyerView />);
 
     confirmTask();
 
@@ -135,7 +152,7 @@ describe("Buyer portal task completion", () => {
 
   it("refetches tasks after a successful completion so the server is the source of truth", async () => {
     mockPatch.mockResolvedValue(undefined);
-    render(<BuyerView />);
+    renderBuyer(<BuyerView />);
 
     confirmTask();
 
@@ -144,7 +161,7 @@ describe("Buyer portal task completion", () => {
 
   it("optimistically checks the task off immediately on click", () => {
     mockPatch.mockReturnValue(new Promise(() => {})); // never resolves — stays in-flight
-    render(<BuyerView />);
+    renderBuyer(<BuyerView />);
 
     confirmTask();
 
@@ -155,7 +172,7 @@ describe("Buyer portal task completion", () => {
 
   it("rolls the optimistic check back AND shows an error when patchTaskStatus rejects", async () => {
     mockPatch.mockRejectedValue(new Error("500 — boom"));
-    render(<BuyerView />);
+    renderBuyer(<BuyerView />);
 
     confirmTask();
 
@@ -193,7 +210,8 @@ describe("Buyer portal document upload (upload task)", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 200 }));
 
-    const { container } = render(<BuyerView />);
+    const { container, client } = renderBuyer(<BuyerView />);
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
     const input = openUploadInput(container);
     fireEvent.change(input, { target: { files: [makeFile()] } });
 
@@ -207,6 +225,10 @@ describe("Buyer portal document upload (upload task)", () => {
     );
     // Real success state, not a fake spinner.
     expect(await screen.findByText(/uploaded successfully/i)).toBeTruthy();
+    // The Documents tab is invalidated so the new doc shows up in-session.
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["documents", DEAL_ID] }),
+    );
 
     fetchSpy.mockRestore();
   });
@@ -214,7 +236,7 @@ describe("Buyer portal document upload (upload task)", () => {
   it("shows an error — never a fake 'uploaded' state — when the upload fails", async () => {
     mockRequestUploadUrl.mockRejectedValue(new Error("no presigned url"));
 
-    const { container } = render(<BuyerView />);
+    const { container } = renderBuyer(<BuyerView />);
     const input = openUploadInput(container);
     fireEvent.change(input, { target: { files: [makeFile()] } });
 

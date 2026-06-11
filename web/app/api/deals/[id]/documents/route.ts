@@ -55,11 +55,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
 
-    const owned = await prisma.deals.findFirst({
-      where: { id: dealId, agent_id: userId },
-      select: { id: true },
-    });
-    if (!owned) return error("deal not found", 404);
+    // Agent owner OR deal participant (buyer/seller) may add a document.
+    const access = await hasDealAccess(dealId, userId);
+    if (!access) return error("deal not found", 404);
 
     let body: CreateBody;
     try {

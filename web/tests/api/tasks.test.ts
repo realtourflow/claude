@@ -174,6 +174,50 @@ describe("PATCH /api/tasks/[id]/status", () => {
     expect(row?.status).toBe("completed");
   });
 
+  it("lets a deal participant (buyer, not the agent) complete a task", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|b" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const task = await createTask({ deal_id: deal.id, status: "pending" });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|b", ["buyer"]),
+      },
+      body: JSON.stringify({ status: "completed" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.status).toBe("completed");
+  });
+
+  it("404 for a stranger who is neither the agent nor a participant", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const stranger = await createUser({ role: "buyer", auth0_id: "auth0|s" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id, status: "pending" });
+    void stranger;
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|s", ["buyer"]),
+      },
+      body: JSON.stringify({ status: "completed" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(404);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.status).toBe("pending");
+  });
+
   it("400 on invalid status string", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const deal = await createDeal({ agent_id: agent.id });

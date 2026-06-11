@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
@@ -54,7 +55,7 @@ const TASK_STATUS_ICON: Record<string, React.ReactNode> = {
 
 // ─── Shared: Task card ────────────────────────────────────────────────────────
 
-function TaskCard({ task, onComplete }: { task: Task; onComplete?: (id: string) => void }) {
+function TaskCard({ task, onComplete, onUploaded }: { task: Task; onComplete?: (id: string) => void; onUploaded?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
@@ -84,6 +85,9 @@ function TaskCard({ task, onComplete }: { task: Task; onComplete?: (id: string) 
       if (!put.ok) throw new Error('S3 upload failed');
       await confirmUpload(task.dealId, file.name, s3_key, mimeType, file.size);
       setUploaded(true);
+      // Surface the new doc in the Documents tab this session (invalidate the
+      // ['documents', dealId] query useDocuments reads).
+      onUploaded?.();
     } catch {
       setUploadError('Upload failed. Please try again.');
     } finally {
@@ -1801,10 +1805,15 @@ export default function BuyerView() {
   const activeUser = useAuthStore((s) => s.activeUser);
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
 
+  const queryClient = useQueryClient();
   const { deals, loading: dealsLoading, error: dealsError, refresh: refreshDeals } = useMyDeals();
   const deal = deals.find((d) => d.type === 'buy');
   const { tasks, refresh: refreshTasks } = useTasks(deal?.id ?? '');
   const { completedIds, error: completeError, complete: handleComplete } = useTaskCompletion(refreshTasks);
+  // After a TaskCard upload confirms, refresh the deal's Documents tab in-session.
+  const invalidateDocuments = useCallback(() => {
+    if (deal) void queryClient.invalidateQueries({ queryKey: ['documents', deal.id] });
+  }, [queryClient, deal]);
   const buyerTasks = tasks.filter((t) => t.assignedTo === 'buyer');
   const openTasks = buyerTasks.filter((t) => t.status !== 'completed' && !completedIds.has(t.id));
   // Union real + optimistic ids so a refetched 'completed' task isn't counted twice.
@@ -1943,9 +1952,9 @@ export default function BuyerView() {
                   <p className="text-sm font-medium text-gray-500">All caught up — great work!</p>
                 </div>
               )}
-              {openTasks.filter((t) => t.status === 'overdue').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
-              {openTasks.filter((t) => t.status === 'in_progress').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
-              {openTasks.filter((t) => t.status === 'pending').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
+              {openTasks.filter((t) => t.status === 'overdue').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} onUploaded={invalidateDocuments} />)}
+              {openTasks.filter((t) => t.status === 'in_progress').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} onUploaded={invalidateDocuments} />)}
+              {openTasks.filter((t) => t.status === 'pending').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} onUploaded={invalidateDocuments} />)}
               {completedCount > 0 && (
                 <p className="text-center text-xs text-gray-300 pt-1">
                   {completedCount} task{completedCount !== 1 ? 's' : ''} completed
