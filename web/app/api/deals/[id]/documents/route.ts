@@ -68,6 +68,13 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     if (!body.name || !body.s3_key) {
       return error("name and s3_key are required", 400);
     }
+    // The key must live under this deal's prefix (upload-url only ever issues
+    // `deals/<dealId>/...`). Without this, a member of deal A could confirm a
+    // row pointing at deal B's object — now reachable by participants, not just
+    // the agent, so harden it here.
+    if (!body.s3_key.startsWith(`deals/${dealId}/`)) {
+      return error("s3_key does not belong to this deal", 400);
+    }
 
     const rows = await prisma.$queryRaw<DocumentRow[]>`
       WITH inserted AS (

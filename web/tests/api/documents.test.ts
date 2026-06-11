@@ -194,6 +194,28 @@ describe("POST /api/deals/[id]/documents", () => {
     expect(res.status).toBe(400);
   });
 
+  it("400 when s3_key belongs to a different deal (no cross-deal confirm)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const dealA = await createDeal({ agent_id: agent.id });
+    const dealB = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${dealA.id}/documents`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      // Key points at deal B while confirming under deal A.
+      body: JSON.stringify({
+        name: "sneaky.pdf",
+        s3_key: `deals/${dealB.id}/123/sneaky.pdf`,
+      }),
+    });
+    const res = await createDocRoute(req, ctx(dealA.id));
+    expect(res.status).toBe(400);
+    const count = await prisma.documents.count({ where: { deal_id: dealA.id } });
+    expect(count).toBe(0);
+  });
+
   it("lets a deal participant (buyer) confirm an upload (uploaded_by = buyer)", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const buyer = await createUser({

@@ -193,7 +193,7 @@ describe("FF1 — notification emails (Resend)", () => {
       `/api/deals/${deal.id}/documents`,
       "auth0|agent",
       ["agent"],
-      { name: "Disclosures.pdf", s3_key: "deals/x/disclosures.pdf" }
+      { name: "Disclosures.pdf", s3_key: `deals/${deal.id}/1/disclosures.pdf` }
     );
     const res = await createDocumentRoute(req, ctx(deal.id));
     expect(res.status).toBe(201);
@@ -381,7 +381,7 @@ describe("FF1 — notification emails (Resend)", () => {
         `/api/deals/${deal.id}/documents`,
         "auth0|agent",
         ["agent"],
-        { name: "x.pdf", s3_key: "k" }
+        { name: "x.pdf", s3_key: `deals/${deal.id}/1/x.pdf` }
       );
       const res = await createDocumentRoute(req, ctx(deal.id));
       expect(res.status).toBe(201);
