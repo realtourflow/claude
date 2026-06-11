@@ -70,8 +70,9 @@ export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
     const row = rows[0];
     if (!row) return error("template not found", 404);
 
-    // Best-effort S3 cleanup. Never fails the request.
-    void deleteObject(row.s3_key);
+    // Best-effort S3 cleanup — awaited so Vercel can't freeze the function
+    // before it runs (deleteObject swallows errors; never fails the request).
+    await deleteObject(row.s3_key);
 
     return new Response(null, { status: 204 });
   })) as Response;
