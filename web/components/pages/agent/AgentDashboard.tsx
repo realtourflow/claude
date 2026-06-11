@@ -63,10 +63,10 @@ function StatCard({ icon: Icon, label, value, sub, color }: {
       <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${color}`}>
         <Icon size={20} className="text-white" />
       </div>
-      <div>
+      <div className="min-w-0">
         <div className="text-2xl font-black text-brand-navy leading-none">{value}</div>
-        <div className="mt-0.5 text-xs font-medium text-gray-400 uppercase tracking-wide">{label}</div>
-        {sub && <div className="mt-0.5 text-[11px] text-gray-400">{sub}</div>}
+        <div className="mt-0.5 text-xs font-medium text-gray-400 uppercase tracking-wide truncate">{label}</div>
+        {sub && <div className="mt-0.5 text-[11px] text-gray-400 truncate">{sub}</div>}
       </div>
     </div>
   );

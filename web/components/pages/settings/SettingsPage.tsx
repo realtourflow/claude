@@ -1596,7 +1596,7 @@ export default function SettingsPage() {
             key={id}
             onClick={() => setTab(id)}
             className={[
-              'flex items-center gap-1.5 whitespace-nowrap rounded-t-lg px-4 py-2.5 text-sm font-semibold transition-colors',
+              'flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-lg px-4 py-2.5 text-sm font-semibold transition-colors',
               tab === id
                 ? 'border-b-2 border-brand-navy text-brand-navy'
                 : 'text-gray-400 hover:text-gray-600',
