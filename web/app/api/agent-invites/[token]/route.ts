@@ -16,7 +16,7 @@ type Row = {
 
 // GET — public (no auth); validates an agent invite token for the
 // /agent-signup/[token] landing page.
-// Mirrors GetAgentInvite in backend/internal/handlers/agent_invites.go.
+// Mirrors GetAgentInvite in the legacy Go backend.
 export async function GET(_req: Request, ctx: Ctx): Promise<Response> {
   const { token } = await ctx.params;
 

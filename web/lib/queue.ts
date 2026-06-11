@@ -11,7 +11,7 @@
  * Schema: we deliberately rely on pg-boss's OWN schema init (`start()` creates
  * and migrates the `pgboss` schema), NOT a golang-migrate file. pg-boss's
  * internal schema is version-managed by the library across upgrades; checking
- * a snapshot into backend/migrations/ would fight that. Our app tables are
+ * a snapshot into migrations/ would fight that. Our app tables are
  * untouched — everything pg-boss owns lives in the separate `pgboss` schema.
  *
  * Worker host: Vercel serverless can't run a resident worker, so the sweep is

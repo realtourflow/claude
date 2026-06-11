@@ -24,7 +24,7 @@ export async function POST(req: Request): Promise<Response> {
       if (dealId) {
         // The session's metadata.type (set by its creator in lib/stripe.ts)
         // decides which product was bought. Ports the type switch in
-        // backend/internal/handlers/stripe.go, except unknown/missing types
+        // the legacy Go backend, except unknown/missing types
         // are a logged no-op here instead of defaulting to the closing fee.
         const type = session.metadata?.type;
         if (type === "closing_fee") {
@@ -65,7 +65,7 @@ async function markFeePaid(dealId: string, sessionId: string): Promise<void> {
   });
 }
 
-// Ports markSmoothExitUpsellPaid (backend/internal/handlers/stripe.go), plus
+// Ports markSmoothExitUpsellPaid (the legacy Go backend), plus
 // records which session paid and when so the payment is traceable from the
 // enrollment JSONB. COALESCE preserves the payment evidence even if the
 // enrollment was cleared between checkout and webhook delivery.

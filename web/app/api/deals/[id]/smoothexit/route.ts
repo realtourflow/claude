@@ -17,7 +17,7 @@ type EnrollBody = {
 // POST /deals/:dealId/smoothexit — owner-only.
 // Stores Smooth Exit enrollment JSONB on the deal. If upsells were selected and
 // Stripe is configured, charges them upfront via Stripe Checkout and returns a
-// checkout_url. Ports EnrollSmoothExit (backend/internal/handlers/enrollment.go).
+// checkout_url. Ports EnrollSmoothExit (the legacy Go backend).
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {

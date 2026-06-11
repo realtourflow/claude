@@ -7,7 +7,7 @@
  * Microsoft. `microsoftAuthorizeUrl()` is offline — MSAL's getAuthCodeUrl()
  * derives the public-cloud endpoints without a metadata network call.
  *
- * Port reference: backend/internal/calendar/oauth.go (MicrosoftConfig).
+ * Port reference: the legacy Go backend (MicrosoftConfig).
  */
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { env } from "./env";

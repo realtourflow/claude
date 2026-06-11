@@ -1,5 +1,5 @@
 /**
- * Stripe wrapper. Mirrors the surface used in backend/internal/handlers/stripe.go.
+ * Stripe wrapper. Mirrors the surface used in the legacy Go backend.
  *
  * - createCheckoutSession({...}) → returns Stripe Checkout Session
  * - constructEvent(payload, sig) → verifies webhook signature, returns event
@@ -91,7 +91,7 @@ export type CreateUpsellCheckoutInput = {
  * Smooth Exit concierge add-ons checkout. Unlike the fixed closing fee, the
  * amount is dynamic (sum of selected upsells) and the metadata marks it as a
  * smooth_exit_upsell. Mirrors EnrollSmoothExit in
- * backend/internal/handlers/enrollment.go.
+ * the legacy Go backend.
  */
 export async function createSmoothExitUpsellCheckout(
   input: CreateUpsellCheckoutInput

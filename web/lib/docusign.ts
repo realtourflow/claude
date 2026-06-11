@@ -1,5 +1,5 @@
 /**
- * DocuSign e-signature client. Mirrors backend/internal/docusign/client.go.
+ * DocuSign e-signature client. Mirrors the legacy Go backend.
  *
  * Sends documents for signature and reads envelope status via the DocuSign
  * eSignature REST API. Auth is the JWT bearer grant ("impersonation"): we mint

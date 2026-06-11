@@ -1,7 +1,7 @@
 /**
  * /me/agents — the agents who have the calling TC assigned as their TC.
  *
- * Ports ListMyAgents in backend/internal/handlers/tc.go: every users row whose
+ * Ports ListMyAgents in the legacy Go backend: every users row whose
  * tc_user_id equals the caller, with a count of that agent's active deals.
  *
  * DEVIATION FROM THE GO SOURCE: the Go query counts

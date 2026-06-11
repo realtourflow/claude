@@ -1,7 +1,7 @@
 /**
  * /me/mls — the calling agent's own SimplyRETS MLS credentials.
  *
- * Mirrors GetMyMLS / PatchMyMLS in backend/internal/handlers/mls.go.
+ * Mirrors GetMyMLS / PatchMyMLS in the legacy Go backend.
  *
  * GET   → { connected: boolean }   — true iff the user has mls_key set.
  *                                     NEVER returns the secret.

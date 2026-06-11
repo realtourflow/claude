@@ -17,7 +17,7 @@ export type SyncedUser = {
  * Upserts a user from JWT data. Preserves a hand-edited name when Auth0 is
  * about to clobber it with the email (Auth0 sometimes defaults name=email).
  *
- * Mirrors upsertUser in backend/internal/handlers/users.go.
+ * Mirrors upsertUser in the legacy Go backend.
  */
 export async function upsertUser(input: {
   auth0Id: string;

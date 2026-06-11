@@ -1,5 +1,5 @@
 /**
- * ARIVE loan-data client. Mirrors backend/internal/arive/client.go.
+ * ARIVE loan-data client. Mirrors the legacy Go backend.
  *
  * Fetches loan trackers / status / key dates from ARIVE — only for Mountain
  * Mortgage / Fast Pass deals (arive_linked = true; the sync route enforces

@@ -5,7 +5,7 @@ import { resolveUserId } from "@/lib/users";
 type Ctx = { params: Promise<{ id: string }> };
 
 // Valid participant roles — mirrors the user_role enum on deal_participants.role
-// (see backend/migrations/000001_init.up.sql + 000006_add_tc_role.up.sql).
+// (see migrations/000001_init.up.sql + 000006_add_tc_role.up.sql).
 const PARTICIPANT_ROLES = [
   "agent",
   "buyer",

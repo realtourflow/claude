@@ -1,6 +1,6 @@
 /**
  * Notifications helper. Fire-and-forget — mirrors createNotification in
- * backend/internal/handlers/notifications.go.
+ * the legacy Go backend.
  *
  * Phase 6 will add the typed event union and a listing endpoint. For now
  * this is just the minimal insert surface used by Phase 3 (stage advance

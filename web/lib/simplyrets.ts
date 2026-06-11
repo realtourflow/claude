@@ -1,5 +1,5 @@
 /**
- * SimplyRETS MLS client. Mirrors backend/internal/simplyrets/client.go.
+ * SimplyRETS MLS client. Mirrors the legacy Go backend.
  *
  * Searches listings on the SimplyRETS API (GET /properties) using a *per-agent*
  * MLS key/secret pair (HTTP Basic auth). Credentials are NOT read from env —

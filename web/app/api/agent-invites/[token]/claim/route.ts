@@ -17,7 +17,7 @@ type InviteRow = {
 };
 
 // POST — JWT required (any role); creates the agent user and marks the invite
-// claimed. Mirrors ClaimAgentInvite in backend/internal/handlers/agent_invites.go.
+// claimed. Mirrors ClaimAgentInvite in the legacy Go backend.
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { token } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {

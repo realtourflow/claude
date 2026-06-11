@@ -1,5 +1,5 @@
 /**
- * Audit log helper. Mirrors backend/internal/handlers/audit.go.
+ * Audit log helper. Mirrors the legacy Go backend.
  *
  * Always non-blocking: errors are swallowed and logged to console. The Go
  * implementation runs in a goroutine; we use a fire-and-forget Promise.

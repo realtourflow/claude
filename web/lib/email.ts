@@ -105,7 +105,7 @@ export type SendAgentInviteInput = {
 
 /**
  * Delivers an agent-signup invitation. Ports buildAgentInviteEmail from
- * backend/internal/handlers/agent_invites.go. The caller (the admin create
+ * the legacy Go backend. The caller (the admin create
  * route) invokes this best-effort — a send failure must not block the response.
  */
 export async function sendAgentInviteEmail(
