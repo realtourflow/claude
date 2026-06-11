@@ -43,7 +43,7 @@ export function useMyDeals(): {
   return {
     deals: query.data ?? [],
     loading: query.isLoading,
-    error: query.error instanceof Error ? query.error.message : null,
+    error: query.isError ? (query.error instanceof Error ? query.error.message || 'Failed to load deals' : 'Failed to load deals') : null,
     refresh: () => { void query.refetch(); },
   };
 }
