@@ -1,6 +1,10 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
+import {
+  SMOOTH_EXIT_UPSELL_PRICE_CENTS,
+  isSmoothExitUpsellId,
+} from "@/lib/smooth-exit-catalog";
 import { createSmoothExitUpsellCheckout } from "@/lib/stripe";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -11,13 +15,15 @@ type EnrollBody = {
   fee_cents?: number;
   survey_answers?: unknown; // arbitrary JSON from the survey
   selected_upsells?: string[];
-  upsell_total_cents?: number;
+  upsell_total_cents?: number; // client-sent; deliberately ignored — the server prices upsells
 };
 
 // POST /deals/:dealId/smoothexit — owner-only.
 // Stores Smooth Exit enrollment JSONB on the deal. If upsells were selected and
 // Stripe is configured, charges them upfront via Stripe Checkout and returns a
-// checkout_url. Ports EnrollSmoothExit (backend/internal/handlers/enrollment.go).
+// checkout_url. Ports EnrollSmoothExit (backend/internal/handlers/enrollment.go),
+// except the upsell total is priced server-side from lib/smooth-exit-catalog.ts
+// (#81) instead of trusting the client's upsell_total_cents.
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -38,8 +44,24 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       return error("invalid request body", 400);
     }
 
+    if (body.selected_upsells !== undefined && !Array.isArray(body.selected_upsells)) {
+      return error("selected_upsells must be an array", 400);
+    }
     const selectedUpsells = body.selected_upsells ?? [];
-    const upsellTotalCents = body.upsell_total_cents ?? 0;
+
+    // Server-side pricing (#81): the upsell total is computed from the shared
+    // catalog — body.upsell_total_cents is ignored, so a tampered client can't
+    // set its own price. Unknown keys 400 before anything is persisted.
+    // Duplicate keys count once, matching calcSmoothExitUpsellTotal in
+    // lib/data/mockSmoothExit.ts. (Deliberate divergence from the Go handler,
+    // which trusted the client's total.)
+    let upsellTotalCents = 0;
+    for (const key of new Set(selectedUpsells)) {
+      if (!isSmoothExitUpsellId(key)) {
+        return error(`unknown upsell: ${key}`, 400);
+      }
+      upsellTotalCents += SMOOTH_EXIT_UPSELL_PRICE_CENTS[key];
+    }
 
     const enrollment = {
       status: "active",
@@ -47,7 +69,8 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       estimated_sale_price: body.estimated_sale_price ?? 0,
       fee_cents: body.fee_cents ?? 0,
       survey_answers: (body.survey_answers ?? null) as object | null,
-      selected_upsells: selectedUpsells,
+      // Dedupe what we store so the JSONB matches what was actually charged.
+      selected_upsells: [...new Set(selectedUpsells)],
       upsell_total_cents: upsellTotalCents,
       upsells_paid: false,
       enrolled_at: new Date().toISOString(),
