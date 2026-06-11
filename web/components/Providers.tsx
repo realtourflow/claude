@@ -2,7 +2,7 @@
 
 import { Auth0Provider } from "@auth0/auth0-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useSyncExternalStore } from "react";
 import { ApiError } from "@/lib/api-client";
 import AuthSetup from "@/components/AuthSetup";
 import TestAuthSetup from "@/components/TestAuthSetup";
@@ -12,21 +12,32 @@ import { RoleSwitcher } from "@/components/RoleSwitcher";
 // TestAuthSetup). Off in every normal/production build.
 const E2E_AUTH = process.env.NEXT_PUBLIC_E2E_AUTH === "1";
 
+// useSyncExternalStore returns the server snapshot (`false`) during SSR AND the
+// first client/hydration render, then the client snapshot (`true`) — so the
+// hydration render matches the server output without a setState-in-effect.
+const subscribeNoop = () => () => {};
+const getIsClient = () => true;
+const getIsServer = () => false;
+
 /**
  * Client-side provider stack. Wraps everything in Auth0Provider so React Router
  * pages can call useAuth0(); also fires /users/sync via AuthSetup and renders
  * the dev-only RoleSwitcher overlay.
  *
- * `window.location.origin` is read lazily from the useState initializer so the
- * value is stable across renders and we don't trigger React 19's
- * set-state-in-effect rule.
+ * The provider stack is deferred until the client (see the `isClient` flag) so
+ * the first client render matches the server-rendered HTML — otherwise the
+ * client-only Auth0Provider/RoleSwitcher subtree triggers a hydration mismatch.
  */
 export function Providers({ children }: { children: ReactNode }) {
-  // Lazy initializer keeps origin stable across renders.
-  // On SSR `window` is undefined → origin stays undefined → we short-circuit below.
-  const [origin] = useState<string | undefined>(() =>
-    typeof window !== "undefined" ? window.location.origin : undefined,
-  );
+  // Defer the entire client-only provider stack until after the first client
+  // render. SSR and the initial client render must produce the SAME tree or
+  // React throws a hydration mismatch. Reading `window.location.origin` in a
+  // useState initializer broke that: the server rendered just `children` (no
+  // `window` → no providers), while the client's first render injected
+  // Auth0Provider + RoleSwitcher — so that subtree appeared only on the client
+  // (issue #102). Gating on a client flag keeps the first client render
+  // identical to SSR, then swaps in the providers once `window` is guaranteed.
+  const isClient = useSyncExternalStore(subscribeNoop, getIsClient, getIsServer);
 
   // One QueryClient per Providers mount. Lazy initializer ensures we don't
   // recreate it on every render.
@@ -49,9 +60,12 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   );
 
-  // Skip Auth0 entirely until we know the redirect origin — prevents Auth0
-  // from initializing with `window` undefined during SSR.
-  if (!origin) return <>{children}</>;
+  // First client render matches the server (children only) → clean hydration.
+  // Once we're on the client we know `window` exists, so the providers can
+  // read the redirect origin.
+  if (!isClient) return <>{children}</>;
+
+  const origin = window.location.origin;
 
   // E2E: seeded session via cookie, no Auth0Provider. The E2E flow only visits
   // protected pages (which read identity from the auth store), so nothing calls

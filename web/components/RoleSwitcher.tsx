@@ -40,7 +40,7 @@ export function RoleSwitcher() {
     return (
       <button
         onClick={() => setCollapsed(false)}
-        className="fixed bottom-4 left-4 z-[9999] flex items-center gap-2 rounded-xl bg-black/80 px-3 py-2 shadow-2xl backdrop-blur-sm hover:bg-black/90 transition-colors"
+        className="fixed bottom-4 left-4 z-40 flex items-center gap-2 rounded-xl bg-black/80 px-3 py-2 shadow-2xl backdrop-blur-sm hover:bg-black/90 transition-colors"
         title="Switch role"
       >
         <span className={`h-2 w-2 rounded-full ${dotColor}`} />
@@ -52,7 +52,7 @@ export function RoleSwitcher() {
 
   return (
     <div
-      className="fixed bottom-4 left-4 z-[9999] flex flex-col gap-1 rounded-xl bg-black/80 p-3 shadow-2xl backdrop-blur-sm"
+      className="fixed bottom-4 left-4 z-40 flex flex-col gap-1 rounded-xl bg-black/80 p-3 shadow-2xl backdrop-blur-sm"
       style={{ minWidth: '220px' }}
     >
       <div className="flex items-center justify-between mb-1">
