@@ -119,6 +119,38 @@ export async function createSmoothExitUpsellCheckout(
   return { id: session.id, url: session.url ?? null };
 }
 
+/**
+ * Fast Pass enrollment checkout. The amount is the full enrollment priced
+ * server-side (base fee + selected add-ons) and the metadata marks it as a
+ * fast_pass. Mirrors EnrollFastPass in
+ * backend/internal/handlers/enrollment.go.
+ */
+export async function createFastPassCheckout(
+  input: CreateUpsellCheckoutInput
+): Promise<{ id: string; url: string | null }> {
+  const session = await client().checkout.sessions.create({
+    payment_method_types: ["card"],
+    line_items: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: {
+            name: "Fast Pass Concierge Service",
+            description: `Fast Pass enrollment for ${input.dealTitle}`,
+          },
+          unit_amount: input.amountCents,
+        },
+        quantity: 1,
+      },
+    ],
+    mode: "payment",
+    success_url: input.successUrl,
+    cancel_url: input.cancelUrl,
+    metadata: { deal_id: input.dealId, type: "fast_pass" },
+  });
+  return { id: session.id, url: session.url ?? null };
+}
+
 export function constructEvent(
   payload: string | Buffer,
   signature: string
