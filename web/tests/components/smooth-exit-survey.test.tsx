@@ -14,12 +14,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Mock } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import SmoothExitSurvey from "@/components/pages/onboarding/SmoothExitSurvey";
+import SmoothExitSurvey, {
+  HANDOFF_KEY,
+} from "@/components/pages/onboarding/SmoothExitSurvey";
 import { api } from "@/lib/api-client";
 
+// Mutable so individual tests can simulate a ?dealId= entry point. The `mock`
+// prefix is what lets Vitest's hoisted vi.mock factory close over it.
+let mockSearchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mockSearchParams,
 }));
 
 vi.mock("@/lib/api-client", () => ({
@@ -29,7 +34,6 @@ vi.mock("@/lib/api-client", () => ({
 const mockPost = api.post as Mock;
 
 const DEAL_ID = "5f0f6f6a-9b1c-4f6e-8a2d-3c4b5a697e01";
-const HANDOFF_KEY = "smoothExitSurveyState";
 
 function seedHandoff() {
   sessionStorage.setItem(
@@ -63,6 +67,7 @@ function driveToSubmit() {
 beforeEach(() => {
   sessionStorage.clear();
   mockPost.mockReset();
+  mockSearchParams = new URLSearchParams();
 });
 
 describe("SmoothExitSurvey handoff", () => {
@@ -88,6 +93,25 @@ describe("SmoothExitSurvey handoff", () => {
 
     await screen.findByText("Smooth Exit activated!");
     expect(sessionStorage.getItem(HANDOFF_KEY)).toBeNull();
+  });
+
+  it("ignores a stale cross-deal stash when an explicit ?dealId= is present", async () => {
+    // A prior Detail visit left add-ons stashed for DEAL_ID, but the user now
+    // arrives via a direct entry point for a DIFFERENT deal. The submit must
+    // target the query deal and NOT resurrect the stale add-ons (the confirm
+    // screen never shows them).
+    seedHandoff();
+    const OTHER_DEAL = "11111111-2222-3333-4444-555555555555";
+    mockSearchParams = new URLSearchParams({ dealId: OTHER_DEAL });
+    mockPost.mockResolvedValue({ ok: true });
+    render(<SmoothExitSurvey />);
+    driveToSubmit();
+
+    await screen.findByText("Smooth Exit activated!");
+    const [path, body] = mockPost.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe(`/deals/${OTHER_DEAL}/smoothexit`);
+    expect(body.selected_upsells).toEqual([]);
+    expect(body.upsell_total_cents).toBe(0);
   });
 
   it("shows an error — never the success screen — when the enrollment POST fails", async () => {

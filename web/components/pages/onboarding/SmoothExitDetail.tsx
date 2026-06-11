@@ -9,6 +9,8 @@ import {
   SmoothExitUpsellId,
   calcSmoothExitUpsellTotal,
 } from "@/lib/data/mockSmoothExit";
+// Single source of truth for the handoff key — keeps writer and reader in sync.
+import { HANDOFF_KEY } from "./SmoothExitSurvey";
 
 const BENEFITS = [
   {
@@ -323,7 +325,7 @@ export default function SmoothExitDetail() {
               // so the destination survey page can read it.
               if (typeof window !== "undefined") {
                 sessionStorage.setItem(
-                  "smoothExitSurveyState",
+                  HANDOFF_KEY,
                   JSON.stringify({ selectedUpsells, upsellTotal, dealId })
                 );
               }

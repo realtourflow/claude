@@ -44,7 +44,7 @@ const TOTAL_SCREENS = 4;
 // SmoothExitDetail stashes its payload in sessionStorage before router.push —
 // Next.js has no react-router `{ state }` second arg. Read it once on mount;
 // cleared only after a successful enrollment submit.
-const HANDOFF_KEY = 'smoothExitSurveyState';
+export const HANDOFF_KEY = 'smoothExitSurveyState';
 
 type SurveyHandoff = {
   dealId?: string | null;
@@ -516,11 +516,19 @@ export default function SmoothExitSurvey() {
   const searchParams = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
   const [handoff] = useState(readHandoff);
-  // Query params are the fallback for entry points that skip SmoothExitDetail
-  // (SellerView "Get Started", Stripe checkout's ?deal_id= cancel-return).
-  const dealId = handoff?.dealId ?? searchParams.get('dealId') ?? searchParams.get('deal_id');
-  const selectedUpsells = handoff?.selectedUpsells ?? [];
-  const upsellTotal = handoff?.upsellTotal ?? 0;
+  // A query dealId marks a direct entry point that skips SmoothExitDetail's
+  // upsell picker — SellerView "Get Started" or Stripe's ?deal_id= cancel-return.
+  // Detail's own push carries no query param, so its fresh stash wins there.
+  const queryDealId = searchParams.get('dealId') ?? searchParams.get('deal_id');
+  const dealId = queryDealId ?? handoff?.dealId ?? null;
+  // Only trust the stash's add-ons when it belongs to the deal being enrolled.
+  // A query dealId that disagrees means a stale stash from a prior visit; the
+  // ConfirmScreen never re-shows those add-ons, so charging for them would be
+  // a silent upsell.
+  const stashMatches =
+    handoff != null && (queryDealId == null || handoff.dealId === queryDealId);
+  const selectedUpsells = stashMatches ? handoff?.selectedUpsells ?? [] : [];
+  const upsellTotal = stashMatches ? handoff?.upsellTotal ?? 0 : 0;
   const [screen, setScreen] = useState(0);
   const [data, setData] = useState<SurveyData>(EMPTY);
   const [submitted, setSubmitted] = useState(false);
@@ -598,8 +606,9 @@ export default function SmoothExitSurvey() {
                     upsell_total_cents: Math.round(upsellTotal * 100),
                   });
                   if (res.checkout_url) {
-                    // Keep the handoff: Stripe's cancel URL returns here and
-                    // the user may need to resubmit.
+                    // Navigating to Stripe — stay disabled (page is unloading)
+                    // so a double-click can't double-post. Keep the handoff:
+                    // Stripe's cancel URL returns here for a resubmit.
                     window.location.href = res.checkout_url;
                     return;
                   }
@@ -608,10 +617,10 @@ export default function SmoothExitSurvey() {
                   // Enrollment did not persist — show the error, never the
                   // success screen, and keep the handoff so retry works.
                   setSubmitError(true);
-                  return;
-                } finally {
                   setSubmitting(false);
+                  return;
                 }
+                setSubmitting(false);
               }
               setSubmitted(true);
             }}
