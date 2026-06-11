@@ -8,6 +8,7 @@ import { Deal, DealStage } from "@/lib/data/mockDeals";
 import { Task } from "@/lib/data/mockTasks";
 import { useMyDeals } from "@/hooks/useMyDeals";
 import { useTasks } from "@/hooks/useTasks";
+import { useTaskCompletion } from "@/hooks/useTaskCompletion";
 import { useMessages, postMessage } from "@/hooks/useMessages";
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
@@ -22,7 +23,7 @@ import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/usePrope
 import { useMLSListings, MLSListing } from "@/hooks/useMLS";
 import { useAgentDocStore } from "@/lib/store/agentDocStore";
 import { useAgentDocTemplatesForDeal, DOC_TYPE_LABELS } from "@/hooks/useAgentDocs";
-import { useDocuments, getDownloadUrl as getDealDocDownloadUrl } from "@/hooks/useDocuments";
+import { useDocuments, getDownloadUrl as getDealDocDownloadUrl, requestUploadUrl, confirmUpload } from "@/hooks/useDocuments";
 import ClientNotifications from "@/components/ClientNotifications";
 import { api } from "@/lib/api-client";
 import { FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/data/mockFastPass";
@@ -57,6 +58,7 @@ function TaskCard({ task, onComplete }: { task: Task; onComplete?: (id: string) 
   const [expanded, setExpanded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploaded, setUploaded] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const isOverdue = task.status === 'overdue';
   const isDone = task.status === 'completed';
@@ -67,10 +69,27 @@ function TaskCard({ task, onComplete }: { task: Task; onComplete?: (id: string) 
     setExpanded(false);
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!e.target.files?.length) return;
+  // Real S3 presigned upload (same flow the agent Documents tab uses): request a
+  // PUT URL, push the file to S3, then create the documents row so it lands in
+  // the deal's Documents. No fake success — failures surface an inline error.
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
     setUploading(true);
-    setTimeout(() => { setUploading(false); setUploaded(true); }, 1500);
+    setUploadError(null);
+    try {
+      const mimeType = file.type || 'application/octet-stream';
+      const { upload_url, s3_key } = await requestUploadUrl(task.dealId, file.name, mimeType);
+      const put = await fetch(upload_url, { method: 'PUT', body: file, headers: { 'Content-Type': mimeType } });
+      if (!put.ok) throw new Error('S3 upload failed');
+      await confirmUpload(task.dealId, file.name, s3_key, mimeType, file.size);
+      setUploaded(true);
+    } catch {
+      setUploadError('Upload failed. Please try again.');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
   }
 
   return (
@@ -147,6 +166,9 @@ function TaskCard({ task, onComplete }: { task: Task; onComplete?: (id: string) 
                       : <><Upload size={13} /> Choose file to upload</>}
                     <input type="file" className="hidden" onChange={handleFileChange} disabled={uploading} />
                   </label>
+                  {uploadError && (
+                    <p role="alert" className="text-xs font-medium text-red-600">{uploadError}</p>
+                  )}
                 </>
               ) : (
                 <>
@@ -1778,17 +1800,17 @@ function StageCard({ deal, firstName, onRefresh }: { deal: Deal; firstName: stri
 export default function BuyerView() {
   const activeUser = useAuthStore((s) => s.activeUser);
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
-  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
 
   const { deals, loading: dealsLoading, error: dealsError, refresh: refreshDeals } = useMyDeals();
   const deal = deals.find((d) => d.type === 'buy');
-  const { tasks } = useTasks(deal?.id ?? '');
+  const { tasks, refresh: refreshTasks } = useTasks(deal?.id ?? '');
+  const { completedIds, error: completeError, complete: handleComplete } = useTaskCompletion(refreshTasks);
   const buyerTasks = tasks.filter((t) => t.assignedTo === 'buyer');
   const openTasks = buyerTasks.filter((t) => t.status !== 'completed' && !completedIds.has(t.id));
-
-  function handleComplete(id: string) {
-    setCompletedIds((prev) => new Set([...prev, id]));
-  }
+  // Union real + optimistic ids so a refetched 'completed' task isn't counted twice.
+  const completedCount = new Set(
+    buyerTasks.filter((t) => t.status === 'completed').map((t) => t.id).concat([...completedIds]),
+  ).size;
 
   if (dealsLoading) {
     return (
@@ -1909,6 +1931,12 @@ export default function BuyerView() {
           />
           {activeTab === 'tasks' && (
             <div className="space-y-2">
+              {completeError && (
+                <div role="alert" className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+                  <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
+                  <p className="text-xs font-medium text-red-600">{completeError}</p>
+                </div>
+              )}
               {openTasks.length === 0 && (
                 <div className="rounded-2xl bg-white p-8 text-center shadow-sm">
                   <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
@@ -1918,9 +1946,9 @@ export default function BuyerView() {
               {openTasks.filter((t) => t.status === 'overdue').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
               {openTasks.filter((t) => t.status === 'in_progress').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
               {openTasks.filter((t) => t.status === 'pending').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
-              {(buyerTasks.filter((t) => t.status === 'completed').length + completedIds.size) > 0 && (
+              {completedCount > 0 && (
                 <p className="text-center text-xs text-gray-300 pt-1">
-                  {buyerTasks.filter((t) => t.status === 'completed').length + completedIds.size} task{(buyerTasks.filter((t) => t.status === 'completed').length + completedIds.size) !== 1 ? 's' : ''} completed
+                  {completedCount} task{completedCount !== 1 ? 's' : ''} completed
                 </p>
               )}
             </div>

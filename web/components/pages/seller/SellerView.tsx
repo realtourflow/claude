@@ -9,6 +9,7 @@ import ClientNotifications from "@/components/ClientNotifications";
 import { useDealStageStore } from "@/lib/store/dealStageStore";
 import { useMyDeals } from "@/hooks/useMyDeals";
 import { useTasks } from "@/hooks/useTasks";
+import { useTaskCompletion } from "@/hooks/useTaskCompletion";
 import { useMessages, postMessage } from "@/hooks/useMessages";
 import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
 import { useOffers } from "@/hooks/useOffers";
@@ -1194,7 +1195,6 @@ function SmoothExitPitch({ dealId }: { dealId: string }) {
 export default function SellerView() {
   const activeUser = useAuthStore((s) => s.activeUser);
   const [activeTab, setActiveTab] = useState<Tab>('tasks');
-  const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
   const [showWelcome, setShowWelcome] = useState(() => {
     const flag = sessionStorage.getItem('seller_welcomed');
     if (flag) { sessionStorage.removeItem('seller_welcomed'); return true; }
@@ -1204,17 +1204,18 @@ export default function SellerView() {
   // Notifications are pulled via <ClientNotifications /> which uses useNotifications hook
   const { deals, loading: dealsLoading, error: dealsError, refresh: refreshDeals } = useMyDeals();
   const deal = deals.find((d) => d.type === 'sell');
-  const { tasks } = useTasks(deal?.id ?? '');
+  const { tasks, refresh: refreshTasks } = useTasks(deal?.id ?? '');
+  const { completedIds, error: completeError, complete: handleComplete } = useTaskCompletion(refreshTasks);
   const sellerTasks = tasks.filter((t) => t.assignedTo === 'seller');
   const openTasks = sellerTasks.filter((t) => t.status !== 'completed' && !completedIds.has(t.id));
+  // Union real + optimistic ids so a refetched 'completed' task isn't counted twice.
+  const completedCount = new Set(
+    sellerTasks.filter((t) => t.status === 'completed').map((t) => t.id).concat([...completedIds]),
+  ).size;
   const { slots: availability } = useShowingAvailability(deal?.id);
   const [showingModalDismissed, setShowingModalDismissed] = useState(
     () => !!sessionStorage.getItem(`showing_avail_prompted_${deal?.id ?? ''}`)
   );
-
-  function handleComplete(id: string) {
-    setCompletedIds((prev) => new Set([...prev, id]));
-  }
 
   if (dealsLoading) {
     return (
@@ -1344,6 +1345,12 @@ export default function SellerView() {
           />
           {activeTab === 'tasks' && (
             <div className="space-y-2">
+              {completeError && (
+                <div role="alert" className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+                  <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
+                  <p className="text-xs font-medium text-red-600">{completeError}</p>
+                </div>
+              )}
               {openTasks.length === 0 && (
                 <div className="rounded-2xl bg-white p-8 text-center shadow-sm">
                   <CheckCircle2 size={32} className="mx-auto mb-2 text-green-400" />
@@ -1355,9 +1362,9 @@ export default function SellerView() {
               {openTasks.filter((t) => t.status === 'overdue').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
               {openTasks.filter((t) => t.status === 'in_progress').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
               {openTasks.filter((t) => t.status === 'pending').map((t) => <TaskCard key={t.id} task={t} onComplete={handleComplete} />)}
-              {(sellerTasks.filter((t) => t.status === 'completed').length + completedIds.size) > 0 && (
+              {completedCount > 0 && (
                 <p className="text-center text-xs text-gray-300 pt-1">
-                  {sellerTasks.filter((t) => t.status === 'completed').length + completedIds.size} task{(sellerTasks.filter((t) => t.status === 'completed').length + completedIds.size) !== 1 ? 's' : ''} completed
+                  {completedCount} task{completedCount !== 1 ? 's' : ''} completed
                 </p>
               )}
             </div>
