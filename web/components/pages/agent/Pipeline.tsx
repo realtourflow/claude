@@ -75,7 +75,7 @@ const EMPTY_FORM: NewDealForm = {
   closingDate: '',
 };
 
-function NewDealModal({
+export function NewDealModal({
   onClose,
   onCreated,
 }: {

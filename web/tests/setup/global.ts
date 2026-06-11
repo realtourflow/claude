@@ -1,5 +1,7 @@
 // Loads .env.test if present, then falls back to .env. Vitest setup file.
 import "dotenv/config";
+// Extend Vitest's expect with @testing-library/jest-dom matchers (toBeInTheDocument, etc.)
+import "@testing-library/jest-dom/vitest";
 import { afterAll } from "vitest";
 
 // Any test that drives a deal-stage or task mutation now lazily starts the

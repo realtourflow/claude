@@ -34,11 +34,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   };
 
   if (tokenGetter) {
-    const token = await tokenGetter();
+    // Race the Auth0 silent-auth call against a 10 s ceiling. Without this,
+    // a stalled getAccessTokenSilently call hangs the entire request forever
+    // (issues #106, #107, #108).
+    const token = await Promise.race<string>([
+      tokenGetter(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Auth token request timed out')), 10_000)
+      ),
+    ]);
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers });
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers,
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!res.ok) {
     let body: unknown = null;
     let bodyText: string | undefined;
