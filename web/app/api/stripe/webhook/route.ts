@@ -31,6 +31,8 @@ export async function POST(req: Request): Promise<Response> {
           await markFeePaid(dealId, session.id);
         } else if (type === "smooth_exit_upsell") {
           await markSmoothExitUpsellPaid(dealId, session.id);
+        } else if (type === "fast_pass") {
+          await markFastPassPaid(dealId, session.id);
         } else {
           console.warn(
             `stripe webhook: unhandled checkout session type ${JSON.stringify(
@@ -88,6 +90,28 @@ async function markSmoothExitUpsellPaid(
         '{upsells_checkout_session_id}', to_jsonb(${sessionId}::text)
       ),
       '{upsells_paid_at}', to_jsonb(NOW()::text)
+    )
+    WHERE id = ${dealId}::uuid
+  `;
+}
+
+// Fast Pass enrollment paid (#78). Mirrors markSmoothExitUpsellPaid: flips
+// paid=true and records the session id + paid_at on the fast_pass JSONB.
+// Touches ONLY fast_pass — fee_status and smooth_exit are left alone. COALESCE
+// preserves the payment evidence even if the enrollment was cleared between
+// checkout and webhook delivery.
+async function markFastPassPaid(
+  dealId: string,
+  sessionId: string
+): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE deals
+    SET fast_pass = jsonb_set(
+      jsonb_set(
+        jsonb_set(COALESCE(fast_pass, '{}'::jsonb), '{paid}', 'true'),
+        '{checkout_session_id}', to_jsonb(${sessionId}::text)
+      ),
+      '{paid_at}', to_jsonb(NOW()::text)
     )
     WHERE id = ${dealId}::uuid
   `;

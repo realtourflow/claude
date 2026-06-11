@@ -37,11 +37,26 @@ const EMPTY: SurveyData = {
   notes: '',
 };
 
-type LocationState = {
+// FastPassDetail stashes its payload in sessionStorage before router.push —
+// Next.js has no react-router `{ state }` second arg. Read it once on mount;
+// cleared only after a successful enrollment submit.
+export const HANDOFF_KEY = 'fastPassSurveyState';
+
+type SurveyHandoff = {
+  dealId?: string | null;
   selectedUpsells?: FastPassUpsellId[];
   total?: number;
-  dealId?: string | null;
 };
+
+function readHandoff(): SurveyHandoff | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(HANDOFF_KEY);
+    return raw ? (JSON.parse(raw) as SurveyHandoff) : null;
+  } catch {
+    return null;
+  }
+}
 
 const UTILITY_OPTIONS = [
   'Electric',
@@ -455,12 +470,14 @@ function ConfirmationScreen({
   selectedUpsells,
   total,
   submitting,
+  submitError,
   onSubmit,
 }: {
   data: SurveyData;
   selectedUpsells: FastPassUpsellId[];
   total: number;
   submitting?: boolean;
+  submitError?: boolean;
   onSubmit: (paymentOption: FastPassPaymentOption) => void;
 }) {
   const [paymentOption, setPaymentOption] = useState<FastPassPaymentOption | null>(null);
@@ -580,6 +597,13 @@ function ConfirmationScreen({
           </div>
         </div>
 
+        {submitError && (
+          <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+            <p className="text-sm font-semibold text-red-700">We couldn&apos;t submit your enrollment.</p>
+            <p className="text-xs text-red-400">Nothing was charged — please try again.</p>
+          </div>
+        )}
+
         <button
           onClick={() => paymentOption && !submitting && onSubmit(paymentOption)}
           disabled={!paymentOption || submitting}
@@ -615,10 +639,12 @@ function SubmittedScreen({
   const router = useRouter();
   const activeUser = useAuthStore((s) => s.activeUser);
   function goToDashboard() {
+    // Real identity only — never a mock id. Logged-in buyers land on their own
+    // dashboard; anyone else (or no session) goes to the app root to re-route.
     if (activeUser?.groupId === 'buyer') {
       router.push(`/buyer/${activeUser.id}`);
     } else {
-      router.push('/buyer/buyer-smith');
+      router.push('/');
     }
   }
   const atClosingTotal = Math.round(total * 1.15);
@@ -658,16 +684,26 @@ export default function FastPassSurvey() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fromOnboarding = searchParams.get('fromOnboarding') === 'true';
-  const state = (null as unknown) as LocationState | null;
-
-  const selectedUpsells: FastPassUpsellId[] = state?.selectedUpsells ?? [];
-  const total = state?.total ?? calcFastPassTotal(selectedUpsells);
-  const dealId = state?.dealId ?? null;
+  const [handoff] = useState(readHandoff);
+  // A query dealId marks a direct entry point that skips FastPassDetail's
+  // upsell picker (e.g. agent DealDetail or Stripe's ?deal_id= cancel-return).
+  // Detail's own push carries no query param, so its fresh stash wins there.
+  const queryDealId = searchParams.get('dealId') ?? searchParams.get('deal_id');
+  const dealId = queryDealId ?? handoff?.dealId ?? null;
+  // Only trust the stash's add-ons when it belongs to the deal being enrolled.
+  // A query dealId that disagrees means a stale stash from a prior visit; the
+  // ConfirmationScreen never re-shows those add-ons, so charging for them would
+  // be a silent upsell. Fall the total back to the base price in that case.
+  const stashMatches =
+    handoff != null && (queryDealId == null || handoff.dealId === queryDealId);
+  const selectedUpsells: FastPassUpsellId[] = stashMatches ? handoff?.selectedUpsells ?? [] : [];
+  const total = stashMatches ? handoff?.total ?? calcFastPassTotal(selectedUpsells) : calcFastPassTotal([]);
 
   const [screen, setScreen] = useState(0);
   const [data, setData] = useState<SurveyData>(EMPTY);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState(false);
   const [chosenPayment, setChosenPayment] = useState<FastPassPaymentOption>('now');
 
   const progress = Math.min(((screen + 1) / TOTAL_SCREENS) * 100, 100);
@@ -737,10 +773,12 @@ export default function FastPassSurvey() {
             selectedUpsells={selectedUpsells}
             total={total}
             submitting={submitting}
+            submitError={submitError}
             onSubmit={async (option) => {
               setChosenPayment(option);
               if (dealId) {
                 setSubmitting(true);
+                setSubmitError(false);
                 try {
                   const atClosingTotal = Math.round(total * 1.15);
                   const totalCents = option === 'at_closing'
@@ -756,16 +794,23 @@ export default function FastPassSurvey() {
                     },
                   );
                   if (res.checkout_url) {
+                    // Navigating to Stripe — stay disabled (page is unloading)
+                    // so a double-click can't double-post. Keep the handoff:
+                    // Stripe's cancel URL returns here for a resubmit.
                     window.location.href = res.checkout_url;
                     return;
                   }
+                  sessionStorage.removeItem(HANDOFF_KEY);
                 } catch {
-                  // fall through to show submitted screen
-                } finally {
+                  // Enrollment did not persist — show the error, never the
+                  // success screen, and keep the handoff so retry works.
+                  setSubmitError(true);
                   setSubmitting(false);
+                  return;
                 }
+                setSubmitting(false);
               }
-              if (fromOnboarding) {
+              if (fromOnboarding && !dealId) {
                 router.push('/onboard/buyer?resume=true');
               } else {
                 setSubmitted(true);

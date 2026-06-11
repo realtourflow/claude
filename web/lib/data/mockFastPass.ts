@@ -1,16 +1,15 @@
-export const FAST_PASS_BASE_PRICE = 2977;
+// Prices derive from lib/fast-pass-catalog.ts (cents) so the dollars shown
+// here always equal what POST /deals/[id]/fastpass charges (#78). Edit the
+// catalog, not these numbers.
+import {
+  FAST_PASS_BASE_PRICE_CENTS,
+  FAST_PASS_UPSELL_PRICE_CENTS,
+  type FastPassUpsellId,
+} from '@/lib/fast-pass-catalog';
 
-export type FastPassUpsellId =
-  | 'utility_setup'
-  | 'refi_monitoring'
-  | 'home_warranty'
-  | 'deep_clean'
-  | 'inspection_followup'
-  | 'address_change'
-  | 'storage_research'
-  | 'new_construction'
-  | 'staging_consult'
-  | 'moving_coordination';
+export type { FastPassUpsellId };
+
+export const FAST_PASS_BASE_PRICE = FAST_PASS_BASE_PRICE_CENTS / 100;
 
 export type FastPassUpsell = {
   id: FastPassUpsellId;
@@ -41,7 +40,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'We contact providers and schedule start dates',
       'Coordinate cancellations at your current address',
     ],
-    price: 97,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.utility_setup / 100,
   },
   {
     id: 'refi_monitoring',
@@ -52,7 +51,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Text + email alert when breakeven threshold is crossed',
       'Free Mountain Mortgage refinance analysis on request',
     ],
-    price: 147,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.refi_monitoring / 100,
   },
   {
     id: 'home_warranty',
@@ -63,7 +62,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Coordinate enrollment and payment before closing',
       'Summary of coverage delivered to your portal',
     ],
-    price: 97,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.home_warranty / 100,
   },
   {
     id: 'deep_clean',
@@ -74,7 +73,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Includes kitchen appliances, bathrooms, floors, and windows',
       'Coordinated with our preferred cleaning partner',
     ],
-    price: 197,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.deep_clean / 100,
   },
   {
     id: 'inspection_followup',
@@ -85,7 +84,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Repair estimates coordinated before your repair request deadline',
       'Updates posted to your portal as items resolve',
     ],
-    price: 147,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.inspection_followup / 100,
   },
   {
     id: 'address_change',
@@ -96,7 +95,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Personalized checklist of accounts to update (bank, DMV, subscriptions)',
       'We initiate key notifications on your behalf',
     ],
-    price: 97,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.address_change / 100,
   },
   {
     id: 'storage_research',
@@ -107,7 +106,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Source short-term rental or hotel options if needed',
       'Coordinate reservations and access instructions',
     ],
-    price: 97,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.storage_research / 100,
   },
   {
     id: 'new_construction',
@@ -118,7 +117,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Detailed punch list checklist delivered before walkthrough',
       'Concierge available by phone during your final walkthrough',
     ],
-    price: 147,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.new_construction / 100,
   },
   {
     id: 'staging_consult',
@@ -129,7 +128,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Room-by-room layout recommendations and style guide',
       'Furniture sourcing suggestions within your budget',
     ],
-    price: 247,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.staging_consult / 100,
   },
   {
     id: 'moving_coordination',
@@ -140,7 +139,7 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
       'Coordinate elevator reservations or building requirements',
       'Moving day guide delivered 48 hours before your move',
     ],
-    price: 197,
+    price: FAST_PASS_UPSELL_PRICE_CENTS.moving_coordination / 100,
   },
 ];
 

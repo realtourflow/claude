@@ -254,6 +254,73 @@ describe("POST /api/stripe/webhook", () => {
     expect(row?.fee_paid_at).toBeNull();
   });
 
+  it("fast_pass payment sets fast_pass.paid and touches neither the closing fee nor smooth_exit", async () => {
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    // Seed an enrollment shaped like POST /deals/[id]/fastpass persists it
+    // (server-computed total for base + the selected upsell), plus an unrelated
+    // smooth_exit row to prove the fast_pass branch leaves it alone.
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: {
+        fast_pass: {
+          status: "active",
+          payment_option: "now",
+          selected_upsells: ["staging_consult"],
+          total_cents: 322400,
+          paid: false,
+          enrolled_at: new Date().toISOString(),
+        },
+        smooth_exit: {
+          status: "active",
+          payment_option: "from_proceeds",
+          selected_upsells: [],
+          upsell_total_cents: 0,
+          upsells_paid: false,
+          enrolled_at: new Date().toISOString(),
+        },
+      },
+    });
+
+    setSessionCompleted({
+      id: "cs_fastpass_paid_1",
+      payment_status: "paid",
+      metadata: { deal_id: deal.id, type: "fast_pass" },
+    });
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.$queryRaw<
+      {
+        status: string;
+        paid: boolean;
+        session_id: string | null;
+        paid_at: string | null;
+        se_paid: boolean;
+      }[]
+    >`
+      SELECT fast_pass->>'status'                       AS status,
+             (fast_pass->>'paid')::boolean              AS paid,
+             fast_pass->>'checkout_session_id'          AS session_id,
+             fast_pass->>'paid_at'                      AS paid_at,
+             (smooth_exit->>'upsells_paid')::boolean    AS se_paid
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].paid).toBe(true);
+    expect(rows[0].session_id).toBe("cs_fastpass_paid_1");
+    expect(rows[0].paid_at).toBeTruthy();
+    // Sibling enrollment fields survive the merge.
+    expect(rows[0].status).toBe("active");
+    // smooth_exit must NOT be touched by a fast_pass payment.
+    expect(rows[0].se_paid).toBe(false);
+
+    // The closing fee must be untouched too.
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fee_status).toBe("unpaid");
+    expect(row?.fee_checkout_session_id).toBeNull();
+    expect(row?.fee_paid_at).toBeNull();
+  });
+
   it("payment_status !== 'paid' changes nothing", async () => {
     const agent = await createUser({ role: "agent" });
     const deal = await createDeal({ agent_id: agent.id });
