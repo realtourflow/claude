@@ -5,7 +5,9 @@
  * message and a "Try again" retry button instead of an infinite spinner.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ReactElement } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ─── Shared mocks ─────────────────────────────────────────────────────────────
 
@@ -100,6 +102,15 @@ const ERROR_RETURN = {
   refresh: vi.fn(),
 };
 
+// BuyerView calls useQueryClient (to invalidate the documents query after a
+// task upload), so it must render under a QueryClientProvider.
+function renderView(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -110,7 +121,7 @@ describe("BuyerView — error state (#107)", () => {
   it("renders an error message when useMyDeals returns an error", () => {
     vi.mocked(useMyDeals).mockReturnValue(ERROR_RETURN);
 
-    render(<BuyerView />);
+    renderView(<BuyerView />);
 
     expect(screen.getByText(/unable to load your deal/i)).toBeInTheDocument();
   });
@@ -119,7 +130,7 @@ describe("BuyerView — error state (#107)", () => {
     const mockRefresh = vi.fn();
     vi.mocked(useMyDeals).mockReturnValue({ ...ERROR_RETURN, refresh: mockRefresh });
 
-    render(<BuyerView />);
+    renderView(<BuyerView />);
 
     const retryBtn = screen.getByRole("button", { name: /try again/i });
     expect(retryBtn).toBeInTheDocument();
@@ -135,7 +146,7 @@ describe("SellerView — error state (#107)", () => {
   it("renders an error message when useMyDeals returns an error", () => {
     vi.mocked(useMyDeals).mockReturnValue(ERROR_RETURN);
 
-    render(<SellerView />);
+    renderView(<SellerView />);
 
     expect(screen.getByText(/unable to load your deal/i)).toBeInTheDocument();
   });
@@ -144,7 +155,7 @@ describe("SellerView — error state (#107)", () => {
     const mockRefresh = vi.fn();
     vi.mocked(useMyDeals).mockReturnValue({ ...ERROR_RETURN, refresh: mockRefresh });
 
-    render(<SellerView />);
+    renderView(<SellerView />);
 
     const retryBtn = screen.getByRole("button", { name: /try again/i });
     expect(retryBtn).toBeInTheDocument();
