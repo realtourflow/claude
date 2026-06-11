@@ -42,6 +42,11 @@ const shape = z.object({
   DOCUSIGN_ACCOUNT_ID: z.string().default(""),
   DOCUSIGN_PRIVATE_KEY: z.string().default(""),
   DOCUSIGN_BASE_URL: z.string().default(""),
+  // HMAC key configured in DocuSign Admin → Connect. When set, the public
+  // /api/docusign/webhook handler requires a valid X-DocuSign-Signature-* header
+  // (HMAC-SHA256 over the raw body) and rejects anything else with 401. Empty =
+  // signature verification disabled (legacy/demo — the handler trusts the POST).
+  DOCUSIGN_CONNECT_HMAC_KEY: z.string().default(""),
 
   ARIVE_API_URL: z.string().default(""),
   ARIVE_API_KEY: z.string().default(""),

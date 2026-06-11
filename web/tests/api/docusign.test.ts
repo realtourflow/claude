@@ -8,6 +8,7 @@ import {
   afterEach,
 } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
+import { createHmac } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { StreamingBlobPayloadOutputTypes } from "@smithy/types";
 import { POST as sendForSignatureRoute } from "@/app/api/deals/[id]/documents/[documentId]/send-for-signature/route";
@@ -21,6 +22,7 @@ import {
   type DocusignSigner,
 } from "@/lib/docusign";
 import { prisma } from "@/lib/db";
+import { resetEnvForTesting } from "@/lib/env";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal } from "../helpers/factories";
@@ -226,6 +228,37 @@ describe("POST /api/deals/[id]/documents/[documentId]/send-for-signature", () =>
     const res = await sendForSignatureRoute(req, ctx(deal.id, doc.id));
     expect(res.status).toBe(400);
   });
+
+  it("502 when the DocuSign envelope send fails", async () => {
+    fakeDocusign.createEnvelope = async () => {
+      throw new Error("docusign upstream 500");
+    };
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const doc = await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "contract.pdf",
+        s3_key: "deals/x/1/contract.pdf",
+      },
+    });
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/documents/${doc.id}/send-for-signature`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({
+          signers: [{ email: "b@example.com", name: "B" }],
+        }),
+      }
+    );
+    const res = await sendForSignatureRoute(req, ctx(deal.id, doc.id));
+    expect(res.status).toBe(502);
+  });
 });
 
 describe("POST /api/deals/[id]/documents/[documentId]/docusign/refresh", () => {
@@ -242,7 +275,9 @@ describe("POST /api/deals/[id]/documents/[documentId]/docusign/refresh", () => {
         docusign_status: "sent",
       },
     });
-    fakeDocusign.statusValue = "completed";
+    // Use a value distinct from both the "sent" fixture and the fake's default
+    // so the test proves the fetched status round-trips (not a hardcode).
+    fakeDocusign.statusValue = "declined";
 
     const req = new Request(
       `http://localhost/api/deals/${deal.id}/documents/${doc.id}/docusign/refresh`,
@@ -254,10 +289,64 @@ describe("POST /api/deals/[id]/documents/[documentId]/docusign/refresh", () => {
     const res = await refreshRoute(req, ctx(deal.id, doc.id));
     expect(res.status).toBe(200);
     const body = (await res.json()) as { status: string };
-    expect(body.status).toBe("completed");
+    expect(body.status).toBe("declined");
 
     const row = await prisma.documents.findUnique({ where: { id: doc.id } });
-    expect(row?.docusign_status).toBe("completed");
+    expect(row?.docusign_status).toBe("declined");
+  });
+
+  it("502 when the DocuSign status fetch fails", async () => {
+    fakeDocusign.getEnvelopeStatus = async () => {
+      throw new Error("docusign upstream 500");
+    };
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const doc = await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "x.pdf",
+        s3_key: "k",
+        docusign_envelope_id: "env-1",
+        docusign_status: "sent",
+      },
+    });
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/documents/${doc.id}/docusign/refresh`,
+      {
+        method: "POST",
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }
+    );
+    const res = await refreshRoute(req, ctx(deal.id, doc.id));
+    expect(res.status).toBe(502);
+    // The stale status must remain untouched when the upstream call fails.
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row?.docusign_status).toBe("sent");
+  });
+
+  it("503 when DocuSign is not configured", async () => {
+    fakeDocusign.enabledValue = false;
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const doc = await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "x.pdf",
+        s3_key: "k",
+        docusign_envelope_id: "env-1",
+      },
+    });
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/documents/${doc.id}/docusign/refresh`,
+      {
+        method: "POST",
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }
+    );
+    const res = await refreshRoute(req, ctx(deal.id, doc.id));
+    expect(res.status).toBe(503);
   });
 
   it("a participant (not just the agent) may refresh", async () => {
@@ -380,5 +469,145 @@ describe("POST /api/docusign/webhook", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean };
     expect(body.ok).toBe(true);
+  });
+
+  it("returns 200 without updating when the status is absent", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const doc = await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "x.pdf",
+        s3_key: "k",
+        docusign_envelope_id: "env-nostatus",
+        docusign_status: "sent",
+      },
+    });
+    const req = new Request("http://localhost/api/docusign/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        event: "x",
+        data: { envelopeId: "env-nostatus", envelopeSummary: {} },
+      }),
+    });
+    const res = await webhookRoute(req);
+    expect(res.status).toBe(200);
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row?.docusign_status).toBe("sent"); // unchanged — no status to apply
+  });
+});
+
+describe("POST /api/docusign/webhook (HMAC verification)", () => {
+  const HMAC_KEY = "test-connect-hmac-key";
+  let prevKey: string | undefined;
+
+  beforeEach(() => {
+    prevKey = process.env.DOCUSIGN_CONNECT_HMAC_KEY;
+    process.env.DOCUSIGN_CONNECT_HMAC_KEY = HMAC_KEY;
+    resetEnvForTesting();
+  });
+  afterEach(() => {
+    if (prevKey === undefined) delete process.env.DOCUSIGN_CONNECT_HMAC_KEY;
+    else process.env.DOCUSIGN_CONNECT_HMAC_KEY = prevKey;
+    resetEnvForTesting();
+  });
+
+  function sign(body: string): string {
+    return createHmac("sha256", HMAC_KEY).update(body, "utf8").digest("base64");
+  }
+
+  async function seedDoc() {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    return prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "x.pdf",
+        s3_key: "k",
+        docusign_envelope_id: "env-sig",
+        docusign_status: "sent",
+      },
+    });
+  }
+
+  it("updates status when the signature is valid", async () => {
+    const doc = await seedDoc();
+    const body = JSON.stringify({
+      data: { envelopeId: "env-sig", envelopeSummary: { status: "completed" } },
+    });
+    const req = new Request("http://localhost/api/docusign/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-docusign-signature-1": sign(body),
+      },
+      body,
+    });
+    const res = await webhookRoute(req);
+    expect(res.status).toBe(200);
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row?.docusign_status).toBe("completed");
+  });
+
+  it("rejects a forged/unsigned callback with 401 and does not update", async () => {
+    const doc = await seedDoc();
+    const body = JSON.stringify({
+      data: { envelopeId: "env-sig", envelopeSummary: { status: "completed" } },
+    });
+    const req = new Request("http://localhost/api/docusign/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-docusign-signature-1": "not-a-valid-signature",
+      },
+      body,
+    });
+    const res = await webhookRoute(req);
+    expect(res.status).toBe(401);
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row?.docusign_status).toBe("sent"); // forged status not applied
+  });
+
+  it("rejects a tampered body whose signature was valid for a different body", async () => {
+    const doc = await seedDoc();
+    // Sign the benign body, then submit a different one under that signature —
+    // proves the route verifies the RAW bytes it received, not a re-parse.
+    const signedBody = JSON.stringify({
+      data: { envelopeId: "env-sig", envelopeSummary: { status: "voided" } },
+    });
+    const tamperedBody = JSON.stringify({
+      data: { envelopeId: "env-sig", envelopeSummary: { status: "completed" } },
+    });
+    const req = new Request("http://localhost/api/docusign/webhook", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-docusign-signature-1": sign(signedBody),
+      },
+      body: tamperedBody,
+    });
+    const res = await webhookRoute(req);
+    expect(res.status).toBe(401);
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row?.docusign_status).toBe("sent");
+  });
+
+  it("rejects when no signature header is present but a key is configured", async () => {
+    const doc = await seedDoc();
+    const body = JSON.stringify({
+      data: { envelopeId: "env-sig", envelopeSummary: { status: "completed" } },
+    });
+    const req = new Request("http://localhost/api/docusign/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json" }, // no signature header
+      body,
+    });
+    const res = await webhookRoute(req);
+    expect(res.status).toBe(401);
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row?.docusign_status).toBe("sent");
   });
 });
