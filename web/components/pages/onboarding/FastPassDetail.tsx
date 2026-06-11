@@ -10,6 +10,8 @@ import {
   FastPassUpsellId,
   calcFastPassTotal,
 } from "@/lib/data/mockFastPass";
+// Single source of truth for the handoff key — keeps writer and reader in sync.
+import { HANDOFF_KEY } from "./FastPassSurvey";
 
 const BENEFITS = [
   {
@@ -335,7 +337,7 @@ export default function FastPassDetail() {
               // so the destination survey page can read it.
               if (typeof window !== "undefined") {
                 sessionStorage.setItem(
-                  "fastPassSurveyState",
+                  HANDOFF_KEY,
                   JSON.stringify({ selectedUpsells, total, dealId })
                 );
               }

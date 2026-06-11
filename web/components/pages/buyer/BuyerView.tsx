@@ -1723,7 +1723,7 @@ function FastPassTracker({ deal }: { deal: Deal }) {
 
 // ─── Fast Pass pitch card (unenrolled buyers) ─────────────────────────────────
 
-function FastPassPitch() {
+function FastPassPitch({ dealId }: { dealId: string }) {
   const router = useRouter();
   return (
     <div className="rounded-2xl overflow-hidden border-2 border-green-200 bg-green-50">
@@ -1742,13 +1742,13 @@ function FastPassPitch() {
       </div>
       <div className="border-t border-green-200 px-5 py-3 flex items-center gap-3">
         <button
-          onClick={() => router.push('/fast-pass')}
+          onClick={() => router.push(`/fast-pass?dealId=${dealId}`)}
           className="text-xs font-semibold text-green-700 hover:text-green-900 transition-colors"
         >
           Learn more →
         </button>
         <button
-          onClick={() => router.push('/fast-pass/survey')}
+          onClick={() => router.push(`/fast-pass/survey?dealId=${dealId}`)}
           className="ml-auto rounded-xl bg-green-700 px-5 py-2 text-xs font-bold text-white hover:bg-green-800 transition-colors active:scale-[0.98]"
         >
           Get Started
@@ -1894,7 +1894,7 @@ export default function BuyerView() {
       {!isFallenThrough && deal.stage !== 'intake' && (
         deal.fastPass?.status === 'active'
           ? <FastPassTracker deal={deal} />
-          : deal.stage !== 'post_close' && <FastPassPitch />
+          : deal.stage !== 'post_close' && <FastPassPitch dealId={deal.id} />
       )}
 
       {/* Tabs (hide on post-close and fallen-through to keep it clean) */}
