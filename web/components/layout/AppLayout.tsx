@@ -29,6 +29,7 @@ import {
   Bell,
   X,
   ScrollText,
+  Menu,
   type LucideIcon,
 } from 'lucide-react';
 import InviteModal from '../InviteModal';
@@ -154,47 +155,120 @@ const TC_NAV = [
 
 type SidebarNavItem = { label: string; icon: LucideIcon; href: string };
 
-function Sidebar({ items, title, labelColor }: { items: SidebarNavItem[]; title: string; labelColor: string }) {
-  const location = usePathname();
-
+function SidebarBrand({
+  title,
+  labelColor,
+  onClose,
+}: {
+  title: string;
+  labelColor: string;
+  onClose?: () => void;
+}) {
   return (
-    <aside className="flex h-full w-56 flex-shrink-0 flex-col bg-brand-navy text-white">
-      {/* Brand Header */}
-      <div className="flex items-center gap-2 px-5 py-4 border-b border-white/10">
+    <div className="flex items-center justify-between gap-2 px-5 py-4 border-b border-white/10">
+      <div className="flex items-center gap-2">
         <span className="text-lg font-bold tracking-tight">RealTour Flow</span>
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${labelColor}`}>
           {title}
         </span>
       </div>
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <ul className="flex flex-col gap-0.5">
-          {items.map((item) => {
-            const Icon = item.icon;
-            const isActive =
-              item.href === '/agent' || item.href === '/admin'
-                ? location === item.href
-                : location.startsWith(item.href);
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  className={[
-                    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
-                    isActive
-                      ? 'bg-brand-gold text-brand-navy font-semibold'
-                      : 'text-white/70 hover:bg-white/10 hover:text-white',
-                  ].join(' ')}
-                >
-                  <Icon size={16} />
-                  {item.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-    </aside>
+      {onClose && (
+        <button
+          onClick={onClose}
+          aria-label="Close navigation"
+          className="text-white/70 hover:text-white transition-colors md:hidden"
+        >
+          <X size={18} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SidebarNavList({
+  items,
+  onNavigate,
+}: {
+  items: SidebarNavItem[];
+  onNavigate?: () => void;
+}) {
+  const location = usePathname();
+
+  return (
+    <nav className="flex-1 overflow-y-auto px-3 py-4">
+      <ul className="flex flex-col gap-0.5">
+        {items.map((item) => {
+          const Icon = item.icon;
+          const isActive =
+            item.href === '/agent' || item.href === '/admin'
+              ? location === item.href
+              : location.startsWith(item.href);
+          return (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                onClick={onNavigate}
+                className={[
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+                  isActive
+                    ? 'bg-brand-gold text-brand-navy font-semibold'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white',
+                ].join(' ')}
+              >
+                <Icon size={16} />
+                {item.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+// Persistent sidebar on md+; a slide-in drawer (with backdrop) below md.
+function Sidebar({
+  items,
+  title,
+  labelColor,
+  drawerOpen,
+  onClose,
+}: {
+  items: SidebarNavItem[];
+  title: string;
+  labelColor: string;
+  drawerOpen: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      {/* Desktop — persistent sidebar */}
+      <aside className="hidden md:flex h-full w-56 flex-shrink-0 flex-col bg-brand-navy text-white">
+        <SidebarBrand title={title} labelColor={labelColor} />
+        <SidebarNavList items={items} />
+      </aside>
+
+      {/* Mobile — tap-to-dismiss backdrop */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/50 md:hidden transition-opacity duration-200 ${
+          drawerOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      {/* Mobile — slide-in drawer */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 max-w-[82%] flex-col bg-brand-navy text-white shadow-xl md:hidden transition-transform duration-200 ${
+          drawerOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation menu"
+      >
+        <SidebarBrand title={title} labelColor={labelColor} onClose={onClose} />
+        <SidebarNavList items={items} onNavigate={onClose} />
+      </aside>
+    </>
   );
 }
 
@@ -261,36 +335,92 @@ function SetupBanner() {
   );
 }
 
+// Shared dashboard shell for the agent/admin/TC roles. Persistent sidebar on
+// md+; on mobile the sidebar becomes a drawer opened by the top-bar hamburger,
+// and the content column goes full-width. `topBar` holds the role-specific
+// right-side actions; `banner` is an optional banner under VerifyEmailBanner.
+function DashboardFrame({
+  items,
+  title,
+  labelColor,
+  topBar,
+  banner,
+  children,
+}: {
+  items: SidebarNavItem[];
+  title: string;
+  labelColor: string;
+  topBar: ReactNode;
+  banner?: ReactNode;
+  children: ReactNode;
+}) {
+  // The drawer closes itself on every dismissal path — a nav-link tap
+  // (onNavigate), the backdrop, and the X all call onClose — so no
+  // route-change effect is needed (and one would trip react-hooks/set-state-in-effect).
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  return (
+    <div className="flex h-screen overflow-hidden bg-brand-bg">
+      <Sidebar
+        items={items}
+        title={title}
+        labelColor={labelColor}
+        drawerOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+      />
+      <div className="flex flex-1 flex-col overflow-hidden min-w-0">
+        <div className="flex h-12 flex-shrink-0 items-center gap-3 bg-white border-b border-gray-100 px-4 sm:px-5 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open navigation"
+            className="md:hidden -ml-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
+          >
+            <Menu size={18} />
+          </button>
+          {topBar}
+        </div>
+        <VerifyEmailBanner />
+        {banner}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
+      </div>
+    </div>
+  );
+}
+
 function AgentLayout({ children }: { children: ReactNode }) {
   const activeUser = useAuthStore((s) => s.activeUser);
   const [showInvite, setShowInvite] = useState(false);
 
+  const topBar = (
+    <div className="ml-auto flex items-center gap-2 sm:gap-3">
+      <NotificationBell />
+      <button
+        onClick={() => setShowInvite(true)}
+        className="flex items-center gap-2 rounded-lg bg-brand-gold px-2.5 py-1.5 sm:px-3.5 text-sm font-semibold text-brand-navy hover:bg-brand-gold-dark transition-colors shadow-sm"
+      >
+        <UserPlus size={15} />
+        <span className="hidden sm:inline">Invite Client</span>
+      </button>
+    </div>
+  );
+
   return (
-    <div className="flex h-screen overflow-hidden bg-brand-bg">
-      <Sidebar items={AGENT_NAV} title="Agent" labelColor="bg-blue-500/30 text-blue-300" />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Agent top bar */}
-        <div className="flex h-12 flex-shrink-0 items-center justify-end gap-3 bg-white border-b border-gray-100 px-5 shadow-sm">
-          <NotificationBell />
-          <button
-            onClick={() => setShowInvite(true)}
-            className="flex items-center gap-2 rounded-lg bg-brand-gold px-3.5 py-1.5 text-sm font-semibold text-brand-navy hover:bg-brand-gold-dark transition-colors shadow-sm"
-          >
-            <UserPlus size={15} />
-            Invite Client
-          </button>
-        </div>
-        {/* Email-verification banner — only shows while unverified */}
-        <VerifyEmailBanner />
-        {/* Setup banner — only shows if setup incomplete */}
-        <SetupBanner />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
-      </div>
+    <>
+      <DashboardFrame
+        items={AGENT_NAV}
+        title="Agent"
+        labelColor="bg-blue-500/30 text-blue-300"
+        topBar={topBar}
+        banner={<SetupBanner />}
+      >
+        {children}
+      </DashboardFrame>
 
       {showInvite && activeUser && (
         <InviteModal agentId={activeUser.id} onClose={() => setShowInvite(false)} />
       )}
-    </div>
+    </>
   );
 }
 
@@ -298,26 +428,26 @@ function AgentLayout({ children }: { children: ReactNode }) {
 
 function AdminLayout({ children }: { children: ReactNode }) {
   const activeUser = useAuthStore((s) => s.activeUser);
-  return (
-    <div className="flex h-screen overflow-hidden bg-brand-bg">
-      <Sidebar items={ADMIN_NAV} title="Admin" labelColor="bg-red-500/30 text-red-300" />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex h-12 flex-shrink-0 items-center justify-between bg-white border-b border-gray-100 px-5 shadow-sm">
-          <span className="text-xs font-semibold text-gray-400">Admin Console</span>
-          <div className="flex items-center gap-3">
-            <NotificationBell />
-            {activeUser && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500 hidden sm:block">{activeUser.name}</span>
-                <Image src={activeUser.avatar} alt={activeUser.name} width={28} height={28} unoptimized className="h-7 w-7 rounded-full ring-2 ring-red-200" />
-              </div>
-            )}
+
+  const topBar = (
+    <>
+      <span className="text-xs font-semibold text-gray-400">Admin Console</span>
+      <div className="ml-auto flex items-center gap-3">
+        <NotificationBell />
+        {activeUser && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 hidden sm:block">{activeUser.name}</span>
+            <Image src={activeUser.avatar} alt={activeUser.name} width={28} height={28} unoptimized className="h-7 w-7 rounded-full ring-2 ring-red-200" />
           </div>
-        </div>
-        <VerifyEmailBanner />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        )}
       </div>
-    </div>
+    </>
+  );
+
+  return (
+    <DashboardFrame items={ADMIN_NAV} title="Admin" labelColor="bg-red-500/30 text-red-300" topBar={topBar}>
+      {children}
+    </DashboardFrame>
   );
 }
 
@@ -325,26 +455,26 @@ function AdminLayout({ children }: { children: ReactNode }) {
 
 function TCLayout({ children }: { children: ReactNode }) {
   const activeUser = useAuthStore((s) => s.activeUser);
-  return (
-    <div className="flex h-screen overflow-hidden bg-brand-bg">
-      <Sidebar items={TC_NAV} title="TC" labelColor="bg-amber-500/30 text-amber-300" />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex h-12 flex-shrink-0 items-center justify-between bg-white border-b border-gray-100 px-5 shadow-sm">
-          <span className="text-xs font-semibold text-gray-400">Transaction Coordinator</span>
-          <div className="flex items-center gap-3">
-            <NotificationBell />
-            {activeUser && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-500 hidden sm:block">{activeUser.name}</span>
-                <Image src={activeUser.avatar} alt={activeUser.name} width={28} height={28} unoptimized className="h-7 w-7 rounded-full ring-2 ring-amber-200" />
-              </div>
-            )}
+
+  const topBar = (
+    <>
+      <span className="text-xs font-semibold text-gray-400">Transaction Coordinator</span>
+      <div className="ml-auto flex items-center gap-3">
+        <NotificationBell />
+        {activeUser && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-500 hidden sm:block">{activeUser.name}</span>
+            <Image src={activeUser.avatar} alt={activeUser.name} width={28} height={28} unoptimized className="h-7 w-7 rounded-full ring-2 ring-amber-200" />
           </div>
-        </div>
-        <VerifyEmailBanner />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        )}
       </div>
-    </div>
+    </>
+  );
+
+  return (
+    <DashboardFrame items={TC_NAV} title="TC" labelColor="bg-amber-500/30 text-amber-300" topBar={topBar}>
+      {children}
+    </DashboardFrame>
   );
 }
 
