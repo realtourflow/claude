@@ -48,9 +48,16 @@ export async function POST(req: Request): Promise<Response> {
     }
   } catch (err) {
     console.error("stripe webhook handler error", err);
-    // We still 200 — Stripe should not retry indefinitely on our bug.
+    // 500 so Stripe redelivers (#81). Retrying is safe: markFeePaid and
+    // markSmoothExitUpsellPaid are idempotent status writes — re-running them
+    // converges on the same terminal state (fee_status='paid' /
+    // upsells_paid=true with the same session id). Returning 200 here would
+    // eat the payment on a transient DB failure: money taken in Stripe, fee
+    // never marked paid, and no redelivery to recover.
+    return error("webhook handler error", 500);
   }
 
+  // Signature-valid but unhandled/ignorable event types fall through to 200.
   return new Response(null, { status: 200 });
 }
 

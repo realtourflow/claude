@@ -16,7 +16,8 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       });
       if (result.count === 0) return error("deal not found", 404);
       const actorId = await resolveUserId(claims.sub);
-      logAudit({
+      // Awaited so the audit row is committed before we respond (never throws).
+      await logAudit({
         actorId: actorId ?? undefined,
         eventType: "fee_waive",
         dealId,

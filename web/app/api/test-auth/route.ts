@@ -6,8 +6,10 @@
  * session in the `rtf_e2e_session` cookie; `TestAuthSetup` reads it to wire the
  * API token and populate the auth store — no real Auth0 round-trip.
  *
- * Hard-gated on `E2E_AUTH`: returns 404 in any environment where the flag is not
- * explicitly "1". This route must never be reachable in production.
+ * Hard-gated on `e2eAuthEnabled()`: returns 404 unless `E2E_AUTH` is explicitly
+ * "1" AND we are not in Vercel production (`VERCEL_ENV !== "production"`). The
+ * backstop guarantees this route is unreachable in production even if the flag
+ * is set there by mistake.
  */
 import { error } from "@/lib/http";
 import { upsertUser } from "@/lib/users";

@@ -1,6 +1,13 @@
 /**
- * Notifications helper. Fire-and-forget — mirrors createNotification in
- * the legacy Go backend.
+ * Notifications helper. Mirrors createNotification in the legacy Go backend.
+ *
+ * Durability (T15, #83): the insert is AWAITED by every call site — on Vercel
+ * a detached fire-and-forget promise may never run once the response is
+ * sent. `createNotification` is async and NEVER rejects: failures are
+ * swallowed and logged HERE, so call sites bare-`await` it and a notification
+ * failure can never fail the user's mutation. See lib/audit.ts for why this
+ * awaited best-effort mechanism was chosen over next/server `after()` (no
+ * `waitUntil` outside a running Next server → nondeterministic in tests).
  *
  * Phase 6 will add the typed event union and a listing endpoint. For now
  * this is just the minimal insert surface used by Phase 3 (stage advance
@@ -17,21 +24,19 @@ export type NotificationInput = {
   href?: string;
 };
 
-export function createNotification(input: NotificationInput): void {
-  void (async () => {
-    try {
-      await prisma.notifications.create({
-        data: {
-          user_id: input.userId,
-          title: input.title,
-          body: input.body,
-          type: input.kind,
-          deal_id: input.dealId ?? null,
-          href: input.href ?? null,
-        },
-      });
-    } catch (err) {
-      console.error("notification insert failed", { input, err });
-    }
-  })();
+export async function createNotification(input: NotificationInput): Promise<void> {
+  try {
+    await prisma.notifications.create({
+      data: {
+        user_id: input.userId,
+        title: input.title,
+        body: input.body,
+        type: input.kind,
+        deal_id: input.dealId ?? null,
+        href: input.href ?? null,
+      },
+    });
+  } catch (err) {
+    console.error("notification insert failed", { input, err });
+  }
 }

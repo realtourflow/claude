@@ -5,7 +5,6 @@ import {
   beforeAll,
   beforeEach,
   afterEach,
-  vi,
 } from "vitest";
 import { POST as syncAriveRoute } from "@/app/api/deals/[id]/arive/sync/route";
 import { POST as ariveWebhook } from "@/app/api/arive/webhook/route";
@@ -117,15 +116,11 @@ describe("ARIVE → calendar push", () => {
     const res = await ariveWebhook(req);
     expect(res.status).toBe(200);
 
-    // The webhook ACKs immediately and syncs in a detached block — wait for it.
-    await vi.waitFor(
-      async () => {
-        const map = await prisma.calendar_event_map.findFirst({
-          where: { user_id: agent.id, internal_uid: `close-${deal.id}` },
-        });
-        expect(map?.external_event_id).toBe("gevt-1");
-      },
-      { timeout: 3000, interval: 50 }
-    );
+    // T15 (#83): the webhook awaits the sync (and its calendar push) before
+    // acking — assert directly, no waitFor.
+    const map = await prisma.calendar_event_map.findFirst({
+      where: { user_id: agent.id, internal_uid: `close-${deal.id}` },
+    });
+    expect(map?.external_event_id).toBe("gevt-1");
   });
 });

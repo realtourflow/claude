@@ -203,15 +203,16 @@ describe("POST /api/stripe/webhook", () => {
   it("smooth_exit_upsell payment sets upsells_paid and does NOT touch the closing fee", async () => {
     const agent = await createUser({ role: "agent" });
     const deal = await createDeal({ agent_id: agent.id });
-    // Seed an enrollment the way POST /deals/[id]/smoothexit persists it.
+    // Seed an enrollment shaped like POST /deals/[id]/smoothexit persists it
+    // (catalog key + the server-computed total for it).
     await prisma.deals.update({
       where: { id: deal.id },
       data: {
         smooth_exit: {
           status: "active",
           payment_option: "from_proceeds",
-          selected_upsells: ["staging"],
-          upsell_total_cents: 25000,
+          selected_upsells: ["staging_consult"],
+          upsell_total_cents: 24700,
           upsells_paid: false,
           enrolled_at: new Date().toISOString(),
         },
@@ -339,6 +340,21 @@ describe("POST /api/stripe/webhook", () => {
     const row = await prisma.deals.findUnique({ where: { id: deal.id } });
     expect(row?.fee_status).toBe("waived");
   });
+
+  it("DB failure during a closing_fee update → 5xx so Stripe redelivers", async () => {
+    // Injection: metadata.deal_id is a malformed uuid, so markFeePaid's
+    // WHERE id = ... comparison throws in Postgres (22P02 invalid input
+    // syntax for type uuid) — landing in the same catch block a transient
+    // DB outage would. Swallowing it with a 200 would eat the payment:
+    // money taken in Stripe, fee never marked paid, no redelivery.
+    setSessionCompleted({
+      id: "cs_dbfail_1",
+      payment_status: "paid",
+      metadata: { deal_id: "not-a-uuid", type: "closing_fee" },
+    });
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBeGreaterThanOrEqual(500);
+  });
 });
 
 describe("ARIVE link + sync + webhook", () => {
@@ -450,7 +466,7 @@ describe("ARIVE link + sync + webhook", () => {
     expect(res.status).toBe(503);
   });
 
-  it("webhook 200s immediately and (best-effort) updates deal", async () => {
+  it("webhook 200s and has synced the deal by the time it responds", async () => {
     const agent = await createUser({ role: "agent" });
     const deal = await createDeal({ agent_id: agent.id });
     await prisma.deals.update({
@@ -465,5 +481,13 @@ describe("ARIVE link + sync + webhook", () => {
     });
     const res = await ariveWebhook(req);
     expect(res.status).toBe(200);
+
+    // T15 (#83): the sync is awaited before the ack — the deal row must be
+    // updated by the time the response resolves (no waitFor, no polling).
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.arive_loan_status).toBe("active");
+    expect(row?.arive_milestones).toEqual({ contract: true });
+    expect(row?.arive_key_dates).toEqual({ closing: "2026-06-15" });
+    expect(row?.arive_synced_at).not.toBeNull();
   });
 });

@@ -75,35 +75,36 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
       }),
     ]);
 
-    // Background fan-out (fire-and-forget). Audit log + notifications +
-    // calendar push.
-    logAudit({
+    // Side-effect fan-out (audit + notifications + calendar push) is AWAITED,
+    // not detached: on Vercel the function can freeze once the response is
+    // sent, so a stray promise may never run. Each piece is best-effort —
+    // logAudit/createNotification swallow internally; the participant lookup
+    // is wrapped here — so nothing below can fail the stage change.
+    await logAudit({
       actorId: userId,
       eventType: "stage_change",
       dealId,
       metadata: { from_stage: current.stage, to_stage: newStage },
     });
 
-    void (async () => {
-      try {
-        const participants = await prisma.deal_participants.findMany({
-          where: { deal_id: dealId },
-          select: { user_id: true },
+    try {
+      const participants = await prisma.deal_participants.findMany({
+        where: { deal_id: dealId },
+        select: { user_id: true },
+      });
+      const label = STAGE_LABELS[newStage] ?? newStage;
+      for (const p of participants) {
+        await createNotification({
+          userId: p.user_id,
+          title: "Your deal has moved forward",
+          body: `New stage: ${label}`,
+          kind: "stage_change",
+          dealId,
         });
-        const label = STAGE_LABELS[newStage] ?? newStage;
-        for (const p of participants) {
-          createNotification({
-            userId: p.user_id,
-            title: "Your deal has moved forward",
-            body: `New stage: ${label}`,
-            kind: "stage_change",
-            dealId,
-          });
-        }
-      } catch (err) {
-        console.error("stage notification fan-out failed", err);
       }
-    })();
+    } catch (err) {
+      console.error("stage notification fan-out failed", err);
+    }
 
     // Calendar push is best-effort but must be AWAITED, not detached: on Vercel
     // the function can freeze after the response is sent, killing a stray

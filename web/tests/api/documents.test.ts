@@ -257,9 +257,33 @@ describe("DELETE /api/documents/[id]", () => {
 
     const row = await prisma.documents.findUnique({ where: { id: doc.id } });
     expect(row).toBeNull();
-    // We do NOT assert on S3 here because deleteObject is fire-and-forget —
-    // it's not awaited by the route. The mock will record the call if/when
-    // it fires, but a synchronous assertion would race.
+    // deleteObject is awaited by the route, so the S3 call is deterministic
+    // by the time the response resolves — no race.
+    const calls = s3Mock.commandCalls(DeleteObjectCommand);
+    expect(calls.length).toBe(1);
+    expect(calls[0].args[0].input.Key).toBe("k");
+  });
+
+  it("still 204s and deletes the row when the S3 delete throws", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const doc = await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "x.pdf",
+        s3_key: "k",
+      },
+    });
+    s3Mock.on(DeleteObjectCommand).rejects(new Error("s3 down"));
+    const req = new Request(`http://localhost/api/documents/${doc.id}`, {
+      method: "DELETE",
+      headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+    });
+    const res = await deleteDocRoute(req, ctx(doc.id));
+    expect(res.status).toBe(204);
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row).toBeNull();
   });
 
   it("404 when caller is not the owning agent", async () => {

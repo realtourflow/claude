@@ -287,6 +287,24 @@ describe("DELETE /api/me/doc-templates/[docId]", () => {
     expect(row).toBeNull();
   });
 
+  it("still 204s and deletes the row when the S3 delete throws", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const tpl = await seedTemplate(agent.id);
+    s3Mock.on(DeleteObjectCommand).rejects(new Error("s3 down"));
+
+    const req = new Request(`http://localhost/api/me/doc-templates/${tpl.id}`, {
+      method: "DELETE",
+      headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+    });
+    const res = await deleteRoute(req, ctx(tpl.id));
+    expect(res.status).toBe(204);
+
+    const row = await prisma.agent_doc_templates.findUnique({
+      where: { id: tpl.id },
+    });
+    expect(row).toBeNull();
+  });
+
   it("404 when caller is not the owning agent", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     await createUser({ role: "agent", auth0_id: "auth0|other" });

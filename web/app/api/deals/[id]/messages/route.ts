@@ -67,39 +67,40 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       body: text,
     });
 
-    // Notification fan-out (fire-and-forget). Agent → all participants;
-    // participant → the agent.
-    void (async () => {
-      try {
-        const title = "New message on your deal";
-        const snippet = text.length > 80 ? text.slice(0, 80) + "…" : text;
-        if (access.isAgent) {
-          const participants = await prisma.deal_participants.findMany({
-            where: { deal_id: dealId },
-            select: { user_id: true },
-          });
-          for (const p of participants) {
-            createNotification({
-              userId: p.user_id,
-              title,
-              body: snippet,
-              kind: "new_message",
-              dealId,
-            });
-          }
-        } else if (access.agentId) {
-          createNotification({
-            userId: access.agentId,
+    // Notification fan-out — agent → all participants; participant → the
+    // agent. AWAITED, not detached: on Vercel a stray promise may never run
+    // once the response is sent. Best-effort throughout: createNotification
+    // swallows internally, the participant lookup is wrapped here, so a
+    // notification failure never fails the send.
+    try {
+      const title = "New message on your deal";
+      const snippet = text.length > 80 ? text.slice(0, 80) + "…" : text;
+      if (access.isAgent) {
+        const participants = await prisma.deal_participants.findMany({
+          where: { deal_id: dealId },
+          select: { user_id: true },
+        });
+        for (const p of participants) {
+          await createNotification({
+            userId: p.user_id,
             title,
             body: snippet,
             kind: "new_message",
             dealId,
           });
         }
-      } catch (err) {
-        console.error("message notification fan-out failed", err);
+      } else if (access.agentId) {
+        await createNotification({
+          userId: access.agentId,
+          title,
+          body: snippet,
+          kind: "new_message",
+          dealId,
+        });
       }
-    })();
+    } catch (err) {
+      console.error("message notification fan-out failed", err);
+    }
 
     // Best-effort email to the other party — only on the client thread. Awaited
     // (not detached) so it actually sends on Vercel; a throw must never block

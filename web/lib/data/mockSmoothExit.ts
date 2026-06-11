@@ -1,3 +1,10 @@
+import {
+  SMOOTH_EXIT_UPSELL_PRICE_CENTS,
+  type SmoothExitUpsellId,
+} from '../smooth-exit-catalog';
+
+export type { SmoothExitUpsellId };
+
 export const SMOOTH_EXIT_FEE_PERCENT = 0.01; // 1% of sale price
 
 export type SmoothExitNextStep =
@@ -66,16 +73,6 @@ export function calcSmoothExitFee(salePrice: number): number {
   return Math.round(salePrice * SMOOTH_EXIT_FEE_PERCENT);
 }
 
-export type SmoothExitUpsellId =
-  | 'pre_listing_clean'
-  | 'staging_consult'
-  | 'pre_listing_inspection'
-  | 'photography_upgrade'
-  | 'storage_research'
-  | 'moving_coordination'
-  | 'address_change'
-  | 'repair_bid_coordination';
-
 export type SmoothExitUpsell = {
   id: SmoothExitUpsellId;
   name: string;
@@ -83,6 +80,11 @@ export type SmoothExitUpsell = {
   details: string[];
   price: number;
 };
+
+// Display prices derive from the server-side catalog (lib/smooth-exit-catalog.ts)
+// so the UI can never drift from what POST /deals/[id]/smoothexit charges.
+const dollars = (id: SmoothExitUpsellId): number =>
+  SMOOTH_EXIT_UPSELL_PRICE_CENTS[id] / 100;
 
 export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
   {
@@ -94,7 +96,7 @@ export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
       'Includes kitchen appliances, bathrooms, floors, and windows',
       'Coordinated around your photo shoot date',
     ],
-    price: 197,
+    price: dollars('pre_listing_clean'),
   },
   {
     id: 'staging_consult',
@@ -105,7 +107,7 @@ export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
       'Room-by-room staging recommendations',
       'Decluttering and furniture arrangement guide',
     ],
-    price: 247,
+    price: dollars('staging_consult'),
   },
   {
     id: 'pre_listing_inspection',
@@ -116,7 +118,7 @@ export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
       'Summary of findings delivered before you list',
       'Vendor quotes for any items you choose to address',
     ],
-    price: 147,
+    price: dollars('pre_listing_inspection'),
   },
   {
     id: 'photography_upgrade',
@@ -127,7 +129,7 @@ export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
       'Aerial drone photography for curb appeal shots',
       "Coordinated with your listing agent's photographer",
     ],
-    price: 197,
+    price: dollars('photography_upgrade'),
   },
   {
     id: 'storage_research',
@@ -138,7 +140,7 @@ export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
       'Source short-term rental or hotel options if needed',
       'Coordinate reservations and access instructions',
     ],
-    price: 97,
+    price: dollars('storage_research'),
   },
   {
     id: 'moving_coordination',
@@ -149,7 +151,7 @@ export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
       'Coordinate building or HOA requirements for move-out',
       'Moving day guide delivered 48 hours before your move',
     ],
-    price: 197,
+    price: dollars('moving_coordination'),
   },
   {
     id: 'address_change',
@@ -160,7 +162,7 @@ export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
       'Personalized checklist of accounts to update (bank, DMV, subscriptions)',
       'We initiate key notifications on your behalf',
     ],
-    price: 97,
+    price: dollars('address_change'),
   },
   {
     id: 'repair_bid_coordination',
@@ -171,7 +173,7 @@ export const SMOOTH_EXIT_UPSELLS: SmoothExitUpsell[] = [
       'Bids compiled and delivered so you can negotiate from facts, not guesswork',
       'Covers up to 3 repair line items from the buyer\'s request',
     ],
-    price: 147,
+    price: dollars('repair_bid_coordination'),
   },
 ];
 
