@@ -5,7 +5,7 @@ on:
     branches: [main, nextjs-prisma-rewrite]
     paths:
       - "web/**"
-      - "backend/migrations/**"
+      - "migrations/**"
       - ".github/workflows/web-ci.yml"
   # No paths filter on PRs: `test` is a required check under branch protection,
   # and a paths-skipped workflow reports no check at all, leaving out-of-paths
@@ -129,7 +129,7 @@ jobs:
           migrate -version
 
       - name: Migrate e2e database
-        run: migrate -path "$GITHUB_WORKSPACE/backend/migrations" -database "$DATABASE_URL" up
+        run: migrate -path "$GITHUB_WORKSPACE/migrations" -database "$DATABASE_URL" up
 
       - name: Install dependencies
         run: npm ci

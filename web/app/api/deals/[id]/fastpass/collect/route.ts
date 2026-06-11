@@ -6,7 +6,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 // POST /deals/:dealId/fastpass/collect — admin only.
 // Marks a deferred (at_closing or seller_concession) Fast Pass as collected.
-// Ports backend CollectFastPass (backend/internal/handlers/enrollment.go).
+// Ports backend CollectFastPass (the legacy Go backend).
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {

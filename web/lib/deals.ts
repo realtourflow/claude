@@ -2,7 +2,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "./db";
 
 /**
- * Health CASE expression. Ported verbatim from backend/internal/handlers/deals.go:25.
+ * Health CASE expression. Ported verbatim from the legacy Go backend.
  *
  * Red    = any incomplete task with a past due_date.
  * Yellow = deal has been in current stage longer than the stage threshold AND has

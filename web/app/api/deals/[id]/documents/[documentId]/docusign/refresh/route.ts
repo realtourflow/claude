@@ -7,7 +7,7 @@ import { getDocusignClient } from "@/lib/docusign";
 type Ctx = { params: Promise<{ id: string; documentId: string }> };
 
 // POST /api/deals/[id]/documents/[documentId]/docusign/refresh
-// Ports RefreshDocuSignStatus in backend/internal/handlers/docusign.go.
+// Ports RefreshDocuSignStatus in the legacy Go backend.
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId, documentId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {

@@ -21,7 +21,7 @@
  * The queue worker dispatches to them directly.
  *
  * Mirrors pushDealClosingEvent / pushTaskDueEvent in
- * backend/internal/handlers/calendar_events.go.
+ * the legacy Go backend.
  */
 import { prisma } from "./db";
 import { fanOutUpsert, fanOutDelete, type CalendarEvent } from "./calendar";

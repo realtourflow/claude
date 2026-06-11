@@ -1,5 +1,5 @@
 /**
- * Audit log helper. Mirrors backend/internal/handlers/audit.go.
+ * Audit log helper. Mirrors the legacy Go backend.
  *
  * Durability (T15, #83): the insert is AWAITED by every call site. On Vercel a
  * function can freeze the moment the response is sent, so the old detached

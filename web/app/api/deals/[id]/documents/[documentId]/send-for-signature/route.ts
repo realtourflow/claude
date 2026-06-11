@@ -12,7 +12,7 @@ type SendBody = {
 };
 
 // POST /api/deals/[id]/documents/[documentId]/send-for-signature
-// Ports SendForSignature in backend/internal/handlers/docusign.go.
+// Ports SendForSignature in the legacy Go backend.
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId, documentId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {

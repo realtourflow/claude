@@ -10,7 +10,7 @@ type WebhookPayload = {
 };
 
 // POST /api/docusign/webhook — public (registered in DocuSign Connect).
-// Ports DocuSignWebhook in backend/internal/handlers/docusign.go.
+// Ports DocuSignWebhook in the legacy Go backend.
 // Always returns 200 so DocuSign does not retry, even on a bad payload.
 export async function POST(req: Request): Promise<Response> {
   let payload: WebhookPayload;

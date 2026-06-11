@@ -11,7 +11,7 @@
  * The user id rides inside the signed cookie (never in the URL), so the
  * unauthenticated callback knows which account to attach the tokens to.
  *
- * Mirrors the `state` handling around backend/internal/calendar/oauth.go.
+ * Mirrors the `state` handling around the legacy Go backend.
  */
 import { SignJWT, jwtVerify } from "jose";
 import { env } from "./env";

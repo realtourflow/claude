@@ -9,11 +9,10 @@ db:
 	docker compose up postgres -d
 
 # Apply all migrations to the database pointed at by $DATABASE_URL.
-# Keeps using golang-migrate while the migrations directory lives at
-# backend/migrations as the canonical source of truth; once we drop
-# the Go side entirely this will switch to `prisma migrate deploy`.
+# golang-migrate against the SQL files in migrations/ (the schema source of
+# truth). A future cutover may switch this to `prisma migrate deploy`.
 migrate:
-	migrate -path backend/migrations -database "$(DATABASE_URL)" up
+	migrate -path migrations -database "$(DATABASE_URL)" up
 
 # Install web dependencies
 install:

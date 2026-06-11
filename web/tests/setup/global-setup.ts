@@ -40,7 +40,7 @@ export async function setup(): Promise<void> {
   }
 
   // Apply the golang-migrate schema (single source of truth until Phase 12).
-  const migrationsPath = path.resolve(__dirname, "../../../backend/migrations");
+  const migrationsPath = path.resolve(__dirname, "../../../migrations");
   execSync(
     `migrate -path "${migrationsPath}" -database "${TEST_URL}" up`,
     { stdio: "inherit" }

@@ -21,7 +21,7 @@ type CreateBody = {
 };
 
 // GET — admin only; lists the 100 most recent agent invites.
-// Mirrors ListAgentInvites in backend/internal/handlers/agent_invites.go.
+// Mirrors ListAgentInvites in the legacy Go backend.
 export async function GET(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     if (!hasRole(claims.roles, ["admin"])) return error("forbidden", 403);
@@ -50,7 +50,7 @@ export async function GET(req: Request): Promise<Response> {
 }
 
 // POST — admin only; creates an invite and fires a best-effort signup email.
-// Mirrors CreateAgentInvite in backend/internal/handlers/agent_invites.go.
+// Mirrors CreateAgentInvite in the legacy Go backend.
 export async function POST(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     if (!hasRole(claims.roles, ["admin"])) return error("forbidden", 403);

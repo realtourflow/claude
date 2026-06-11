@@ -1,6 +1,6 @@
 /**
  * S3 helpers — pre-signed PUT/GET URLs + object delete. Mirrors the AWS SDK
- * v2 usage in backend/internal/handlers/documents.go.
+ * v2 usage in the legacy Go backend.
  */
 import {
   S3Client,
@@ -49,7 +49,7 @@ export function makeS3Key(dealId: string, fileName: string): string {
 /**
  * Generates an agent-scoped S3 key for a doc template, with a timestamp prefix
  * to avoid collisions. Mirrors agentDocS3Key in
- * backend/internal/handlers/agent_docs.go.
+ * the legacy Go backend.
  */
 export function makeAgentDocS3Key(agentId: string, fileName: string): string {
   const safe = fileName.split("/").pop()!.replace(/\s+/g, "-");
@@ -80,7 +80,7 @@ export async function getDownloadUrl(input: { key: string }): Promise<string> {
 
 /**
  * Fetches the full object body as bytes. Used to hand a document's contents to
- * DocuSign. Mirrors downloadS3Object in backend/internal/handlers/docusign.go.
+ * DocuSign. Mirrors downloadS3Object in the legacy Go backend.
  */
 export async function getObjectBytes(key: string): Promise<Uint8Array> {
   const { client, bucket } = getClient();

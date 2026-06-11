@@ -1,7 +1,7 @@
 /**
  * Tiny iCal (RFC 5545) serializer — enough to satisfy Apple Calendar,
  * Google Calendar, and Outlook subscription feeds. Mirrors the
- * `CalendarFeed` handler in backend/internal/handlers/calendar.go.
+ * `CalendarFeed` handler in the legacy Go backend.
  */
 
 function pad(n: number): string {

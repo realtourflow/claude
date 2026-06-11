@@ -9,7 +9,7 @@ import { GroupId } from "@/permissions/groups";
 /**
  * Smart root redirect based on active user group.
  * Returns null while Auth0 and /users/sync are still initializing so we never
- * default-route a buyer or seller to /agent. Ported from frontend/src/App.tsx.
+ * default-route a buyer or seller to /agent. Ported from the legacy frontend.
  */
 export default function RootRedirect() {
   const {

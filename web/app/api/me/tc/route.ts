@@ -1,7 +1,7 @@
 /**
  * /me/tc — the calling agent's own Transaction Coordinator (TC) contact.
  *
- * Mirrors GetMyTC / PutMyTC / DeleteMyTC in backend/internal/handlers/tc.go.
+ * Mirrors GetMyTC / PutMyTC / DeleteMyTC in the legacy Go backend.
  *
  * The TC is stored two ways on the caller's own users row:
  *   - tc_contact  (Json?)   — the manual { name, email, phone } the agent typed.

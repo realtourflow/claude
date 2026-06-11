@@ -1,7 +1,7 @@
 /**
  * Google Calendar OAuth — authorize-URL builder + code/token exchange.
  *
- * Mirrors backend/internal/calendar/oauth.go (GoogleConfig / AuthCodeURL /
+ * Mirrors the legacy Go backend (GoogleConfig / AuthCodeURL /
  * Exchange + userinfo). The network-touching exchange sits behind a test seam
  * (setGoogleOAuthForTesting) exactly like lib/stripe.ts and lib/arive.ts, so
  * integration tests never hit real Google.

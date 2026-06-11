@@ -1,6 +1,5 @@
 /**
- * Notifications helper. Mirrors createNotification in
- * backend/internal/handlers/notifications.go.
+ * Notifications helper. Mirrors createNotification in the legacy Go backend.
  *
  * Durability (T15, #83): the insert is AWAITED by every call site — on Vercel
  * a detached fire-and-forget promise may never run once the response is

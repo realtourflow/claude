@@ -5,7 +5,7 @@ import { hasRole } from "@/lib/roles";
 type Ctx = { params: Promise<{ inviteId: string }> };
 
 // DELETE — admin only; revokes an unclaimed invite.
-// Mirrors DeleteAgentInvite in backend/internal/handlers/agent_invites.go.
+// Mirrors DeleteAgentInvite in the legacy Go backend.
 export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
   const { inviteId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {

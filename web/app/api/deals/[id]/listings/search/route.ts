@@ -1,7 +1,7 @@
 /**
  * GET /deals/:dealId/listings/search — proxies a SimplyRETS listing search
  * using the DEAL'S AGENT credentials (not the caller's). Mirrors SearchListings
- * in backend/internal/handlers/mls.go.
+ * in the legacy Go backend.
  *
  * Any participant (agent owner or buyer/seller on the deal) may call it, but the
  * search always runs against the deal agent's stored MLS key/secret. If the

@@ -1,6 +1,6 @@
 /**
  * Calendar push — writes RealTourFlow deal/task events into an agent's
- * connected calendar(s). Port of backend/internal/calendar/push.go.
+ * connected calendar(s). Port of the legacy Go backend.
  *
  * Two providers (Google + Microsoft Graph) share one upsert/delete/refresh core
  * parameterized by a ProviderConfig; the fan-out iterates both, and each

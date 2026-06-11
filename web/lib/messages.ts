@@ -8,7 +8,7 @@ export type DealMessageAccess = {
 
 /**
  * Resolves the caller's relationship to a deal for messaging purposes.
- * Mirrors dealAccessForMessages in backend/internal/handlers/messages.go.
+ * Mirrors dealAccessForMessages in the legacy Go backend.
  */
 export async function getMessageAccess(
   dealId: string,

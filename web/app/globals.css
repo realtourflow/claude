@@ -2,7 +2,7 @@
 
 /* Tailwind 4 theme tokens — these make `bg-brand-navy`, `text-brand-gold`, etc.
    work as utility classes. Matches the colors used throughout the original
-   Vite frontend (see frontend/tailwind.config.js for the legacy v3 config). */
+   Vite frontend (see the legacy frontend Tailwind config for the legacy v3 config). */
 @theme {
   --color-brand-navy: #00163b;
   --color-brand-navy-light: #002855;
