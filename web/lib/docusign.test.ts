@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 import { DefaultDocusignClient, type FetchLike } from "@/lib/docusign";
 import { resetEnvForTesting } from "@/lib/env";
 
@@ -87,7 +88,16 @@ describe("DefaultDocusignClient.createEnvelope", () => {
     );
     expect(form.get("assertion")).toBeTruthy();
     // A JWT has three dot-separated segments.
-    expect((form.get("assertion") as string).split(".")).toHaveLength(3);
+    const assertion = form.get("assertion") as string;
+    expect(assertion.split(".")).toHaveLength(3);
+    // Decode and assert the grant claims — a swapped iss/sub, dropped scope, or
+    // wrong signing alg would otherwise sail through the "3 segments" check.
+    expect(decodeProtectedHeader(assertion).alg).toBe("RS256");
+    const claims = decodeJwt(assertion);
+    expect(claims.iss).toBe("test-integration-key"); // integration (client) key
+    expect(claims.sub).toBe("test-user-id"); // impersonated user
+    expect(claims.aud).toBe("account-d.docusign.com"); // demo auth host, no scheme
+    expect(claims.scope).toBe("signature impersonation");
 
     // Envelope endpoint: right URL, Bearer token, signer + document payload.
     const envCall = calls.find((c) => c.url.includes("/envelopes"));
@@ -124,6 +134,22 @@ describe("DefaultDocusignClient.createEnvelope", () => {
         { email: "a@b.com", name: "A" },
       ])
     ).rejects.toThrow(/400/);
+  });
+
+  it("throws when a 201 response carries no envelopeId", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      // 201 Created but the body has no envelopeId — must not persist "".
+      return jsonResponse({}, 201);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await expect(
+      client.createEnvelope("x.pdf", new Uint8Array([1]), [
+        { email: "a@b.com", name: "A" },
+      ])
+    ).rejects.toThrow(/envelopeId/i);
   });
 });
 
@@ -190,6 +216,20 @@ describe("DefaultDocusignClient.enabled", () => {
       expect(new DefaultDocusignClient().enabled()).toBe(false);
     } finally {
       process.env.DOCUSIGN_USER_ID = prev;
+      resetEnvForTesting();
+    }
+  });
+
+  it("is false when the private key is set but unparseable", () => {
+    const prev = process.env.DOCUSIGN_PRIVATE_KEY;
+    // Non-empty (passes the presence check) but not a valid PEM — must read as
+    // disabled (→ 503) rather than throwing mid-request (→ 502).
+    process.env.DOCUSIGN_PRIVATE_KEY = "-----BEGIN RSA PRIVATE KEY-----\nnope\n-----END RSA PRIVATE KEY-----";
+    resetEnvForTesting();
+    try {
+      expect(new DefaultDocusignClient().enabled()).toBe(false);
+    } finally {
+      process.env.DOCUSIGN_PRIVATE_KEY = prev;
       resetEnvForTesting();
     }
   });

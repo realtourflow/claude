@@ -50,7 +50,13 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       return error("at least one signer required", 400);
     }
 
-    const bytes = await getObjectBytes(doc.s3_key);
+    let bytes: Uint8Array;
+    try {
+      bytes = await getObjectBytes(doc.s3_key);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return error("failed to retrieve document: " + msg, 500);
+    }
 
     let envelopeId: string;
     try {

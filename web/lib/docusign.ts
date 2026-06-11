@@ -42,6 +42,7 @@ export class DefaultDocusignClient implements DocusignClient {
   private accessToken = "";
   private tokenExpiresAt = 0; // epoch ms
   private privateKey: KeyObject | undefined;
+  private privateKeyParseFailed = false;
 
   constructor(private readonly fetchImpl: FetchLike = defaultFetch) {}
 
@@ -51,7 +52,10 @@ export class DefaultDocusignClient implements DocusignClient {
       !!e.DOCUSIGN_INTEGRATION_KEY &&
       !!e.DOCUSIGN_PRIVATE_KEY &&
       !!e.DOCUSIGN_ACCOUNT_ID &&
-      !!e.DOCUSIGN_USER_ID
+      !!e.DOCUSIGN_USER_ID &&
+      // A malformed key must surface as a clean enabled()=false (→ 503), not a
+      // mid-request throw (→ 502). Go only set `enabled` after the key parsed.
+      this.parsePrivateKey() !== undefined
     );
   }
 
@@ -67,14 +71,34 @@ export class DefaultDocusignClient implements DocusignClient {
       : "https://account.docusign.com";
   }
 
-  private loadPrivateKey(): KeyObject {
-    if (!this.privateKey) {
-      // Env vars may encode newlines as literal "\n" — normalize first.
-      const pem = env().DOCUSIGN_PRIVATE_KEY.replace(/\\n/g, "\n");
-      // Node handles PKCS1 ("BEGIN RSA PRIVATE KEY") and PKCS8 alike.
-      this.privateKey = createPrivateKey(pem);
+  // Parses the configured PKCS1/PKCS8 key, caching both success and failure so
+  // a bad key is decided once. Returns undefined when the key is missing or
+  // unparseable — callers turn that into enabled()=false / a thrown load.
+  private parsePrivateKey(): KeyObject | undefined {
+    if (this.privateKey) return this.privateKey;
+    if (this.privateKeyParseFailed) return undefined;
+    const raw = env().DOCUSIGN_PRIVATE_KEY;
+    if (!raw) {
+      this.privateKeyParseFailed = true;
+      return undefined;
     }
-    return this.privateKey;
+    try {
+      // Env vars may encode newlines as literal "\n" — normalize first.
+      // Node handles PKCS1 ("BEGIN RSA PRIVATE KEY") and PKCS8 alike.
+      this.privateKey = createPrivateKey(raw.replace(/\\n/g, "\n"));
+      return this.privateKey;
+    } catch {
+      this.privateKeyParseFailed = true;
+      return undefined;
+    }
+  }
+
+  private loadPrivateKey(): KeyObject {
+    const key = this.parsePrivateKey();
+    if (!key) {
+      throw new Error("docusign: DOCUSIGN_PRIVATE_KEY is missing or unparseable");
+    }
+    return key;
   }
 
   // Returns a cached bearer token, minting a fresh one when missing/expired.
@@ -184,7 +208,12 @@ export class DefaultDocusignClient implements DocusignClient {
       );
     }
     const result = (await res.json()) as { envelopeId?: string };
-    return result.envelopeId ?? "";
+    if (!result.envelopeId) {
+      // A 201 with no envelopeId would persist "" and make refresh impossible
+      // to ever poll — fail loudly instead.
+      throw new Error("docusign create envelope: 201 response missing envelopeId");
+    }
+    return result.envelopeId;
   }
 
   async getEnvelopeStatus(envelopeId: string): Promise<string> {
