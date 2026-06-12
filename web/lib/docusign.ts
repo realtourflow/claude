@@ -16,7 +16,26 @@ import { createPrivateKey, type KeyObject } from "node:crypto";
 import { SignJWT } from "jose";
 import { env } from "./env";
 
-export type DocusignSigner = { email: string; name: string };
+export type DocusignSigner = {
+  email: string;
+  name: string;
+  // Set for portal users: DocuSign skips its email and the recipient signs
+  // embedded in-app (a later phase mints the recipient view). Omit for outside
+  // signers — they get the normal DocuSign email (hybrid model).
+  clientUserId?: string;
+  routingOrder?: number;
+  recipientId?: string;
+};
+
+// A role on a DocuSign template. Field placement/tabs live on the template
+// itself — tagged once in the DocuSign account — so no tabs are sent here.
+export type TemplateRole = {
+  roleName: string;
+  name: string;
+  email: string;
+  clientUserId?: string;
+  routingOrder?: number;
+};
 
 export type DocusignClient = {
   enabled(): boolean;
@@ -24,6 +43,10 @@ export type DocusignClient = {
     docName: string,
     docBytes: Uint8Array,
     signers: DocusignSigner[]
+  ): Promise<string>;
+  createTemplateEnvelope(
+    templateId: string,
+    roles: TemplateRole[]
   ): Promise<string>;
   getEnvelopeStatus(envelopeId: string): Promise<string>;
 };
@@ -175,15 +198,28 @@ export class DefaultDocusignClient implements DocusignClient {
         signers: signers.map((s, i) => ({
           email: s.email,
           name: s.name,
-          recipientId: String(i + 1),
-          routingOrder: String(i + 1),
+          recipientId: s.recipientId ?? String(i + 1),
+          routingOrder: String(s.routingOrder ?? i + 1),
+          ...(s.clientUserId ? { clientUserId: s.clientUserId } : {}),
           tabs: {
+            // Fallback path only (one-off uploads): stack each signer's
+            // signature + date line at a distinct spot so signers never land
+            // on the same point. Template sends never reach this code — their
+            // placement lives on the template.
             signHereTabs: [
               {
                 documentId: "1",
                 pageNumber: "1",
                 xPosition: "100",
-                yPosition: "680",
+                yPosition: String(680 - 60 * i),
+              },
+            ],
+            dateSignedTabs: [
+              {
+                documentId: "1",
+                pageNumber: "1",
+                xPosition: "300",
+                yPosition: String(680 - 60 * i),
               },
             ],
           },
@@ -192,6 +228,33 @@ export class DefaultDocusignClient implements DocusignClient {
       status: "sent",
     };
 
+    return this.postEnvelope(token, envelope);
+  }
+
+  // Template-based send: field placement/tabs are tagged once on the DocuSign
+  // template, so the payload carries only the template id + role assignments.
+  async createTemplateEnvelope(
+    templateId: string,
+    roles: TemplateRole[]
+  ): Promise<string> {
+    const token = await this.token();
+    const envelope = {
+      templateId,
+      templateRoles: roles.map((r) => ({
+        roleName: r.roleName,
+        name: r.name,
+        email: r.email,
+        ...(r.clientUserId ? { clientUserId: r.clientUserId } : {}),
+        ...(r.routingOrder !== undefined
+          ? { routingOrder: String(r.routingOrder) }
+          : {}),
+      })),
+      status: "sent",
+    };
+    return this.postEnvelope(token, envelope);
+  }
+
+  private async postEnvelope(token: string, envelope: object): Promise<string> {
     const e = env();
     const url = `${this.baseURL()}/restapi/v2.1/accounts/${e.DOCUSIGN_ACCOUNT_ID}/envelopes`;
     const res = await this.fetchImpl(url, {

@@ -135,6 +135,33 @@ export async function getDealForAgent(
 }
 
 /**
+ * Everyone who can sign on a deal: the owning agent plus all participants,
+ * with the user fields DocuSign recipient derivation needs
+ * (lib/docusign-routing.ts consumes these rows).
+ */
+export async function loadDealPeople(dealId: string): Promise<
+  { userId: string; name: string; email: string; role: string }[]
+> {
+  const rows = await prisma.$queryRaw<
+    { user_id: string; name: string; email: string; role: string }[]
+  >`
+    SELECT u.id AS user_id, u.name, u.email, 'agent' AS role
+    FROM deals JOIN users u ON u.id = deals.agent_id
+    WHERE deals.id = ${dealId}::uuid
+    UNION ALL
+    SELECT u.id AS user_id, u.name, u.email, dp.role
+    FROM deal_participants dp JOIN users u ON u.id = dp.user_id
+    WHERE dp.deal_id = ${dealId}::uuid
+  `;
+  return rows.map((r) => ({
+    userId: r.user_id,
+    name: r.name,
+    email: r.email,
+    role: r.role,
+  }));
+}
+
+/**
  * Resolve whether a user has access to a deal — agent owner or participant.
  */
 export async function hasDealAccess(

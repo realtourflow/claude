@@ -117,6 +117,56 @@ export async function sendForSignature(
   return api.post(`/deals/${dealId}/documents/${documentId}/send-for-signature`, { signers });
 }
 
+// Preferred fallback-path send: deal participants by user id. The server
+// derives routing (buyer → seller → agent) and marks portal users for
+// embedded signing. Optional purpose ('baa') tags the buyer agency agreement.
+export async function sendForSignatureByUserIds(
+  dealId: string,
+  documentId: string,
+  signerUserIds: string[],
+  purpose?: string,
+): Promise<{ envelope_id: string; status: string }> {
+  return api.post(`/deals/${dealId}/documents/${documentId}/send-for-signature`, {
+    signer_user_ids: signerUserIds,
+    ...(purpose ? { purpose } : {}),
+  });
+}
+
+export type DocusignTemplate = {
+  key: string;
+  label: string;
+  roles: string[];
+  roleMapping: Record<string, string>;
+  purpose: string;
+};
+
+// The standard forms configured in DOCUSIGN_TEMPLATES (feeds the form picker).
+export async function listDocusignTemplates(): Promise<DocusignTemplate[]> {
+  const res = await api.get<{ templates: DocusignTemplate[] }>(`/docusign/templates`);
+  return res.templates;
+}
+
+export type TemplateAssignment = {
+  role_name: string;
+  user_id?: string;
+  email?: string;
+  name?: string;
+};
+
+// PRIMARY send path: send a configured template. Roles auto-fill from the
+// deal's participants server-side; assignments override individual roles
+// (swap participant or hand a role to an outside email signer).
+export async function sendTemplateForSignature(
+  dealId: string,
+  formKey: string,
+  assignments?: TemplateAssignment[],
+): Promise<{ envelope_id: string; status: string; document: ApiDocument }> {
+  return api.post(`/deals/${dealId}/docusign/send-template`, {
+    form_key: formKey,
+    ...(assignments && assignments.length > 0 ? { assignments } : {}),
+  });
+}
+
 // Merges the selected PDFs into one packet document and sends it for
 // signature to a single recipient. Returns the new packet document row.
 export async function sendDisclosurePacket(

@@ -47,6 +47,13 @@ const shape = z.object({
   // (HMAC-SHA256 over the raw body) and rejects anything else with 401. Empty =
   // signature verification disabled (legacy/demo — the handler trusts the POST).
   DOCUSIGN_CONNECT_HMAC_KEY: z.string().default(""),
+  // JSON map of formKey → {templateId, label, roleMapping, purpose?} for
+  // template-based sending (lib/docusign-templates.ts). Template IDs differ
+  // between the demo and production DocuSign accounts, so they live in env —
+  // Go-Live is an ID swap, never a code change. Kept as a raw string here and
+  // parsed lazily so a malformed value breaks template routes with a clear
+  // error instead of every env() call app-wide.
+  DOCUSIGN_TEMPLATES: z.string().default("{}"),
 
   ARIVE_API_URL: z.string().default(""),
   ARIVE_API_KEY: z.string().default(""),
