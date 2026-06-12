@@ -145,39 +145,42 @@ model deal_stage_history {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model deals {
-  id                      String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_id                String               @db.Uuid
+  id                      String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id                String                @db.Uuid
   type                    deal_type
-  stage                   deal_stage           @default(intake)
+  stage                   deal_stage            @default(intake)
   title                   String
   address                 String?
-  price                   Decimal?             @db.Decimal(12, 2)
-  arive_linked            Boolean              @default(false)
-  created_at              DateTime             @default(now()) @db.Timestamptz(6)
-  updated_at              DateTime             @default(now()) @db.Timestamptz(6)
+  price                   Decimal?              @db.Decimal(12, 2)
+  arive_linked            Boolean               @default(false)
+  created_at              DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime              @default(now()) @db.Timestamptz(6)
   notes                   String?
-  arive_loan_id           String?              @unique(map: "idx_deals_arive_loan_id", where: raw("(arive_loan_id IS NOT NULL)"))
+  arive_loan_id           String?               @unique(map: "idx_deals_arive_loan_id", where: raw("(arive_loan_id IS NOT NULL)"))
   arive_milestones        Json?
   arive_key_dates         Json?
   arive_loan_status       String?
-  arive_synced_at         DateTime?            @db.Timestamptz(6)
-  fee_status              String               @default("unpaid")
-  fee_amount_cents        Int                  @default(7500)
+  arive_synced_at         DateTime?             @db.Timestamptz(6)
+  fee_status              String                @default("unpaid")
+  fee_amount_cents        Int                   @default(7500)
   fee_checkout_session_id String?
-  fee_paid_at             DateTime?            @db.Timestamptz(6)
+  fee_paid_at             DateTime?             @db.Timestamptz(6)
   fast_pass               Json?
   smooth_exit             Json?
-  pre_approved            Boolean              @default(false)
-  baa_signed              Boolean              @default(false)
+  pre_approved            Boolean               @default(false)
+  baa_signed              Boolean               @default(false)
   showing_availability    Json?
-  commission_pct          Decimal              @default(3.0) @db.Decimal
+  commission_pct          Decimal               @default(3.0) @db.Decimal
+  market                  String                @default("")
   audit_log               audit_log[]
   checklist_items         checklist_items[]
   deal_contingencies      deal_contingencies[]
+  deal_contract_facts     deal_contract_facts?
+  deal_contract_terms     deal_contract_terms[]
   deal_invites            deal_invites[]
   deal_participants       deal_participants[]
   deal_stage_history      deal_stage_history[]
-  users                   users                @relation(fields: [agent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users                   users                 @relation(fields: [agent_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   documents               documents[]
   messages                messages[]
   net_sheets              net_sheets?
@@ -396,6 +399,7 @@ model users {
   mls_key                                       String?
   mls_secret                                    String?
   onboarding_complete                           Boolean               @default(false)
+  market                                        String                @default("")
   agent_doc_templates                           agent_doc_templates[]
   agent_invites_agent_invites_claimed_byTousers agent_invites[]       @relation("agent_invites_claimed_byTousers")
   agent_invites_agent_invites_invited_byTousers agent_invites[]       @relation("agent_invites_invited_byTousers")
@@ -440,6 +444,41 @@ model docusign_recipients {
   @@unique([document_id, recipient_id])
   @@index([envelope_id], map: "idx_docusign_recipients_envelope")
   @@index([user_id], map: "idx_docusign_recipients_user")
+}
+
+model deal_contract_facts {
+  deal_id                 String    @id @db.Uuid
+  legal_description       String    @default("")
+  parcel_or_ppin          String    @default("")
+  city                    String    @default("")
+  state                   String    @default("")
+  zip                     String    @default("")
+  purchase_price          Decimal?  @db.Decimal(12, 2)
+  earnest_money_amount    Decimal?  @db.Decimal(12, 2)
+  earnest_money_holder    String    @default("")
+  financing_type          String    @default("")
+  loan_amount_or_pct      String    @default("")
+  offer_date              DateTime? @db.Date
+  acceptance_binding_date DateTime? @db.Date
+  closing_date            DateTime? @db.Date
+  possession              String    @default("")
+  buyer_broker_comp       String    @default("")
+  agency_role             String    @default("")
+  included_fixtures       Json      @default("{}")
+  additional_provisions   String    @default("")
+  updated_at              DateTime  @default(now()) @db.Timestamptz(6)
+  deals                   deals     @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model deal_contract_terms {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deal_id    String   @db.Uuid
+  form_key   String
+  terms      Json     @default("{}")
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  deals      deals    @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([deal_id, form_key])
 }
 
 enum checklist_assignee {
