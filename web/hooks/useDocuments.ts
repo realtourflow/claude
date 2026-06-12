@@ -16,6 +16,8 @@ export type Document = {
   envelopeId?: string;
   docusignStatus?: string;
   docusignSentAt?: string;
+  // '' | 'baa' — marks special documents (the buyer agency agreement).
+  purpose?: string;
 };
 
 type ApiDocument = {
@@ -31,6 +33,7 @@ type ApiDocument = {
   docusign_envelope_id?: string;
   docusign_status?: string;
   docusign_sent_at?: string;
+  purpose?: string;
 };
 
 function apiDocToFrontend(d: ApiDocument): Document {
@@ -47,6 +50,7 @@ function apiDocToFrontend(d: ApiDocument): Document {
     envelopeId: d.docusign_envelope_id,
     docusignStatus: d.docusign_status ?? undefined,
     docusignSentAt: d.docusign_sent_at ?? undefined,
+    purpose: d.purpose ?? undefined,
   };
 }
 
