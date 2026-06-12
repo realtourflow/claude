@@ -1,15 +1,29 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
+import { loadDealPeople } from "@/lib/deals";
 import { getDocusignClient, type DocusignSigner } from "@/lib/docusign";
-import { sendDocumentEnvelope } from "@/lib/docusign-documents";
+import { deriveFallbackSigners, RoutingError } from "@/lib/docusign-routing";
+import {
+  recipientsFromSigners,
+  sendDocumentEnvelope,
+  type EnvelopeRecipient,
+} from "@/lib/docusign-documents";
 import { getObjectBytes } from "@/lib/s3";
 
 type Ctx = { params: Promise<{ id: string; documentId: string }> };
 
 type SendBody = {
+  // Preferred: deal participants/agent by user id (routed buyer → seller →
+  // agent, embedded signing via clientUserId).
+  signer_user_ids?: string[];
+  // Legacy / outside signers: raw email+name (DocuSign emails them).
   signers?: { email?: string; name?: string }[];
+  // Optional marker for special documents ('' | 'baa').
+  purpose?: string;
 };
+
+const PURPOSE_ALLOWLIST = ["", "baa"];
 
 // POST /api/deals/[id]/documents/[documentId]/send-for-signature
 // Ports SendForSignature in the legacy Go backend.
@@ -43,11 +57,29 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     } catch {
       return error("at least one signer required", 400);
     }
-    const signers: DocusignSigner[] = (body.signers ?? [])
-      .filter((s): s is { email: string; name: string } => !!s.email && !!s.name)
-      .map((s) => ({ email: s.email, name: s.name }));
-    if (signers.length === 0) {
-      return error("at least one signer required", 400);
+    if (body.purpose !== undefined && !PURPOSE_ALLOWLIST.includes(body.purpose)) {
+      return error("invalid purpose", 400);
+    }
+
+    let signers: DocusignSigner[];
+    let recipients: EnvelopeRecipient[];
+    if (body.signer_user_ids && body.signer_user_ids.length > 0) {
+      const people = await loadDealPeople(dealId);
+      try {
+        signers = deriveFallbackSigners(people, body.signer_user_ids);
+      } catch (err) {
+        if (err instanceof RoutingError) return error(err.message, 400);
+        throw err;
+      }
+      recipients = recipientsFromSigners(signers, people);
+    } else {
+      signers = (body.signers ?? [])
+        .filter((s): s is { email: string; name: string } => !!s.email && !!s.name)
+        .map((s) => ({ email: s.email, name: s.name }));
+      if (signers.length === 0) {
+        return error("at least one signer required", 400);
+      }
+      recipients = recipientsFromSigners(signers);
     }
 
     let bytes: Uint8Array;
@@ -65,6 +97,8 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         docName: doc.name,
         bytes,
         signers,
+        recipients,
+        purpose: body.purpose,
       }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

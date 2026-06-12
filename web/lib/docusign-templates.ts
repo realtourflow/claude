@@ -25,6 +25,10 @@ import { env } from "./env";
 
 export class TemplateConfigError extends Error {}
 
+// Unknown form key — a caller mistake (400), unlike a malformed
+// DOCUSIGN_TEMPLATES value, which is a server misconfiguration (500).
+export class UnknownFormError extends TemplateConfigError {}
+
 const entrySchema = z.object({
   templateId: z.string().min(1),
   label: z.string().min(1),
@@ -61,7 +65,7 @@ export function getTemplateConfig(formKey: string): TemplateConfig {
   const config = parseConfig();
   const entry = config[formKey];
   if (!entry) {
-    throw new TemplateConfigError(
+    throw new UnknownFormError(
       `no DocuSign template configured for form "${formKey}" — add it to DOCUSIGN_TEMPLATES`
     );
   }
