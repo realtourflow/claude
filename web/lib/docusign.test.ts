@@ -346,6 +346,153 @@ describe("DefaultDocusignClient.getEnvelopeStatus", () => {
   });
 });
 
+describe("DefaultDocusignClient.downloadCombinedDocument", () => {
+  it("GETs the combined signed PDF and returns its bytes", async () => {
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF
+    let docUrl = "";
+    const fakeFetch: FetchLike = async (url, init) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      docUrl = url;
+      expect((init?.headers as Record<string, string>).authorization).toBe(
+        "Bearer tok"
+      );
+      return new Response(pdf, {
+        status: 200,
+        headers: { "content-type": "application/pdf" },
+      });
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    const bytes = await client.downloadCombinedDocument("env-9");
+    expect(docUrl).toBe(
+      "https://demo.docusign.net/restapi/v2.1/accounts/test-account-id/envelopes/env-9/documents/combined"
+    );
+    expect(Array.from(bytes)).toEqual([0x25, 0x50, 0x44, 0x46]);
+  });
+
+  it("throws on a non-2xx download", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      return new Response("nope", { status: 404 });
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await expect(client.downloadCombinedDocument("missing")).rejects.toThrow(/404/);
+  });
+});
+
+describe("DefaultDocusignClient.listRecipients", () => {
+  it("returns the envelope's signers with email/name/status/recipientId", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      expect(url).toBe(
+        "https://demo.docusign.net/restapi/v2.1/accounts/test-account-id/envelopes/env-9/recipients"
+      );
+      return jsonResponse({
+        signers: [
+          {
+            email: "mike@example.com",
+            name: "Mike Smith",
+            status: "completed",
+            recipientId: "1",
+            extraNoise: "x",
+          },
+          { email: "sarah@example.com", name: "Sarah", status: "sent", recipientId: "2" },
+        ],
+      });
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    const recips = await client.listRecipients("env-9");
+    expect(recips).toEqual([
+      { email: "mike@example.com", name: "Mike Smith", status: "completed", recipientId: "1" },
+      { email: "sarah@example.com", name: "Sarah", status: "sent", recipientId: "2" },
+    ]);
+  });
+
+  it("throws on a non-2xx response", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      return new Response("nope", { status: 500 });
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await expect(client.listRecipients("env-9")).rejects.toThrow(/500/);
+  });
+});
+
+describe("envelope-level eventNotification (code-controlled webhook)", () => {
+  const KEY = "DOCUSIGN_WEBHOOK_URL";
+
+  async function sentBodies(run: (c: DefaultDocusignClient) => Promise<unknown>) {
+    const bodies: string[] = [];
+    const fakeFetch: FetchLike = async (url, init) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      bodies.push(init?.body as string);
+      return jsonResponse({ envelopeId: "e" }, 201);
+    };
+    await run(new DefaultDocusignClient(fakeFetch));
+    return bodies.map((b) => JSON.parse(b));
+  }
+
+  it("attaches eventNotification to BOTH send paths when the env is set", async () => {
+    const prev = process.env[KEY];
+    process.env[KEY] = "https://app.example.com/api/docusign/webhook";
+    resetEnvForTesting();
+    try {
+      const [adhoc, tpl] = await sentBodies(async (c) => {
+        await c.createEnvelope("x.pdf", new Uint8Array([1]), [
+          { email: "a@b.com", name: "A" },
+        ]);
+        await c.createTemplateEnvelope("tpl-1", [
+          { roleName: "Buyer", name: "A", email: "a@b.com" },
+        ]);
+      });
+      for (const sent of [adhoc, tpl]) {
+        expect(sent.eventNotification.url).toBe(
+          "https://app.example.com/api/docusign/webhook"
+        );
+        expect(sent.eventNotification.requireAcknowledgment).toBe("true");
+        expect(sent.eventNotification.events).toEqual([
+          "envelope-completed",
+          "envelope-declined",
+          "envelope-voided",
+          "recipient-completed",
+          "recipient-delivered",
+        ]);
+        expect(sent.eventNotification.eventData).toEqual({
+          version: "restv2.1",
+          format: "json",
+          includeData: ["recipients"],
+        });
+      }
+    } finally {
+      if (prev === undefined) delete process.env[KEY];
+      else process.env[KEY] = prev;
+      resetEnvForTesting();
+    }
+  });
+
+  it("omits eventNotification when the env is unset", async () => {
+    const [adhoc, tpl] = await sentBodies(async (c) => {
+      await c.createEnvelope("x.pdf", new Uint8Array([1]), [
+        { email: "a@b.com", name: "A" },
+      ]);
+      await c.createTemplateEnvelope("tpl-1", [
+        { roleName: "Buyer", name: "A", email: "a@b.com" },
+      ]);
+    });
+    expect("eventNotification" in adhoc).toBe(false);
+    expect("eventNotification" in tpl).toBe(false);
+  });
+});
+
 describe("DefaultDocusignClient token caching", () => {
   it("caches the bearer token across calls", async () => {
     let tokenCalls = 0;

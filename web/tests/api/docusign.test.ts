@@ -58,6 +58,13 @@ function makeFakeDocusign(): FakeDocusign {
     async getEnvelopeStatus() {
       return fake.statusValue;
     },
+    async downloadCombinedDocument() {
+      return new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF
+    },
+    async listRecipients() {
+      return [];
+    },
+
   };
   return fake;
 }
