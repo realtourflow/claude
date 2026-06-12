@@ -14,13 +14,23 @@ import { useEffect, useState } from "react";
 import { FileText, PenLine, Send, X } from "lucide-react";
 import { useParticipants } from "@/hooks/useParticipants";
 import {
+  getContractPrep,
   listDocusignTemplates,
+  saveContractFacts,
+  saveContractTerms,
   sendTemplateForSignature,
+  type ContractPrep,
   type DocusignTemplate,
   type TemplateAssignment,
 } from "@/hooks/useDocuments";
 
 type AgentInfo = { id: string; name: string; email: string };
+
+// purchase_price -> "Purchase price"
+function humanize(key: string): string {
+  const words = key.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 export default function SendTemplateModal({
   dealId,
@@ -41,6 +51,15 @@ export default function SendTemplateModal({
   const [outside, setOutside] = useState<Record<string, { name: string; email: string }>>({});
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState("");
+
+  // Contract-prep step (forms with a fieldMap): merged fields the agent
+  // reviews/edits before the signers step. Values held as form strings;
+  // checkboxes as booleans.
+  const [step, setStep] = useState<"pick" | "prepare" | "signers">("pick");
+  const [prep, setPrep] = useState<ContractPrep | null>(null);
+  const [factVals, setFactVals] = useState<Record<string, string>>({});
+  const [boardVals, setBoardVals] = useState<Record<string, string | boolean>>({});
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +105,64 @@ export default function SendTemplateModal({
       const current = prev[templateRole] ?? { name: "", email: "" };
       return { ...prev, [templateRole]: { ...current, [field]: value } };
     });
+  }
+
+  function pickForm(t: DocusignTemplate) {
+    setFormKey(t.key);
+    setErr("");
+    setPrep(null);
+    if (Object.keys(t.fieldMap ?? {}).length > 0) {
+      setStep("prepare");
+      getContractPrep(dealId, t.key)
+        .then((p) => {
+          setPrep(p);
+          const facts: Record<string, string> = {};
+          for (const f of p.core) {
+            if (f.type === "json") continue; // fixtures editor is v2
+            facts[f.key] = f.value == null ? "" : String(f.value);
+          }
+          const board: Record<string, string | boolean> = {};
+          for (const f of p.board_fields) {
+            board[f.key] =
+              f.type === "checkbox" ? f.value === true : f.value == null ? "" : String(f.value);
+          }
+          setFactVals(facts);
+          setBoardVals(board);
+        })
+        .catch((e: unknown) => {
+          setErr(e instanceof Error ? e.message : "Failed to load contract fields.");
+        });
+    } else {
+      setStep("signers");
+    }
+  }
+
+  async function handleSaveAndContinue() {
+    if (!prep || !formKey) return;
+    setSaving(true);
+    setErr("");
+    try {
+      const facts: Record<string, unknown> = {};
+      for (const [key, v] of Object.entries(factVals)) {
+        if (v !== "") facts[key] = v;
+      }
+      if (Object.keys(facts).length > 0) {
+        await saveContractFacts(dealId, facts);
+      }
+      const terms: Record<string, unknown> = {};
+      for (const f of prep.board_fields) {
+        const v = boardVals[f.key];
+        if (f.type === "checkbox") terms[f.key] = v === true;
+        else if (v !== "" && v !== undefined) terms[f.key] = v;
+      }
+      if (Object.keys(terms).length > 0) {
+        await saveContractTerms(dealId, formKey, terms);
+      }
+      setStep("signers");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Failed to save contract fields.");
+    }
+    setSaving(false);
   }
 
   async function handleSend() {
@@ -141,10 +218,7 @@ export default function SendTemplateModal({
                   <button
                     key={t.key}
                     type="button"
-                    onClick={() => {
-                      setFormKey(t.key);
-                      setErr("");
-                    }}
+                    onClick={() => pickForm(t)}
                     className={[
                       "w-full flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors",
                       formKey === t.key
@@ -165,8 +239,92 @@ export default function SendTemplateModal({
             )}
           </div>
 
+          {/* Contract prep — forms with a fieldMap */}
+          {selected && step === "prepare" && (
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">
+                Prepare contract
+              </p>
+              {!prep ? (
+                <p className="text-xs text-gray-400">Loading contract fields…</p>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    {prep.core
+                      .filter((f) => f.type !== "json")
+                      .map((f) => (
+                        <div key={f.key} className="flex items-center gap-3">
+                          <label
+                            htmlFor={`fact-${f.key}`}
+                            className="w-40 flex-shrink-0 text-xs font-semibold text-gray-500"
+                          >
+                            {humanize(f.key)}
+                          </label>
+                          <input
+                            id={`fact-${f.key}`}
+                            type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
+                            value={factVals[f.key] ?? ""}
+                            onChange={(e) =>
+                              setFactVals((prev) => ({ ...prev, [f.key]: e.target.value }))
+                            }
+                            className="flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm focus:border-brand-navy focus:outline-none"
+                          />
+                        </div>
+                      ))}
+                  </div>
+                  {prep.board_fields.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-gray-300 mb-1.5">
+                        {selected.board || "Form"} specifics
+                      </p>
+                      <div className="space-y-2">
+                        {prep.board_fields.map((f) =>
+                          f.type === "checkbox" ? (
+                            <label key={f.key} className="flex items-center gap-2.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={boardVals[f.key] === true}
+                                onChange={(e) =>
+                                  setBoardVals((prev) => ({ ...prev, [f.key]: e.target.checked }))
+                                }
+                                className="h-4 w-4 rounded accent-brand-navy"
+                              />
+                              <span className="text-xs text-gray-600">{f.label ?? humanize(f.key)}</span>
+                            </label>
+                          ) : (
+                            <div key={f.key} className="flex items-center gap-3">
+                              <label
+                                htmlFor={`term-${f.key}`}
+                                className="w-40 flex-shrink-0 text-xs font-semibold text-gray-500"
+                              >
+                                {f.label ?? humanize(f.key)}
+                              </label>
+                              <input
+                                id={`term-${f.key}`}
+                                type="text"
+                                value={String(boardVals[f.key] ?? "")}
+                                onChange={(e) =>
+                                  setBoardVals((prev) => ({ ...prev, [f.key]: e.target.value }))
+                                }
+                                className="flex-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm focus:border-brand-navy focus:outline-none"
+                              />
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-gray-400">
+                    These values prefill the contract — signers see them filled in. Leave a field
+                    blank to leave it empty on the form.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Role assignment preview */}
-          {selected && (
+          {selected && step === "signers" && (
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">
                 Signers
@@ -192,8 +350,8 @@ export default function SendTemplateModal({
                             </p>
                             <p className="text-xs text-gray-400 truncate">{row.person.email}</p>
                           </div>
-                          <span className="flex-shrink-0 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-bold text-green-700">
-                            Signs in-app
+                          <span className="flex-shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                            Secure email link
                           </span>
                         </>
                       ) : (
@@ -248,13 +406,23 @@ export default function SendTemplateModal({
           >
             Cancel
           </button>
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/90 disabled:opacity-40"
-          >
-            <Send size={13} /> {sending ? "Sending…" : "Send"}
-          </button>
+          {step === "prepare" ? (
+            <button
+              onClick={handleSaveAndContinue}
+              disabled={!prep || saving}
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/90 disabled:opacity-40"
+            >
+              {saving ? "Saving…" : "Save & continue"}
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!canSend || step !== "signers"}
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/90 disabled:opacity-40"
+            >
+              <Send size={13} /> {sending ? "Sending…" : "Send"}
+            </button>
+          )}
         </div>
       </div>
     </div>
