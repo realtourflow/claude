@@ -15,6 +15,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { StreamingBlobPayloadOutputTypes } from "@smithy/types";
 import { POST as sendTemplateRoute } from "@/app/api/deals/[id]/docusign/send-template/route";
+import { GET as listTemplatesRoute } from "@/app/api/docusign/templates/route";
 import { POST as sendForSignatureRoute } from "@/app/api/deals/[id]/documents/[documentId]/send-for-signature/route";
 import { GET as downloadUrlRoute } from "@/app/api/documents/[id]/download-url/route";
 import { DELETE as deleteDocumentRoute } from "@/app/api/documents/[id]/route";
@@ -443,6 +444,46 @@ describe("fallback path enrichment (send-for-signature)", () => {
     );
     const res = await sendForSignatureRoute(req, docCtx(deal.id, doc.id));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/docusign/templates", () => {
+  it("lists configured forms for an agent", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|agent" });
+    const req = new Request("http://localhost/api/docusign/templates", {
+      headers: { authorization: await authHeader("auth0|agent", ["agent"]) },
+    });
+    const res = await listTemplatesRoute(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { templates: { key: string }[] };
+    expect(body.templates).toHaveLength(2);
+    expect(body.templates.find((t) => t.key === "buyer_agency_agreement")).toEqual({
+      key: "buyer_agency_agreement",
+      label: "Buyer Agency Agreement",
+      roles: ["buyer", "agent"],
+      purpose: "baa",
+    });
+  });
+
+  it("403s for a non-agent role", async () => {
+    await createUser({ role: "buyer", auth0_id: "auth0|buyer-x" });
+    const req = new Request("http://localhost/api/docusign/templates", {
+      headers: { authorization: await authHeader("auth0|buyer-x", ["buyer"]) },
+    });
+    const res = await listTemplatesRoute(req);
+    expect(res.status).toBe(403);
+  });
+
+  it("500s with a clear message when the config is malformed", async () => {
+    process.env.DOCUSIGN_TEMPLATES = "{broken";
+    resetEnvForTesting();
+    await createUser({ role: "agent", auth0_id: "auth0|agent" });
+    const req = new Request("http://localhost/api/docusign/templates", {
+      headers: { authorization: await authHeader("auth0|agent", ["agent"]) },
+    });
+    const res = await listTemplatesRoute(req);
+    expect(res.status).toBe(500);
+    expect(await res.text()).toMatch(/not valid JSON/i);
   });
 });
 
