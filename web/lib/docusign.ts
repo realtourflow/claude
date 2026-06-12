@@ -30,8 +30,16 @@ export type DocusignSigner = {
   recipientId?: string;
 };
 
-// A role on a DocuSign template. Field placement/tabs live on the template
-// itself — tagged once in the DocuSign account — so no tabs are sent here.
+// Prefill payload for one template role: values poured into the template's
+// existing tabs by label (placement still lives on the template).
+export type TemplateRoleTabs = {
+  textTabs?: { tabLabel: string; value: string }[];
+  checkboxTabs?: { tabLabel: string; selected: string }[];
+};
+
+// A role on a DocuSign template. Field PLACEMENT lives on the template —
+// tagged once in the DocuSign account; `tabs` only PREFILLS those tabs with
+// values (contract-fill), it never positions anything.
 export type TemplateRole = {
   roleName: string;
   name: string;
@@ -40,6 +48,7 @@ export type TemplateRole = {
   userId?: string;
   clientUserId?: string;
   routingOrder?: number;
+  tabs?: TemplateRoleTabs;
 };
 
 export type DocusignClient = {
@@ -252,6 +261,9 @@ export class DefaultDocusignClient implements DocusignClient {
         ...(r.clientUserId ? { clientUserId: r.clientUserId } : {}),
         ...(r.routingOrder !== undefined
           ? { routingOrder: String(r.routingOrder) }
+          : {}),
+        ...(r.tabs && (r.tabs.textTabs?.length || r.tabs.checkboxTabs?.length)
+          ? { tabs: r.tabs }
           : {}),
       })),
       status: "sent",

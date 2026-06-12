@@ -257,6 +257,36 @@ describe("DefaultDocusignClient.createTemplateEnvelope", () => {
     expect(JSON.stringify(sent)).not.toContain("userId");
   });
 
+  it("serializes prefilled tabs on the right role and omits tabs when absent", async () => {
+    let envBody: string | undefined;
+    const fakeFetch: FetchLike = async (url, init) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      envBody = init?.body as string;
+      return jsonResponse({ envelopeId: "env-tpl-2" }, 201);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await client.createTemplateEnvelope("tpl-123", [
+      {
+        roleName: "Buyer",
+        name: "Mike",
+        email: "mike@example.com",
+        tabs: {
+          textTabs: [{ tabLabel: "PurchasePrice", value: "425000" }],
+          checkboxTabs: [{ tabLabel: "HomeWarranty", selected: "true" }],
+        },
+      },
+      { roleName: "Agent", name: "Sarah", email: "sarah@example.com" },
+    ]);
+    const sent = JSON.parse(envBody as string);
+    expect(sent.templateRoles[0].tabs).toEqual({
+      textTabs: [{ tabLabel: "PurchasePrice", value: "425000" }],
+      checkboxTabs: [{ tabLabel: "HomeWarranty", selected: "true" }],
+    });
+    expect("tabs" in sent.templateRoles[1]).toBe(false);
+  });
+
   it("throws on a 201 response missing envelopeId", async () => {
     const fakeFetch: FetchLike = async (url) => {
       if (url.endsWith("/oauth/token")) {
