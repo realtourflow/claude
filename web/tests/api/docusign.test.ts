@@ -20,6 +20,7 @@ import {
   setDocusignForTesting,
   type DocusignClient,
   type DocusignSigner,
+  type TemplateRole,
 } from "@/lib/docusign";
 import { prisma } from "@/lib/db";
 import { resetEnvForTesting } from "@/lib/env";
@@ -36,6 +37,7 @@ type FakeDocusign = DocusignClient & {
   enabledValue: boolean;
   statusValue: string;
   lastCreate?: { docName: string; bytes: Uint8Array; signers: DocusignSigner[] };
+  lastTemplateCreate?: { templateId: string; roles: TemplateRole[] };
 };
 
 function makeFakeDocusign(): FakeDocusign {
@@ -48,6 +50,10 @@ function makeFakeDocusign(): FakeDocusign {
     async createEnvelope(docName, bytes, signers) {
       fake.lastCreate = { docName, bytes, signers };
       return "env-fixed-123";
+    },
+    async createTemplateEnvelope(templateId, roles) {
+      fake.lastTemplateCreate = { templateId, roles };
+      return "env-tpl-123";
     },
     async getEnvelopeStatus() {
       return fake.statusValue;

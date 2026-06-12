@@ -153,6 +153,137 @@ describe("DefaultDocusignClient.createEnvelope", () => {
   });
 });
 
+describe("DefaultDocusignClient.createEnvelope tab placement (fallback path)", () => {
+  it("stacks each signer's signature + date tabs at distinct positions", async () => {
+    let envBody: string | undefined;
+    const fakeFetch: FetchLike = async (url, init) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      envBody = init?.body as string;
+      return jsonResponse({ envelopeId: "env-2" }, 201);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await client.createEnvelope("x.pdf", new Uint8Array([1]), [
+      { email: "a@b.com", name: "A" },
+      { email: "c@d.com", name: "C" },
+    ]);
+    const sent = JSON.parse(envBody as string);
+    const [first, second] = sent.recipients.signers;
+    // Every signer signs AND dates.
+    expect(first.tabs.signHereTabs).toHaveLength(1);
+    expect(first.tabs.dateSignedTabs).toHaveLength(1);
+    expect(second.tabs.signHereTabs).toHaveLength(1);
+    expect(second.tabs.dateSignedTabs).toHaveLength(1);
+    // Signers must not stack on the same point.
+    expect(first.tabs.signHereTabs[0].yPosition).not.toBe(
+      second.tabs.signHereTabs[0].yPosition
+    );
+    // Date tab sits on the same line as its signature tab.
+    expect(first.tabs.dateSignedTabs[0].yPosition).toBe(
+      first.tabs.signHereTabs[0].yPosition
+    );
+  });
+
+  it("passes clientUserId and explicit routing through on the fallback path", async () => {
+    let envBody: string | undefined;
+    const fakeFetch: FetchLike = async (url, init) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      envBody = init?.body as string;
+      return jsonResponse({ envelopeId: "env-3" }, 201);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await client.createEnvelope("x.pdf", new Uint8Array([1]), [
+      { email: "a@b.com", name: "A", clientUserId: "user-uuid-1", routingOrder: 2 },
+      { email: "c@d.com", name: "C" },
+    ]);
+    const sent = JSON.parse(envBody as string);
+    expect(sent.recipients.signers[0].clientUserId).toBe("user-uuid-1");
+    expect(sent.recipients.signers[0].routingOrder).toBe("2");
+    // No clientUserId given -> the key is absent (DocuSign emails this signer).
+    expect("clientUserId" in sent.recipients.signers[1]).toBe(false);
+  });
+});
+
+describe("DefaultDocusignClient.createTemplateEnvelope", () => {
+  it("POSTs templateId + templateRoles with status sent and NO documents/tabs", async () => {
+    const calls: Call[] = [];
+    const fakeFetch: FetchLike = async (url, init) => {
+      calls.push({ url, init });
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      if (url.includes("/envelopes")) {
+        return jsonResponse({ envelopeId: "env-tpl-1" }, 201);
+      }
+      throw new Error(`unexpected url ${url}`);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    const envelopeId = await client.createTemplateEnvelope("tpl-123", [
+      {
+        roleName: "Buyer",
+        name: "Mike Smith",
+        email: "mike@example.com",
+        clientUserId: "user-uuid-buyer",
+      },
+      { roleName: "Agent", name: "Sarah Johnson", email: "sarah@example.com" },
+    ]);
+    expect(envelopeId).toBe("env-tpl-1");
+
+    const envCall = calls.find((c) => c.url.includes("/envelopes"));
+    expect(envCall?.url).toBe(
+      "https://demo.docusign.net/restapi/v2.1/accounts/test-account-id/envelopes"
+    );
+    const sent = JSON.parse(envCall?.init?.body as string);
+    expect(sent.templateId).toBe("tpl-123");
+    expect(sent.status).toBe("sent");
+    // Placement comes from the template: no document upload, no coordinate tabs.
+    expect(sent.documents).toBeUndefined();
+    expect(JSON.stringify(sent)).not.toContain("signHereTabs");
+    expect(JSON.stringify(sent)).not.toContain("xPosition");
+    // Portal signer carries clientUserId (embedded); outside signer does not.
+    expect(sent.templateRoles[0]).toMatchObject({
+      roleName: "Buyer",
+      name: "Mike Smith",
+      email: "mike@example.com",
+      clientUserId: "user-uuid-buyer",
+    });
+    expect("clientUserId" in sent.templateRoles[1]).toBe(false);
+  });
+
+  it("throws on a 201 response missing envelopeId", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      return jsonResponse({}, 201);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await expect(
+      client.createTemplateEnvelope("tpl-123", [
+        { roleName: "Buyer", name: "A", email: "a@b.com" },
+      ])
+    ).rejects.toThrow(/envelopeId/i);
+  });
+
+  it("throws on a non-201 response", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      return new Response("bad", { status: 400 });
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await expect(
+      client.createTemplateEnvelope("tpl-123", [
+        { roleName: "Buyer", name: "A", email: "a@b.com" },
+      ])
+    ).rejects.toThrow(/400/);
+  });
+});
+
 describe("DefaultDocusignClient.getEnvelopeStatus", () => {
   it("returns the envelope status", async () => {
     const fakeFetch: FetchLike = async (url) => {

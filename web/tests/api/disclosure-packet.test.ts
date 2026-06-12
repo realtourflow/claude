@@ -57,6 +57,9 @@ function makeFakeDocusign(): FakeDocusign {
       fake.createCalls.push({ docName, bytes, signers });
       return "env-packet-123";
     },
+    async createTemplateEnvelope() {
+      throw new Error("disclosure packets never use the template path");
+    },
     async getEnvelopeStatus() {
       return "sent";
     },
