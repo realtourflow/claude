@@ -14,7 +14,8 @@ import { useTaskStore } from "@/lib/store/taskStore";
 import { useNotificationStore } from "@/lib/store/notificationStore";
 import { Task } from "@/lib/data/mockTasks";
 import { useTasks, patchTaskStatus, postTask } from "@/hooks/useTasks";
-import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignature, sendDisclosurePacket, refreshDocuSignStatus, Document as ApiDocument } from "@/hooks/useDocuments";
+import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, sendDisclosurePacket, refreshDocuSignStatus, Document as ApiDocument } from "@/hooks/useDocuments";
+import SendTemplateModal from "./SendTemplateModal";
 import { useMessages, postMessage, MessageChannel } from "@/hooks/useMessages";
 import { useVendors } from "@/hooks/useVendors";
 import {
@@ -2792,8 +2793,16 @@ function SendForSignatureModal({
   const { participants } = useParticipants(dealId);
   const signable = participants.filter((p) => p.role === 'buyer' || p.role === 'seller');
   const [selected, setSelected] = useState<Set<string>>(new Set(signable.map((p) => p.id)));
+  const [isBaa, setIsBaa] = useState(false);
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState('');
+
+  // Server routing policy: buyers sign first, then sellers. Mirrored here so
+  // the modal can preview the order read-only.
+  const orderOf = (role: string) => (role === 'buyer' ? 1 : 2);
+  const selectedOrdered = signable
+    .filter((p) => selected.has(p.id))
+    .sort((a, b) => orderOf(a.role) - orderOf(b.role));
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -2805,14 +2814,12 @@ function SendForSignatureModal({
   }
 
   async function handleSend() {
-    const signers = signable
-      .filter((p) => selected.has(p.id))
-      .map((p) => ({ email: p.email, name: p.name }));
-    if (signers.length === 0) { setErr('Select at least one signer.'); return; }
+    const ids = selectedOrdered.map((p) => p.id);
+    if (ids.length === 0) { setErr('Select at least one signer.'); return; }
     setSending(true);
     setErr('');
     try {
-      await sendForSignature(dealId, doc.id, signers);
+      await sendForSignatureByUserIds(dealId, doc.id, ids, isBaa ? 'baa' : undefined);
       onSent();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to send — check DocuSign configuration.');
@@ -2845,24 +2852,47 @@ function SendForSignatureModal({
               <p className="text-xs text-gray-400">No buyers or sellers on this deal yet.</p>
             ) : (
               <div className="space-y-1.5">
-                {signable.map((p) => (
-                  <label key={p.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(p.id)}
-                      onChange={() => toggle(p.id)}
-                      className="h-4 w-4 rounded accent-brand-navy"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-brand-navy truncate">{p.name}</p>
-                      <p className="text-xs text-gray-400 truncate">{p.email}</p>
-                    </div>
-                    <span className="text-[10px] font-bold uppercase text-gray-300">{p.role}</span>
-                  </label>
-                ))}
+                {signable.map((p) => {
+                  const orderIdx = selectedOrdered.findIndex((s) => s.id === p.id);
+                  return (
+                    <label key={p.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(p.id)}
+                        onChange={() => toggle(p.id)}
+                        className="h-4 w-4 rounded accent-brand-navy"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-brand-navy truncate">{p.name}</p>
+                        <p className="text-xs text-gray-400 truncate">{p.email}</p>
+                      </div>
+                      {orderIdx >= 0 && (
+                        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-brand-navy/10 text-[10px] font-bold text-brand-navy" title="Signing order">
+                          {orderIdx + 1}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-bold uppercase text-gray-300">{p.role}</span>
+                    </label>
+                  );
+                })}
               </div>
             )}
+            {signable.length > 0 && (
+              <p className="mt-2 text-[11px] text-gray-400">Buyers sign first, then sellers.</p>
+            )}
           </div>
+
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isBaa}
+              onChange={(e) => setIsBaa(e.target.checked)}
+              className="h-4 w-4 rounded accent-brand-navy"
+            />
+            <span className="text-xs text-gray-600">
+              This is the buyer agency agreement
+            </span>
+          </label>
 
           {err && <p className="text-xs text-red-500">{err}</p>}
         </div>
@@ -3072,10 +3102,13 @@ function DocumentsTab({
 }) {
   const [showUpload, setShowUpload] = useState(false);
   const [showPacket, setShowPacket] = useState(false);
+  const [showSendForm, setShowSendForm] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [signingDoc, setSigningDoc] = useState<ApiDocument | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  // Agent info previews the agent's own role row in the template modal.
+  const activeUser = useAuthStore((s) => s.activeUser);
 
   const stageReq = STAGE_GATE[deal.stage];
   const stageDocFound = stageReq ? docs.some((d) => d.name === stageReq.name) : false;
@@ -3222,7 +3255,13 @@ function DocumentsTab({
           )}
         </div>
         <div className="border-t px-5 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
+            <button
+              onClick={() => setShowSendForm(true)}
+              className="flex items-center gap-1.5 text-sm font-semibold text-brand-navy hover:text-brand-navy/70 transition-colors"
+            >
+              <PenLine size={14} /> Send a form
+            </button>
             <button
               onClick={() => setShowUpload(true)}
               className="flex items-center gap-1.5 text-sm font-medium text-brand-navy hover:text-brand-navy/70 transition-colors"
@@ -3269,6 +3308,19 @@ function DocumentsTab({
           docs={docs}
           onClose={() => setShowPacket(false)}
           onSent={() => { setShowPacket(false); onRefresh(); }}
+        />
+      )}
+
+      {showSendForm && (
+        <SendTemplateModal
+          dealId={deal.id ?? ''}
+          agent={
+            activeUser
+              ? { id: activeUser.id, name: activeUser.name, email: activeUser.email }
+              : null
+          }
+          onClose={() => setShowSendForm(false)}
+          onSent={() => { setShowSendForm(false); onRefresh(); }}
         />
       )}
     </div>

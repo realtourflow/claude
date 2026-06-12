@@ -76,6 +76,7 @@ export function listTemplates(): Array<{
   key: string;
   label: string;
   roles: string[];
+  roleMapping: Record<string, string>;
   purpose: string;
 }> {
   const config = parseConfig();
@@ -83,6 +84,9 @@ export function listTemplates(): Array<{
     key,
     label: entry.label,
     roles: Object.keys(entry.roleMapping),
+    // Participant role -> template roleName. The send route's per-role
+    // overrides are keyed by template roleName, so the picker needs the map.
+    roleMapping: entry.roleMapping,
     purpose: entry.purpose,
   }));
 }

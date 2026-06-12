@@ -461,6 +461,7 @@ describe("GET /api/docusign/templates", () => {
       key: "buyer_agency_agreement",
       label: "Buyer Agency Agreement",
       roles: ["buyer", "agent"],
+      roleMapping: { buyer: "Buyer", agent: "Agent" },
       purpose: "baa",
     });
   });
