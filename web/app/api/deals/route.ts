@@ -54,11 +54,12 @@ export async function POST(req: Request): Promise<Response> {
         updated_at: Date;
       }[]
     >`
-      INSERT INTO deals (agent_id, type, title, address, price, arive_linked)
+      INSERT INTO deals (agent_id, type, title, address, price, arive_linked, market)
       VALUES (${userId}::uuid, ${type}::deal_type, ${title},
               ${body.address ?? null},
               ${body.price ?? null}::decimal,
-              ${body.arive_linked ?? false})
+              ${body.arive_linked ?? false},
+              COALESCE((SELECT market FROM users WHERE id = ${userId}::uuid), ''))
       RETURNING id, agent_id, type::text AS type, stage::text AS stage,
                 title, address, price::text AS price, arive_linked, created_at, updated_at
     `;

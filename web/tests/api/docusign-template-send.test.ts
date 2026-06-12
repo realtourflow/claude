@@ -159,7 +159,7 @@ function templateSendReq(dealId: string, body: unknown, auth: string) {
 
 describe("POST /api/deals/[id]/docusign/send-template", () => {
   it("auto-assigns participants to template roles and records everything", async () => {
-    const { agent, buyer, deal } = await seedDealWithBuyer();
+    const { buyer, deal } = await seedDealWithBuyer();
     const res = await sendTemplateRoute(
       templateSendReq(
         deal.id,

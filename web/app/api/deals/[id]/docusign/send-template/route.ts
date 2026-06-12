@@ -14,6 +14,8 @@ import {
   type RoleOverride,
 } from "@/lib/docusign-routing";
 import { sendTemplateEnvelope } from "@/lib/docusign-documents";
+import { buildPrefillTabs } from "@/lib/docusign-prefill";
+import { getMergedContractValues } from "@/lib/contract-facts";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -40,7 +42,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     // single-document send route).
     const owned = await prisma.deals.findFirst({
       where: { id: dealId, agent_id: userId },
-      select: { id: true },
+      select: { id: true, market: true },
     });
     if (!owned) return error("deal not found or access denied", 404);
 
@@ -65,6 +67,13 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       if (err instanceof TemplateConfigError) return error(err.message, 500);
       throw err;
     }
+    // Board-keyed forms only send on deals in that market.
+    if (template.board && template.board !== owned.market) {
+      return error(
+        `form "${body.form_key}" belongs to board ${template.board}; this deal's market is ${owned.market || "unset"}`,
+        400
+      );
+    }
 
     const people = await loadDealPeople(dealId);
     let roles;
@@ -78,6 +87,18 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       if (err instanceof RoutingError) return error(err.message, 400);
       throw err;
     }
+
+    // Contract-fill: pour the deal's facts + this form's saved terms into the
+    // template's tabs (placement lives on the template; this only sets values).
+    const values = await getMergedContractValues(dealId, body.form_key);
+    const tabsByRole = buildPrefillTabs({
+      fieldMap: template.fieldMap,
+      values,
+      defaultRole: Object.values(template.roleMapping)[0] ?? "",
+    });
+    roles = roles.map((r) =>
+      tabsByRole[r.roleName] ? { ...r, tabs: tabsByRole[r.roleName] } : r
+    );
 
     let sent;
     try {
