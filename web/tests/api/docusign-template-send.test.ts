@@ -448,7 +448,7 @@ describe("fallback path enrichment (send-for-signature)", () => {
 });
 
 describe("GET /api/docusign/templates", () => {
-  it("lists configured forms for an agent", async () => {
+  it("lists configured forms for an agent (universal forms, no market set)", async () => {
     await createUser({ role: "agent", auth0_id: "auth0|agent" });
     const req = new Request("http://localhost/api/docusign/templates", {
       headers: { authorization: await authHeader("auth0|agent", ["agent"]) },
@@ -457,13 +457,50 @@ describe("GET /api/docusign/templates", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { templates: { key: string }[] };
     expect(body.templates).toHaveLength(2);
-    expect(body.templates.find((t) => t.key === "buyer_agency_agreement")).toEqual({
+    expect(body.templates.find((t) => t.key === "buyer_agency_agreement")).toMatchObject({
       key: "buyer_agency_agreement",
       label: "Buyer Agency Agreement",
       roles: ["buyer", "agent"],
       roleMapping: { buyer: "Buyer", agent: "Agent" },
       purpose: "baa",
+      board: "",
     });
+  });
+
+  it("an agent sees their board's forms plus universal ones — not other boards'", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|bham" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { market: "BIRMINGHAM_AAR" },
+    });
+    process.env.DOCUSIGN_TEMPLATES = JSON.stringify({
+      ...TEMPLATES,
+      birmingham_general_financed: {
+        templateId: "tpl-bham",
+        label: "General/Financed Residential Contract",
+        board: "BIRMINGHAM_AAR",
+        roleMapping: { buyer: "Buyer", agent: "Agent" },
+      },
+      baldwin_residential_purchase: {
+        templateId: "tpl-baldwin",
+        label: "Residential Purchase Agreement",
+        board: "BALDWIN_GULF_COAST",
+        roleMapping: { buyer: "Buyer", agent: "Agent" },
+      },
+    });
+    resetEnvForTesting();
+
+    const req = new Request("http://localhost/api/docusign/templates", {
+      headers: { authorization: await authHeader("auth0|bham", ["agent"]) },
+    });
+    const res = await listTemplatesRoute(req);
+    expect(res.status).toBe(200);
+    const keys = ((await res.json()) as { templates: { key: string }[] }).templates.map(
+      (t) => t.key
+    );
+    expect(keys).toContain("birmingham_general_financed");
+    expect(keys).toContain("buyer_agency_agreement"); // universal
+    expect(keys).not.toContain("baldwin_residential_purchase"); // other board
   });
 
   it("403s for a non-agent role", async () => {

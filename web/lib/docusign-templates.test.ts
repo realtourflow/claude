@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import {
   getTemplateConfig,
   listTemplates,
+  listTemplatesForMarket,
   TemplateConfigError,
 } from "@/lib/docusign-templates";
 import { resetEnvForTesting } from "@/lib/env";
@@ -18,11 +19,24 @@ const VALID = {
     label: "Buyer Agency Agreement",
     roleMapping: { buyer: "Buyer", agent: "Agent" },
     purpose: "baa",
+    // No board: universal — visible to every market.
   },
   listing_agreement: {
     templateId: "66666666-7777-8888-9999-000000000000",
     label: "Listing Agreement",
     roleMapping: { seller: "Seller", agent: "Agent" },
+  },
+  birmingham_general_financed: {
+    templateId: "77777777-1111-2222-3333-444444444444",
+    label: "General/Financed Residential Contract",
+    board: "BIRMINGHAM_AAR",
+    roleMapping: { buyer: "Buyer", seller: "Seller", agent: "Agent" },
+    fieldMap: {
+      purchase_price: { label: "PurchasePrice", type: "text" },
+      earnest_money_amount: { label: "EarnestMoney", type: "text" },
+      inspection_days: { label: "InspectionDays", type: "text", role: "Buyer" },
+      home_warranty: { label: "HomeWarranty", type: "checkbox" },
+    },
   },
 };
 
@@ -85,10 +99,64 @@ describe("getTemplateConfig", () => {
   });
 });
 
+describe("board + fieldMap (contract-fill registry)", () => {
+  it("parses board and fieldMap on a configured form", () => {
+    const cfg = getTemplateConfig("birmingham_general_financed");
+    expect(cfg.board).toBe("BIRMINGHAM_AAR");
+    expect(cfg.fieldMap.purchase_price).toEqual({
+      label: "PurchasePrice",
+      type: "text",
+    });
+    expect(cfg.fieldMap.inspection_days.role).toBe("Buyer");
+    expect(cfg.fieldMap.home_warranty.type).toBe("checkbox");
+  });
+
+  it("defaults board to empty (universal) and fieldMap to {}", () => {
+    const cfg = getTemplateConfig("buyer_agency_agreement");
+    expect(cfg.board).toBe("");
+    expect(cfg.fieldMap).toEqual({});
+  });
+
+  it("rejects a fieldMap entry with an invalid type", () => {
+    setTemplatesEnv(
+      JSON.stringify({
+        bad: {
+          templateId: "t",
+          label: "Bad",
+          roleMapping: { buyer: "Buyer" },
+          fieldMap: { x: { label: "X", type: "dropdown" } },
+        },
+      })
+    );
+    expect(() => getTemplateConfig("bad")).toThrow(TemplateConfigError);
+  });
+});
+
+describe("listTemplatesForMarket", () => {
+  it("returns the market's boarded forms plus universal (board-less) forms", () => {
+    const keys = listTemplatesForMarket("BIRMINGHAM_AAR").map((t) => t.key);
+    expect(keys).toContain("birmingham_general_financed");
+    expect(keys).toContain("buyer_agency_agreement"); // universal
+    expect(keys).toContain("listing_agreement"); // universal (no board)
+  });
+
+  it("hides other markets' boarded forms", () => {
+    const keys = listTemplatesForMarket("BALDWIN_GULF_COAST").map((t) => t.key);
+    expect(keys).not.toContain("birmingham_general_financed");
+    expect(keys).toContain("buyer_agency_agreement");
+  });
+
+  it("an agent with no market sees only universal forms", () => {
+    const keys = listTemplatesForMarket("").map((t) => t.key);
+    expect(keys).not.toContain("birmingham_general_financed");
+    expect(keys).toContain("buyer_agency_agreement");
+  });
+});
+
 describe("listTemplates", () => {
   it("lists configured forms with key, label, participant roles, and purpose", () => {
     const all = listTemplates();
-    expect(all).toHaveLength(2);
+    expect(all).toHaveLength(3);
     const baa = all.find((t) => t.key === "buyer_agency_agreement");
     expect(baa).toEqual({
       key: "buyer_agency_agreement",
@@ -96,6 +164,8 @@ describe("listTemplates", () => {
       roles: ["buyer", "agent"],
       roleMapping: { buyer: "Buyer", agent: "Agent" },
       purpose: "baa",
+      board: "",
+      fieldMap: {},
     });
   });
 
