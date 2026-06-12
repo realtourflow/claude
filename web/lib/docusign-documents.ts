@@ -38,10 +38,10 @@ export function recipientsFromSigners(
   people: DealPerson[] = []
 ): EnvelopeRecipient[] {
   return signers.map((s, i) => ({
-    userId: s.clientUserId ?? null,
+    userId: s.userId ?? s.clientUserId ?? null,
     email: s.email,
     name: s.name,
-    role: people.find((p) => p.userId === s.clientUserId)?.role ?? "",
+    role: people.find((p) => p.userId === (s.userId ?? s.clientUserId))?.role ?? "",
     recipientId: s.recipientId ?? String(i + 1),
     routingOrder: s.routingOrder ?? i + 1,
     clientUserId: s.clientUserId ?? null,
@@ -55,7 +55,7 @@ export function recipientsFromTemplateRoles(
   // ids to template roles, so later phases match these rows by user/email —
   // never by this id.
   return roles.map((r, i) => ({
-    userId: r.clientUserId ?? null,
+    userId: r.userId ?? r.clientUserId ?? null,
     email: r.email,
     name: r.name,
     role: r.roleName,

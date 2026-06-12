@@ -175,18 +175,18 @@ describe("POST /api/deals/[id]/docusign/send-template", () => {
     };
     expect(body.envelope_id).toBe("env-tpl-1");
 
-    // Envelope was template-based with clientUserId on both portal roles.
+    // Envelope was template-based. STAGE 1: every signer is an EMAIL recipient
+    // (no clientUserId anywhere on the wire) while identity stays linked.
     expect(fakeDocusign.lastTemplateCreate?.templateId).toBe("tpl-baa-demo");
     const roles = fakeDocusign.lastTemplateCreate?.roles ?? [];
     expect(roles).toHaveLength(2);
     expect(roles.find((r) => r.roleName === "Buyer")).toMatchObject({
       email: "mike@example.com",
-      clientUserId: buyer.id,
     });
     expect(roles.find((r) => r.roleName === "Agent")).toMatchObject({
       email: "sarah@example.com",
-      clientUserId: agent.id,
     });
+    expect(roles.every((r) => r.clientUserId === undefined)).toBe(true);
 
     // Placeholder documents row: template label as name, no upload yet,
     // purpose from config, envelope stamped.
@@ -209,9 +209,9 @@ describe("POST /api/deals/[id]/docusign/send-template", () => {
     const buyerRow = recipients.find((r) => r.role === "Buyer");
     expect(buyerRow).toMatchObject({
       envelope_id: "env-tpl-1",
-      user_id: buyer.id,
+      user_id: buyer.id, // identity link survives for Stage 2 / portal status
       email: "mike@example.com",
-      client_user_id: buyer.id,
+      client_user_id: null, // Stage 1: email recipient
       status: "sent",
     });
   });
@@ -367,11 +367,12 @@ describe("fallback path enrichment (send-for-signature)", () => {
       "jen@example.com",
       "sarah@example.com",
     ]);
-    expect(signers.map((s) => s.clientUserId)).toEqual([
+    expect(signers.map((s) => s.userId)).toEqual([
       buyer.id,
       seller.id,
       agent.id,
     ]);
+    expect(signers.every((s) => s.clientUserId === undefined)).toBe(true);
 
     const rows = await prisma.docusign_recipients.findMany({
       where: { document_id: doc.id },

@@ -227,6 +227,7 @@ describe("DefaultDocusignClient.createTemplateEnvelope", () => {
         name: "Mike Smith",
         email: "mike@example.com",
         clientUserId: "user-uuid-buyer",
+        userId: "internal-rtf-uuid", // identity link — must NOT serialize
       },
       { roleName: "Agent", name: "Sarah Johnson", email: "sarah@example.com" },
     ]);
@@ -251,6 +252,9 @@ describe("DefaultDocusignClient.createTemplateEnvelope", () => {
       clientUserId: "user-uuid-buyer",
     });
     expect("clientUserId" in sent.templateRoles[1]).toBe(false);
+    // The internal RTF identity field never leaks to DocuSign.
+    expect(JSON.stringify(sent)).not.toContain("internal-rtf-uuid");
+    expect(JSON.stringify(sent)).not.toContain("userId");
   });
 
   it("throws on a 201 response missing envelopeId", async () => {

@@ -19,9 +19,12 @@ import { env } from "./env";
 export type DocusignSigner = {
   email: string;
   name: string;
-  // Set for portal users: DocuSign skips its email and the recipient signs
-  // embedded in-app (a later phase mints the recipient view). Omit for outside
-  // signers — they get the normal DocuSign email (hybrid model).
+  // RTF user identity for recipient-row linkage. NEVER serialized to DocuSign —
+  // payload construction picks fields explicitly.
+  userId?: string;
+  // Set only for embedded signing (Stage 2+): DocuSign skips its email and the
+  // recipient signs in-app. Stage 1 ships email links for everyone, so routing
+  // leaves this unset; outside signers never get one.
   clientUserId?: string;
   routingOrder?: number;
   recipientId?: string;
@@ -33,6 +36,8 @@ export type TemplateRole = {
   roleName: string;
   name: string;
   email: string;
+  // RTF user identity — internal only, never serialized (see DocusignSigner).
+  userId?: string;
   clientUserId?: string;
   routingOrder?: number;
 };
