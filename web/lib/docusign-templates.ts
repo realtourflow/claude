@@ -29,13 +29,29 @@ export class TemplateConfigError extends Error {}
 // DOCUSIGN_TEMPLATES value, which is a server misconfiguration (500).
 export class UnknownFormError extends TemplateConfigError {}
 
+// One field on a contract form: a deal-fact or term key mapped to the
+// template's tab LABEL. `role` targets the template role whose tabs carry the
+// prefill (defaults to the form's first role at send time).
+const fieldMapEntrySchema = z.object({
+  label: z.string().min(1),
+  type: z.enum(["text", "checkbox"]),
+  role: z.string().optional(),
+});
+
 const entrySchema = z.object({
   templateId: z.string().min(1),
   label: z.string().min(1),
   roleMapping: z.record(z.string(), z.string().min(1)),
   // Allowlist: '' (plain document) or 'baa' (buyer agency agreement).
   purpose: z.enum(["", "baa"]).default(""),
+  // Board/association that owns the form (e.g. BIRMINGHAM_AAR). Empty =
+  // universal — visible to every market (the BAA).
+  board: z.string().default(""),
+  // factOrTermKey -> tab mapping driving contract prefill.
+  fieldMap: z.record(z.string(), fieldMapEntrySchema).default({}),
 });
+
+export type FieldMapEntry = z.infer<typeof fieldMapEntrySchema>;
 
 const configSchema = z.record(z.string(), entrySchema);
 
@@ -72,13 +88,17 @@ export function getTemplateConfig(formKey: string): TemplateConfig {
   return entry;
 }
 
-export function listTemplates(): Array<{
+export type TemplateListing = {
   key: string;
   label: string;
   roles: string[];
   roleMapping: Record<string, string>;
   purpose: string;
-}> {
+  board: string;
+  fieldMap: Record<string, FieldMapEntry>;
+};
+
+export function listTemplates(): TemplateListing[] {
   const config = parseConfig();
   return Object.entries(config).map(([key, entry]) => ({
     key,
@@ -88,5 +108,13 @@ export function listTemplates(): Array<{
     // overrides are keyed by template roleName, so the picker needs the map.
     roleMapping: entry.roleMapping,
     purpose: entry.purpose,
+    board: entry.board,
+    fieldMap: entry.fieldMap,
   }));
+}
+
+// Forms an agent in the given market can use: their board's forms plus
+// universal (board-less) ones. No market -> universal only.
+export function listTemplatesForMarket(market: string): TemplateListing[] {
+  return listTemplates().filter((t) => t.board === "" || t.board === market);
 }

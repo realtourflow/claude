@@ -16,6 +16,8 @@ export type Document = {
   envelopeId?: string;
   docusignStatus?: string;
   docusignSentAt?: string;
+  // '' | 'baa' — marks special documents (the buyer agency agreement).
+  purpose?: string;
 };
 
 type ApiDocument = {
@@ -31,6 +33,7 @@ type ApiDocument = {
   docusign_envelope_id?: string;
   docusign_status?: string;
   docusign_sent_at?: string;
+  purpose?: string;
 };
 
 function apiDocToFrontend(d: ApiDocument): Document {
@@ -47,6 +50,7 @@ function apiDocToFrontend(d: ApiDocument): Document {
     envelopeId: d.docusign_envelope_id,
     docusignStatus: d.docusign_status ?? undefined,
     docusignSentAt: d.docusign_sent_at ?? undefined,
+    purpose: d.purpose ?? undefined,
   };
 }
 
@@ -138,6 +142,8 @@ export type DocusignTemplate = {
   roles: string[];
   roleMapping: Record<string, string>;
   purpose: string;
+  board: string;
+  fieldMap: Record<string, { label: string; type: "text" | "checkbox"; role?: string }>;
 };
 
 // The standard forms configured in DOCUSIGN_TEMPLATES (feeds the form picker).
@@ -152,6 +158,45 @@ export type TemplateAssignment = {
   email?: string;
   name?: string;
 };
+
+export type ContractPrepField = {
+  key: string;
+  type: string;
+  value: unknown;
+  label?: string;
+  role?: string;
+};
+
+export type ContractPrep = {
+  form: { key: string; label: string; board: string };
+  core: ContractPrepField[];
+  board_fields: ContractPrepField[];
+};
+
+// The merged, prefilled field set the agent reviews before sending a form.
+export async function getContractPrep(
+  dealId: string,
+  formKey: string,
+): Promise<ContractPrep> {
+  return api.get(`/deals/${dealId}/contracts/${formKey}/prep`);
+}
+
+// Shared core contract facts (one set per deal — every form reads them).
+export async function saveContractFacts(
+  dealId: string,
+  facts: Record<string, unknown>,
+): Promise<void> {
+  await api.put(`/deals/${dealId}/contract-facts`, facts);
+}
+
+// Form-specific values, validated server-side against the form's fieldMap.
+export async function saveContractTerms(
+  dealId: string,
+  formKey: string,
+  terms: Record<string, unknown>,
+): Promise<void> {
+  await api.put(`/deals/${dealId}/contracts/${formKey}/terms`, { terms });
+}
 
 // PRIMARY send path: send a configured template. Roles auto-fill from the
 // deal's participants server-side; assignments override individual roles

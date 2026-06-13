@@ -4,10 +4,10 @@
  * route layer loads the rows and hands them in.
  *
  * Template path: deal participant roles map to template role names via the
- * form's roleMapping; routing order lives on the template, never here. Portal
- * users get clientUserId = users.id (embedded signing, no DocuSign email);
- * outside signers (email/name override) get none — DocuSign emails them
- * (hybrid model).
+ * form's roleMapping; routing order lives on the template, never here. Matched
+ * people carry userId (identity link for recipient rows / portal status) —
+ * STAGE 1 ships secure EMAIL signing for every signer, so clientUserId is
+ * never set here; the embedded upgrade (Stage 2) adds it for portal users.
  *
  * Fallback (ad-hoc) path: routing policy buyer → seller → agent.
  */
@@ -53,7 +53,7 @@ export function assignTemplateRoles(opts: {
         roleName: templateRole,
         name: person.name,
         email: person.email,
-        clientUserId: person.userId,
+        userId: person.userId,
       };
     }
 
@@ -72,7 +72,7 @@ export function assignTemplateRoles(opts: {
       roleName: templateRole,
       name: person.name,
       email: person.email,
-      clientUserId: person.userId,
+      userId: person.userId,
     };
   });
 }
@@ -97,7 +97,7 @@ export function deriveFallbackSigners(
     .map((p, i) => ({
       email: p.email,
       name: p.name,
-      clientUserId: p.userId,
+      userId: p.userId,
       routingOrder: i + 1,
     }));
 }

@@ -22,11 +22,9 @@ import MetroMap from "@/components/MetroMap";
 import VendorDirectory from "@/components/VendorDirectory";
 import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
 import { useMLSListings, MLSListing } from "@/hooks/useMLS";
-import { useAgentDocStore } from "@/lib/store/agentDocStore";
 import { useAgentDocTemplatesForDeal, DOC_TYPE_LABELS } from "@/hooks/useAgentDocs";
 import { useDocuments, getDownloadUrl as getDealDocDownloadUrl, requestUploadUrl, confirmUpload } from "@/hooks/useDocuments";
 import ClientNotifications from "@/components/ClientNotifications";
-import { api } from "@/lib/api-client";
 import { FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/data/mockFastPass";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -755,89 +753,6 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
   );
 }
 
-// ─── BAA Signing Modal ────────────────────────────────────────────────────────
-
-function BAASigningModal({ deal, agentId, onClose, onSigned }: {
-  deal: Deal;
-  agentId: string;
-  onClose: () => void;
-  onSigned: () => void;
-}) {
-  const { docsByAgent } = useAgentDocStore();
-  const baaDoc = (docsByAgent[agentId] ?? []).find((d) => d.docType === 'baa');
-  const [agreed, setAgreed] = useState(false);
-  const [signed, setSigned] = useState(false);
-
-  function handleSign() {
-    setSigned(true);
-    setTimeout(() => { onSigned(); onClose(); }, 1800);
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 px-4 pb-0">
-      <div className="w-full max-w-lg rounded-t-2xl bg-white shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Document</p>
-            <h3 className="text-base font-black text-brand-navy">Buyer Agency Agreement</h3>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Document body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 text-sm text-gray-700 leading-relaxed">
-          <div className="rounded-xl bg-gray-50 px-4 py-3 space-y-1 text-xs">
-            <div className="flex justify-between"><span className="text-gray-400">Agent</span><span className="font-semibold text-brand-navy">Sarah Johnson</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Buyer</span><span className="font-semibold text-brand-navy">{deal.clientName}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Agreement Date</span><span className="font-semibold text-brand-navy">{new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">Duration</span><span className="font-semibold text-brand-navy">90 days from signing</span></div>
-            {baaDoc?.notes && <div className="flex justify-between"><span className="text-gray-400">Notes</span><span className="font-medium text-brand-navy">{baaDoc.notes}</span></div>}
-          </div>
-
-          <p><strong>1. Exclusive Representation.</strong> Buyer agrees to work exclusively with Agent for the purpose of locating and purchasing residential real property during the term of this agreement.</p>
-          <p><strong>2. Agent&apos;s Duties.</strong> Agent agrees to use reasonable efforts to assist Buyer in locating suitable properties, presenting offers, and negotiating on Buyer&apos;s behalf.</p>
-          <p><strong>3. Buyer&apos;s Duties.</strong> Buyer agrees to work exclusively with Agent and to notify Agent of any properties discovered through independent sources.</p>
-          <p><strong>4. Compensation.</strong> Agent&apos;s compensation is negotiated separately and will be disclosed in each purchase agreement.</p>
-          <p><strong>5. Termination.</strong> Either party may terminate this agreement with written notice. Properties introduced by Agent during the term remain subject to this agreement for 60 days post-termination.</p>
-          <p className="text-xs text-gray-400 border-t border-gray-100 pt-3">
-            This is a placeholder template. In production, the agent&apos;s uploaded document will be displayed here for electronic signature via DocuSign or a similar service.
-          </p>
-        </div>
-
-        {/* Sign footer */}
-        <div className="border-t border-gray-100 px-5 py-4 space-y-3">
-          {!signed ? (
-            <>
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-navy" />
-                <span className="text-xs text-gray-600 leading-relaxed">
-                  I have read and agree to the terms of this Buyer Agency Agreement.
-                </span>
-              </label>
-              <button
-                onClick={handleSign}
-                disabled={!agreed}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-navy py-3.5 text-sm font-bold text-white disabled:opacity-40 hover:bg-brand-navy/90 transition-all"
-              >
-                Sign electronically →
-              </button>
-            </>
-          ) : (
-            <div className="flex items-center justify-center gap-2 py-3">
-              <CheckCircle2 size={20} className="text-green-500" />
-              <p className="text-sm font-bold text-green-700">Agreement signed! Closing…</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── MLS Browser ─────────────────────────────────────────────────────────────
 
 function MLSListingCard({ listing, onAdd }: { listing: MLSListing; onAdd: (l: MLSListing) => void }) {
@@ -1009,15 +924,23 @@ function MLSBrowser({ deal, onAddProperty }: {
 
 // ─── Active Search Card ───────────────────────────────────────────────────────
 
-function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () => void }) {
+function ActiveSearchCard({ deal }: { deal: Deal }) {
   const { properties, addProperty, updateStatus, removeProperty, updateBuyerNote, setOfferRequested } = useProperties(deal.id);
   const preApproved = deal.preApproved ?? false;
   const baaSigned = deal.baaSigned ?? false;
+  // The BAA is a real DocuSign envelope now (Stage 1: signed via the secure
+  // email link; deals.baa_signed flips when the envelope completes). The
+  // portal just reflects where it stands.
+  const { docs: dealDocs } = useDocuments(deal.id);
+  const baaPending = dealDocs.some(
+    (d) =>
+      d.purpose === 'baa' &&
+      !['completed', 'voided', 'declined'].includes(d.docusignStatus ?? ''),
+  );
 
   async function handleOfferInterest(propertyId: string, _address: string) {
     await setOfferRequested(propertyId, true).catch(() => {});
   }
-  const [showBAAModal, setShowBAAModal] = useState(false);
   const isMountainMortgage = deal.flags.includes('mountain_mortgage');
 
   const [showForm, setShowForm] = useState(false);
@@ -1115,17 +1038,22 @@ function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () 
             </div>
           </div>
 
-          {!baaSigned && (
-            <button
-              onClick={() => setShowBAAModal(true)}
-              className="flex w-full items-center justify-between rounded-xl border border-amber-300 bg-white px-4 py-3 text-left hover:bg-amber-50 transition-colors"
-            >
+          {!baaSigned && baaPending && (
+            <div className="flex w-full items-start gap-3 rounded-xl border border-amber-300 bg-white px-4 py-3">
               <div>
-                <p className="text-sm font-bold text-brand-navy">Sign your buyer agency agreement</p>
-                <p className="text-xs text-gray-400 mt-0.5">Required before your agent can legally show you homes</p>
+                <p className="text-sm font-bold text-brand-navy">Buyer agency agreement sent — check your email</p>
+                <p className="text-xs text-gray-400 mt-0.5">Sign it via the secure DocuSign link in your inbox. Status updates here once everyone has signed.</p>
               </div>
-              <ChevronRight size={16} className="text-brand-navy flex-shrink-0" />
-            </button>
+            </div>
+          )}
+
+          {!baaSigned && !baaPending && (
+            <div className="flex w-full items-start gap-3 rounded-xl border border-amber-200 bg-white/60 px-4 py-3">
+              <div>
+                <p className="text-sm font-bold text-brand-navy">Buyer agency agreement</p>
+                <p className="text-xs text-gray-400 mt-0.5">Your agent will send it for signature — required before showings.</p>
+              </div>
+            </div>
           )}
 
           {baaSigned && (
@@ -1201,18 +1129,6 @@ function ActiveSearchCard({ deal, onBaaSigned }: { deal: Deal; onBaaSigned?: () 
         }
       />
 
-      {/* BAA signing modal */}
-      {showBAAModal && (
-        <BAASigningModal
-          deal={deal}
-          agentId={deal.agentId}
-          onClose={() => setShowBAAModal(false)}
-          onSigned={() => {
-            api.post(`/deals/${deal.id}/baa/sign`, {}).catch(() => {});
-            onBaaSigned?.();
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -1786,11 +1702,11 @@ function FastPassPitch({ dealId }: { dealId: string }) {
 
 // ─── Stage card dispatcher ────────────────────────────────────────────────────
 
-function StageCard({ deal, firstName, onRefresh }: { deal: Deal; firstName: string; onRefresh?: () => void }) {
+function StageCard({ deal, firstName }: { deal: Deal; firstName: string; onRefresh?: () => void }) {
   if (deal.status === 'fallen_through') return <FallenThroughCard deal={deal} firstName={firstName} />;
   switch (deal.stage) {
     case 'intake':         return <IntakeCard deal={deal} firstName={firstName} />;
-    case 'active_search':  return <ActiveSearchCard deal={deal} onBaaSigned={onRefresh} />;
+    case 'active_search':  return <ActiveSearchCard deal={deal} />;
     case 'offer_active':   return <OfferActiveCard deal={deal} />;
     case 'under_contract': return <UnderContractCard deal={deal} />;
     case 'pre_close':      return <PreCloseCard deal={deal} />;

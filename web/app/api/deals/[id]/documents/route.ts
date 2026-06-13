@@ -19,6 +19,7 @@ type DocumentRow = {
   docusign_envelope_id: string | null;
   docusign_status: string | null;
   docusign_sent_at: Date | null;
+  purpose: string;
 };
 
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
@@ -32,7 +33,8 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     const rows = await prisma.$queryRaw<DocumentRow[]>`
       SELECT d.id, d.deal_id, d.uploaded_by, u.name AS uploader_name,
              d.name, d.s3_key, d.mime_type, d.file_size, d.created_at,
-             d.docusign_envelope_id, d.docusign_status, d.docusign_sent_at
+             d.docusign_envelope_id, d.docusign_status, d.docusign_sent_at,
+             d.purpose
       FROM documents d
       JOIN users u ON u.id = d.uploaded_by
       WHERE d.deal_id = ${dealId}::uuid

@@ -5,7 +5,6 @@ import { PATCH as advanceStageRoute } from "@/app/api/deals/[id]/stage/route";
 import { PATCH as notesRoute } from "@/app/api/deals/[id]/notes/route";
 import { PATCH as commissionRoute } from "@/app/api/deals/[id]/commission/route";
 import { PATCH as flagsRoute } from "@/app/api/deals/[id]/flags/route";
-import { POST as baaSignRoute } from "@/app/api/deals/[id]/baa/sign/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -346,45 +345,3 @@ describe("PATCH /api/deals/[id]/flags", () => {
   });
 });
 
-describe("POST /api/deals/[id]/baa/sign", () => {
-  it("agent owner can sign", async () => {
-    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
-    const deal = await createDeal({ agent_id: agent.id });
-    const req = new Request(`http://localhost/api/deals/${deal.id}/baa/sign`, {
-      method: "POST",
-      headers: { authorization: await authHeader("auth0|a", ["agent"]) },
-    });
-    const res = await baaSignRoute(req, ctx(deal.id));
-    expect(res.status).toBe(200);
-    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
-    expect(row?.baa_signed).toBe(true);
-  });
-
-  it("participant can sign", async () => {
-    const agent = await createUser({ role: "agent" });
-    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer-1" });
-    const deal = await createDeal({ agent_id: agent.id });
-    await prisma.deal_participants.create({
-      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
-    });
-    const req = new Request(`http://localhost/api/deals/${deal.id}/baa/sign`, {
-      method: "POST",
-      headers: { authorization: await authHeader("auth0|buyer-1", ["buyer"]) },
-    });
-    const res = await baaSignRoute(req, ctx(deal.id));
-    expect(res.status).toBe(200);
-  });
-
-  it("404 for unrelated user", async () => {
-    const agent = await createUser({ role: "agent" });
-    const stranger = await createUser({ role: "buyer", auth0_id: "auth0|stranger" });
-    const deal = await createDeal({ agent_id: agent.id });
-    void stranger;
-    const req = new Request(`http://localhost/api/deals/${deal.id}/baa/sign`, {
-      method: "POST",
-      headers: { authorization: await authHeader("auth0|stranger", ["buyer"]) },
-    });
-    const res = await baaSignRoute(req, ctx(deal.id));
-    expect(res.status).toBe(404);
-  });
-});

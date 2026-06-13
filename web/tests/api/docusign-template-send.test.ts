@@ -159,7 +159,7 @@ function templateSendReq(dealId: string, body: unknown, auth: string) {
 
 describe("POST /api/deals/[id]/docusign/send-template", () => {
   it("auto-assigns participants to template roles and records everything", async () => {
-    const { agent, buyer, deal } = await seedDealWithBuyer();
+    const { buyer, deal } = await seedDealWithBuyer();
     const res = await sendTemplateRoute(
       templateSendReq(
         deal.id,
@@ -175,18 +175,18 @@ describe("POST /api/deals/[id]/docusign/send-template", () => {
     };
     expect(body.envelope_id).toBe("env-tpl-1");
 
-    // Envelope was template-based with clientUserId on both portal roles.
+    // Envelope was template-based. STAGE 1: every signer is an EMAIL recipient
+    // (no clientUserId anywhere on the wire) while identity stays linked.
     expect(fakeDocusign.lastTemplateCreate?.templateId).toBe("tpl-baa-demo");
     const roles = fakeDocusign.lastTemplateCreate?.roles ?? [];
     expect(roles).toHaveLength(2);
     expect(roles.find((r) => r.roleName === "Buyer")).toMatchObject({
       email: "mike@example.com",
-      clientUserId: buyer.id,
     });
     expect(roles.find((r) => r.roleName === "Agent")).toMatchObject({
       email: "sarah@example.com",
-      clientUserId: agent.id,
     });
+    expect(roles.every((r) => r.clientUserId === undefined)).toBe(true);
 
     // Placeholder documents row: template label as name, no upload yet,
     // purpose from config, envelope stamped.
@@ -209,9 +209,9 @@ describe("POST /api/deals/[id]/docusign/send-template", () => {
     const buyerRow = recipients.find((r) => r.role === "Buyer");
     expect(buyerRow).toMatchObject({
       envelope_id: "env-tpl-1",
-      user_id: buyer.id,
+      user_id: buyer.id, // identity link survives for Stage 2 / portal status
       email: "mike@example.com",
-      client_user_id: buyer.id,
+      client_user_id: null, // Stage 1: email recipient
       status: "sent",
     });
   });
@@ -367,11 +367,12 @@ describe("fallback path enrichment (send-for-signature)", () => {
       "jen@example.com",
       "sarah@example.com",
     ]);
-    expect(signers.map((s) => s.clientUserId)).toEqual([
+    expect(signers.map((s) => s.userId)).toEqual([
       buyer.id,
       seller.id,
       agent.id,
     ]);
+    expect(signers.every((s) => s.clientUserId === undefined)).toBe(true);
 
     const rows = await prisma.docusign_recipients.findMany({
       where: { document_id: doc.id },
@@ -448,7 +449,7 @@ describe("fallback path enrichment (send-for-signature)", () => {
 });
 
 describe("GET /api/docusign/templates", () => {
-  it("lists configured forms for an agent", async () => {
+  it("lists configured forms for an agent (universal forms, no market set)", async () => {
     await createUser({ role: "agent", auth0_id: "auth0|agent" });
     const req = new Request("http://localhost/api/docusign/templates", {
       headers: { authorization: await authHeader("auth0|agent", ["agent"]) },
@@ -457,13 +458,50 @@ describe("GET /api/docusign/templates", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { templates: { key: string }[] };
     expect(body.templates).toHaveLength(2);
-    expect(body.templates.find((t) => t.key === "buyer_agency_agreement")).toEqual({
+    expect(body.templates.find((t) => t.key === "buyer_agency_agreement")).toMatchObject({
       key: "buyer_agency_agreement",
       label: "Buyer Agency Agreement",
       roles: ["buyer", "agent"],
       roleMapping: { buyer: "Buyer", agent: "Agent" },
       purpose: "baa",
+      board: "",
     });
+  });
+
+  it("an agent sees their board's forms plus universal ones — not other boards'", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|bham" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { market: "BIRMINGHAM_AAR" },
+    });
+    process.env.DOCUSIGN_TEMPLATES = JSON.stringify({
+      ...TEMPLATES,
+      birmingham_general_financed: {
+        templateId: "tpl-bham",
+        label: "General/Financed Residential Contract",
+        board: "BIRMINGHAM_AAR",
+        roleMapping: { buyer: "Buyer", agent: "Agent" },
+      },
+      baldwin_residential_purchase: {
+        templateId: "tpl-baldwin",
+        label: "Residential Purchase Agreement",
+        board: "BALDWIN_GULF_COAST",
+        roleMapping: { buyer: "Buyer", agent: "Agent" },
+      },
+    });
+    resetEnvForTesting();
+
+    const req = new Request("http://localhost/api/docusign/templates", {
+      headers: { authorization: await authHeader("auth0|bham", ["agent"]) },
+    });
+    const res = await listTemplatesRoute(req);
+    expect(res.status).toBe(200);
+    const keys = ((await res.json()) as { templates: { key: string }[] }).templates.map(
+      (t) => t.key
+    );
+    expect(keys).toContain("birmingham_general_financed");
+    expect(keys).toContain("buyer_agency_agreement"); // universal
+    expect(keys).not.toContain("baldwin_residential_purchase"); // other board
   });
 
   it("403s for a non-agent role", async () => {

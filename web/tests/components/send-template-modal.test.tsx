@@ -12,10 +12,16 @@ import SendTemplateModal from "@/components/pages/agent/SendTemplateModal";
 
 const listDocusignTemplates = vi.fn();
 const sendTemplateForSignature = vi.fn();
+const getContractPrep = vi.fn();
+const saveContractFacts = vi.fn();
+const saveContractTerms = vi.fn();
 vi.mock("@/hooks/useDocuments", () => ({
   listDocusignTemplates: (...args: unknown[]) => listDocusignTemplates(...args),
   sendTemplateForSignature: (...args: unknown[]) =>
     sendTemplateForSignature(...args),
+  getContractPrep: (...args: unknown[]) => getContractPrep(...args),
+  saveContractFacts: (...args: unknown[]) => saveContractFacts(...args),
+  saveContractTerms: (...args: unknown[]) => saveContractTerms(...args),
 }));
 
 const useParticipants = vi.fn();
@@ -30,6 +36,8 @@ const TEMPLATES = [
     roles: ["buyer", "agent"],
     roleMapping: { buyer: "Buyer", agent: "Agent" },
     purpose: "baa",
+    board: "",
+    fieldMap: {},
   },
   {
     key: "listing_agreement",
@@ -37,8 +45,33 @@ const TEMPLATES = [
     roles: ["seller", "agent"],
     roleMapping: { seller: "Seller", agent: "Agent" },
     purpose: "",
+    board: "",
+    fieldMap: {},
+  },
+  {
+    key: "birmingham_general_financed",
+    label: "General/Financed Residential Contract",
+    roles: ["buyer", "agent"],
+    roleMapping: { buyer: "Buyer", agent: "Agent" },
+    purpose: "",
+    board: "BIRMINGHAM_AAR",
+    fieldMap: {
+      purchase_price: { label: "PurchasePrice", type: "text" },
+      home_warranty: { label: "HomeWarranty", type: "checkbox" },
+    },
   },
 ];
+
+const PREP = {
+  form: { key: "birmingham_general_financed", label: "General/Financed Residential Contract", board: "BIRMINGHAM_AAR" },
+  core: [
+    { key: "purchase_price", type: "number", value: "410000" },
+    { key: "closing_date", type: "date", value: null },
+  ],
+  board_fields: [
+    { key: "home_warranty", label: "HomeWarranty", type: "checkbox", value: null },
+  ],
+};
 
 const AGENT = { id: "u-agent", name: "Sarah Johnson", email: "sarah@example.com" };
 const BUYER = {
@@ -57,6 +90,9 @@ beforeEach(() => {
     status: "sent",
     document: { id: "doc-1" },
   });
+  getContractPrep.mockResolvedValue(PREP);
+  saveContractFacts.mockResolvedValue(undefined);
+  saveContractTerms.mockResolvedValue(undefined);
 });
 
 function renderModal(onSent = vi.fn()) {
@@ -86,7 +122,7 @@ describe("SendTemplateModal", () => {
     // Both roles matched: buyer participant + the agent, labeled for in-app signing.
     expect(screen.getByText("Mike Smith")).toBeInTheDocument();
     expect(screen.getByText("Sarah Johnson")).toBeInTheDocument();
-    expect(screen.getAllByText(/signs in-app/i)).toHaveLength(2);
+    expect(screen.getAllByText(/secure email link/i)).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: /^send$/i }));
     await waitFor(() =>
@@ -146,5 +182,54 @@ describe("SendTemplateModal", () => {
     expect(
       await screen.findByText(/no standard forms configured/i)
     ).toBeInTheDocument();
+  });
+
+  it("a form with a fieldMap inserts the Prepare step and saves facts + terms", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(
+      await screen.findByText("General/Financed Residential Contract")
+    );
+
+    // Prepare step renders the merged fields prefilled from the deal.
+    expect(await screen.findByText(/prepare contract/i)).toBeInTheDocument();
+    const price = screen.getByLabelText(/purchase price/i);
+    expect(price).toHaveValue(410000);
+
+    await user.clear(price);
+    await user.type(price, "425000");
+    await user.click(screen.getByLabelText(/HomeWarranty/i));
+    await user.click(screen.getByRole("button", { name: /save & continue/i }));
+
+    await waitFor(() =>
+      expect(saveContractFacts).toHaveBeenCalledWith(
+        "deal-1",
+        expect.objectContaining({ purchase_price: "425000" })
+      )
+    );
+    expect(saveContractTerms).toHaveBeenCalledWith(
+      "deal-1",
+      "birmingham_general_financed",
+      expect.objectContaining({ home_warranty: true })
+    );
+
+    // Then the signers step; Send fires the template send.
+    expect(await screen.findByText("Mike Smith")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() =>
+      expect(sendTemplateForSignature).toHaveBeenCalledWith(
+        "deal-1",
+        "birmingham_general_financed",
+        []
+      )
+    );
+  });
+
+  it("a form without a fieldMap skips straight to signers", async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(await screen.findByText("Buyer Agency Agreement"));
+    expect(screen.queryByText(/prepare contract/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Mike Smith")).toBeInTheDocument();
   });
 });

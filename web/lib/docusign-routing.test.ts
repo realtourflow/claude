@@ -35,7 +35,7 @@ const AGENT: DealPerson = {
 };
 
 describe("assignTemplateRoles (template path)", () => {
-  it("fills template roles from deal people with clientUserId set (embedded)", () => {
+  it("fills template roles from deal people, identity-linked but EMAIL-only (Stage 1)", () => {
     const roles = assignTemplateRoles({
       roleMapping: { buyer: "Buyer", agent: "Agent" },
       people: [BUYER, SELLER, AGENT],
@@ -46,10 +46,12 @@ describe("assignTemplateRoles (template path)", () => {
       roleName: "Buyer",
       name: "Mike Smith",
       email: "mike@example.com",
-      clientUserId: "u-buyer",
+      userId: "u-buyer", // identity link for recipient rows / Stage 2
     });
+    // Stage 1 ships email signing for ALL signers: no clientUserId on the wire.
+    expect(roles.every((r) => r.clientUserId === undefined)).toBe(true);
     const agentRole = roles.find((r) => r.roleName === "Agent");
-    expect(agentRole?.clientUserId).toBe("u-agent");
+    expect(agentRole?.userId).toBe("u-agent");
     // Routing order comes from the template — never set here.
     expect(roles.every((r) => r.routingOrder === undefined)).toBe(true);
   });
@@ -78,11 +80,12 @@ describe("assignTemplateRoles (template path)", () => {
     expect(roles[0]).toMatchObject({
       roleName: "Buyer",
       name: "Alex Garcia",
-      clientUserId: "u-buyer2",
+      userId: "u-buyer2",
     });
+    expect(roles[0].clientUserId).toBeUndefined();
   });
 
-  it("an override by email/name creates an outside signer with no clientUserId (hybrid)", () => {
+  it("an override by email/name creates an outside signer with no identity link", () => {
     const roles = assignTemplateRoles({
       roleMapping: { buyer: "Buyer", agent: "Agent" },
       people: [AGENT], // no buyer participant — the outside override fills it
@@ -97,6 +100,7 @@ describe("assignTemplateRoles (template path)", () => {
       name: "Out Sider",
     });
     expect(buyerRole?.clientUserId).toBeUndefined();
+    expect(buyerRole?.userId).toBeUndefined();
   });
 
   it("rejects an override whose user_id is not on the deal", () => {
@@ -111,7 +115,7 @@ describe("assignTemplateRoles (template path)", () => {
 });
 
 describe("deriveFallbackSigners (ad-hoc path)", () => {
-  it("orders signers buyer -> seller -> agent with clientUserId set", () => {
+  it("orders signers buyer -> seller -> agent, identity-linked but email-only", () => {
     const signers = deriveFallbackSigners(
       [AGENT, SELLER, BUYER],
       ["u-agent", "u-seller", "u-buyer"]
@@ -122,11 +126,13 @@ describe("deriveFallbackSigners (ad-hoc path)", () => {
       "sarah@example.com", // agent last
     ]);
     expect(signers.map((s) => s.routingOrder)).toEqual([1, 2, 3]);
-    expect(signers.map((s) => s.clientUserId)).toEqual([
+    expect(signers.map((s) => s.userId)).toEqual([
       "u-buyer",
       "u-seller",
       "u-agent",
     ]);
+    // Stage 1: every signer is an email recipient.
+    expect(signers.every((s) => s.clientUserId === undefined)).toBe(true);
   });
 
   it("only includes the selected people", () => {
