@@ -18,6 +18,9 @@ export type Document = {
   docusignSentAt?: string;
   // '' | 'baa' — marks special documents (the buyer agency agreement).
   purpose?: string;
+  // The VIEWER's own recipient status on this document's envelope (null when
+  // they are not a signer). Drives the portal "Sign this document" button.
+  myRecipientStatus?: string | null;
 };
 
 type ApiDocument = {
@@ -34,6 +37,7 @@ type ApiDocument = {
   docusign_status?: string;
   docusign_sent_at?: string;
   purpose?: string;
+  my_recipient_status?: string | null;
 };
 
 function apiDocToFrontend(d: ApiDocument): Document {
@@ -51,6 +55,7 @@ function apiDocToFrontend(d: ApiDocument): Document {
     docusignStatus: d.docusign_status ?? undefined,
     docusignSentAt: d.docusign_sent_at ?? undefined,
     purpose: d.purpose ?? undefined,
+    myRecipientStatus: d.my_recipient_status ?? null,
   };
 }
 

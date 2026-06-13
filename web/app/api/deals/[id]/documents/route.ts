@@ -20,6 +20,7 @@ type DocumentRow = {
   docusign_status: string | null;
   docusign_sent_at: Date | null;
   purpose: string;
+  my_recipient_status: string | null;
 };
 
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
@@ -34,9 +35,12 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       SELECT d.id, d.deal_id, d.uploaded_by, u.name AS uploader_name,
              d.name, d.s3_key, d.mime_type, d.file_size, d.created_at,
              d.docusign_envelope_id, d.docusign_status, d.docusign_sent_at,
-             d.purpose
+             d.purpose,
+             dr.status AS my_recipient_status
       FROM documents d
       JOIN users u ON u.id = d.uploaded_by
+      LEFT JOIN docusign_recipients dr
+        ON dr.document_id = d.id AND dr.user_id = ${userId}::uuid
       WHERE d.deal_id = ${dealId}::uuid
       ORDER BY d.created_at DESC
     `;

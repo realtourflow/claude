@@ -493,6 +493,58 @@ describe("envelope-level eventNotification (code-controlled webhook)", () => {
   });
 });
 
+describe("DefaultDocusignClient.createRecipientView (embedded signing)", () => {
+  it("POSTs the recipient-view request and returns the signing URL", async () => {
+    let viewUrl = "";
+    let viewBody: string | undefined;
+    const fakeFetch: FetchLike = async (url, init) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      viewUrl = url;
+      viewBody = init?.body as string;
+      return jsonResponse({ url: "https://demo.docusign.net/signing/xyz" }, 201);
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    const url = await client.createRecipientView("env-7", {
+      clientUserId: "user-uuid-1",
+      email: "mike@example.com",
+      userName: "Mike Smith",
+      returnUrl: "https://app.example.com/buyer/u1?signed_doc=d1",
+    });
+    expect(url).toBe("https://demo.docusign.net/signing/xyz");
+    expect(viewUrl).toBe(
+      "https://demo.docusign.net/restapi/v2.1/accounts/test-account-id/envelopes/env-7/views/recipient"
+    );
+    const sent = JSON.parse(viewBody as string);
+    expect(sent).toEqual({
+      authenticationMethod: "none",
+      clientUserId: "user-uuid-1",
+      email: "mike@example.com",
+      userName: "Mike Smith",
+      returnUrl: "https://app.example.com/buyer/u1?signed_doc=d1",
+    });
+  });
+
+  it("throws on a non-2xx response", async () => {
+    const fakeFetch: FetchLike = async (url) => {
+      if (url.endsWith("/oauth/token")) {
+        return jsonResponse({ access_token: "tok", expires_in: 3600 });
+      }
+      return new Response("Unknown envelope", { status: 400 });
+    };
+    const client = new DefaultDocusignClient(fakeFetch);
+    await expect(
+      client.createRecipientView("env-x", {
+        clientUserId: "u",
+        email: "a@b.com",
+        userName: "A",
+        returnUrl: "https://x",
+      })
+    ).rejects.toThrow(/400/);
+  });
+});
+
 describe("DefaultDocusignClient token caching", () => {
   it("caches the bearer token across calls", async () => {
     let tokenCalls = 0;

@@ -64,6 +64,10 @@ function makeFakeDocusign(): FakeDocusign {
     async listRecipients() {
       return [];
     },
+    async createRecipientView() {
+      return "https://demo.docusign.net/signing/fake";
+    },
+
 
   };
   return fake;

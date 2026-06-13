@@ -35,7 +35,7 @@ const AGENT: DealPerson = {
 };
 
 describe("assignTemplateRoles (template path)", () => {
-  it("fills template roles from deal people, identity-linked but EMAIL-only (Stage 1)", () => {
+  it("fills template roles from deal people with embedded clientUserId (Stage 2)", () => {
     const roles = assignTemplateRoles({
       roleMapping: { buyer: "Buyer", agent: "Agent" },
       people: [BUYER, SELLER, AGENT],
@@ -48,8 +48,8 @@ describe("assignTemplateRoles (template path)", () => {
       email: "mike@example.com",
       userId: "u-buyer", // identity link for recipient rows / Stage 2
     });
-    // Stage 1 ships email signing for ALL signers: no clientUserId on the wire.
-    expect(roles.every((r) => r.clientUserId === undefined)).toBe(true);
+    // Stage 2: portal users sign embedded — clientUserId rides the wire.
+    expect(roles.every((r) => r.clientUserId === r.userId)).toBe(true);
     const agentRole = roles.find((r) => r.roleName === "Agent");
     expect(agentRole?.userId).toBe("u-agent");
     // Routing order comes from the template — never set here.
@@ -82,7 +82,7 @@ describe("assignTemplateRoles (template path)", () => {
       name: "Alex Garcia",
       userId: "u-buyer2",
     });
-    expect(roles[0].clientUserId).toBeUndefined();
+    expect(roles[0].clientUserId).toBe("u-buyer2");
   });
 
   it("an override by email/name creates an outside signer with no identity link", () => {
@@ -115,7 +115,7 @@ describe("assignTemplateRoles (template path)", () => {
 });
 
 describe("deriveFallbackSigners (ad-hoc path)", () => {
-  it("orders signers buyer -> seller -> agent, identity-linked but email-only", () => {
+  it("orders signers buyer -> seller -> agent with embedded clientUserId", () => {
     const signers = deriveFallbackSigners(
       [AGENT, SELLER, BUYER],
       ["u-agent", "u-seller", "u-buyer"]
@@ -131,8 +131,8 @@ describe("deriveFallbackSigners (ad-hoc path)", () => {
       "u-seller",
       "u-agent",
     ]);
-    // Stage 1: every signer is an email recipient.
-    expect(signers.every((s) => s.clientUserId === undefined)).toBe(true);
+    // Stage 2: portal users sign embedded.
+    expect(signers.every((s) => s.clientUserId === s.userId)).toBe(true);
   });
 
   it("only includes the selected people", () => {
