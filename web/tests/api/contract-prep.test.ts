@@ -75,6 +75,10 @@ function makeFakeDocusign(): FakeDocusign {
     async listRecipients() {
       return [];
     },
+    async createRecipientView() {
+      return "https://demo.docusign.net/signing/fake";
+    },
+
 
   };
   return fake;
@@ -291,7 +295,7 @@ describe("market gating", () => {
 });
 
 describe("prefilled send (Stage 1)", () => {
-  it("sends the template with text + checkbox tabs from facts + terms; all signers email", async () => {
+  it("sends the template with text + checkbox tabs from facts + terms; portal signers embedded", async () => {
     const { deal } = await seedBhamDeal();
     const auth = await authHeader("auth0|agent", ["agent"]);
     await putFactsRoute(
@@ -337,8 +341,8 @@ describe("prefilled send (Stage 1)", () => {
     expect(buyerRole?.tabs?.checkboxTabs).toEqual([
       { tabLabel: "HomeWarranty", selected: "true" },
     ]);
-    // Stage 1: email recipients only.
-    expect(roles.every((r) => r.clientUserId === undefined)).toBe(true);
+    // Stage 2: portal signers are embedded.
+    expect(roles.every((r) => r.clientUserId !== undefined)).toBe(true);
   });
 
   it("the same deal facts fill two different forms' fieldMaps", async () => {

@@ -74,6 +74,19 @@ export type DocusignClient = {
   downloadCombinedDocument(envelopeId: string): Promise<Uint8Array>;
   // Authoritative per-recipient statuses straight from DocuSign (self-heal).
   listRecipients(envelopeId: string): Promise<EnvelopeRecipientStatus[]>;
+  // Embedded signing: mints a single-use (~5 min) signing URL for a recipient
+  // created with a clientUserId. The triple (clientUserId, email, userName)
+  // must EXACTLY match the envelope recipient — echo the send-time snapshot,
+  // never live profile values.
+  createRecipientView(
+    envelopeId: string,
+    opts: {
+      clientUserId: string;
+      email: string;
+      userName: string;
+      returnUrl: string;
+    }
+  ): Promise<string>;
 };
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -391,6 +404,44 @@ export class DefaultDocusignClient implements DocusignClient {
       status: s.status ?? "",
       recipientId: s.recipientId ?? "",
     }));
+  }
+
+  async createRecipientView(
+    envelopeId: string,
+    opts: {
+      clientUserId: string;
+      email: string;
+      userName: string;
+      returnUrl: string;
+    }
+  ): Promise<string> {
+    const token = await this.token();
+    const e = env();
+    const url = `${this.baseURL()}/restapi/v2.1/accounts/${e.DOCUSIGN_ACCOUNT_ID}/envelopes/${envelopeId}/views/recipient`;
+    const res = await this.fetchImpl(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        authenticationMethod: "none",
+        clientUserId: opts.clientUserId,
+        email: opts.email,
+        userName: opts.userName,
+        returnUrl: opts.returnUrl,
+      }),
+    });
+    if (!res.ok && res.status !== 201) {
+      throw new Error(
+        `docusign recipient view: status ${res.status}: ${await safeText(res)}`
+      );
+    }
+    const result = (await res.json()) as { url?: string };
+    if (!result.url) {
+      throw new Error("docusign recipient view: response missing url");
+    }
+    return result.url;
   }
 }
 

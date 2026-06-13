@@ -78,6 +78,10 @@ function makeFakeDocusign(): FakeDocusign {
     async listRecipients() {
       return [];
     },
+    async createRecipientView() {
+      return "https://demo.docusign.net/signing/fake";
+    },
+
 
   };
   return fake;
@@ -182,8 +186,8 @@ describe("POST /api/deals/[id]/docusign/send-template", () => {
     };
     expect(body.envelope_id).toBe("env-tpl-1");
 
-    // Envelope was template-based. STAGE 1: every signer is an EMAIL recipient
-    // (no clientUserId anywhere on the wire) while identity stays linked.
+    // Envelope was template-based. STAGE 2: portal signers carry clientUserId
+    // (embedded in-app signing); outside signers stay email recipients.
     expect(fakeDocusign.lastTemplateCreate?.templateId).toBe("tpl-baa-demo");
     const roles = fakeDocusign.lastTemplateCreate?.roles ?? [];
     expect(roles).toHaveLength(2);
@@ -193,7 +197,7 @@ describe("POST /api/deals/[id]/docusign/send-template", () => {
     expect(roles.find((r) => r.roleName === "Agent")).toMatchObject({
       email: "sarah@example.com",
     });
-    expect(roles.every((r) => r.clientUserId === undefined)).toBe(true);
+    expect(roles.every((r) => r.clientUserId !== undefined)).toBe(true);
 
     // Placeholder documents row: template label as name, no upload yet,
     // purpose from config, envelope stamped.
@@ -216,9 +220,9 @@ describe("POST /api/deals/[id]/docusign/send-template", () => {
     const buyerRow = recipients.find((r) => r.role === "Buyer");
     expect(buyerRow).toMatchObject({
       envelope_id: "env-tpl-1",
-      user_id: buyer.id, // identity link survives for Stage 2 / portal status
+      user_id: buyer.id,
       email: "mike@example.com",
-      client_user_id: null, // Stage 1: email recipient
+      client_user_id: buyer.id, // embedded portal signer
       status: "sent",
     });
   });
@@ -379,7 +383,7 @@ describe("fallback path enrichment (send-for-signature)", () => {
       seller.id,
       agent.id,
     ]);
-    expect(signers.every((s) => s.clientUserId === undefined)).toBe(true);
+    expect(signers.every((s) => s.clientUserId !== undefined)).toBe(true);
 
     const rows = await prisma.docusign_recipients.findMany({
       where: { document_id: doc.id },
