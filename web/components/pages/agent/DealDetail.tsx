@@ -14,7 +14,7 @@ import { useTaskStore } from "@/lib/store/taskStore";
 import { useNotificationStore } from "@/lib/store/notificationStore";
 import { Task } from "@/lib/data/mockTasks";
 import { useTasks, patchTaskStatus, postTask } from "@/hooks/useTasks";
-import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, sendDisclosurePacket, refreshDocuSignStatus, Document as ApiDocument } from "@/hooks/useDocuments";
+import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, refreshDocuSignStatus, setDisclosuresComplete, Document as ApiDocument } from "@/hooks/useDocuments";
 import SendTemplateModal from "./SendTemplateModal";
 import { useMessages, postMessage, MessageChannel } from "@/hooks/useMessages";
 import { useVendors } from "@/hooks/useVendors";
@@ -58,7 +58,6 @@ import {
   Download,
   Trash2,
   Check,
-  FileStack,
 } from 'lucide-react';
 import MetroMap from "@/components/MetroMap";
 import { MOCK_USERS } from "@/lib/data/mockUsers";
@@ -2911,184 +2910,6 @@ function SendForSignatureModal({
   );
 }
 
-// ── Send Disclosure Packet Modal (FF5 #23) ────────────────────────────────────
-// Agent picks which uploaded PDFs to merge + one recipient. The server merges
-// them into a single packet document and sends it through DocuSign — the
-// packet then shows up in the documents list with its signature status tag.
-function SendDisclosurePacketModal({
-  dealId,
-  docs,
-  onClose,
-  onSent,
-}: {
-  dealId: string;
-  docs: ApiDocument[];
-  onClose: () => void;
-  onSent: () => void;
-}) {
-  const { participants } = useParticipants(dealId);
-  const signable = participants.filter((p) => p.role === 'buyer' || p.role === 'seller');
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [recipientId, setRecipientId] = useState<string>('');
-  const [customEmail, setCustomEmail] = useState('');
-  const [customName, setCustomName] = useState('');
-  const [sending, setSending] = useState(false);
-  const [err, setErr] = useState('');
-
-  // Defaults to the first buyer/seller participant (or free entry when the
-  // deal has none) until the agent explicitly picks a recipient.
-  const effectiveRecipientId = recipientId || (signable[0]?.id ?? 'custom');
-
-  function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const recipient =
-    effectiveRecipientId === 'custom'
-      ? { email: customEmail.trim(), name: customName.trim() }
-      : (() => {
-          const p = signable.find((s) => s.id === effectiveRecipientId);
-          return p ? { email: p.email, name: p.name } : { email: '', name: '' };
-        })();
-
-  const canSend = selected.size > 0 && !!recipient.email && !!recipient.name;
-
-  async function handleSend() {
-    if (!canSend) {
-      setErr(selected.size === 0 ? 'Select at least one PDF.' : 'Enter the recipient name and email.');
-      return;
-    }
-    setSending(true);
-    setErr('');
-    try {
-      // Send in the order shown in the list (the documents card order).
-      const orderedIds = docs.filter((d) => selected.has(d.id)).map((d) => d.id);
-      await sendDisclosurePacket(dealId, orderedIds, recipient);
-      onSent();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Failed to send disclosure packet.');
-    }
-    setSending(false);
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <div className="flex items-center gap-2">
-            <FileStack size={16} className="text-brand-navy" />
-            <h2 className="font-bold text-brand-navy text-sm">Send Disclosure Packet</h2>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
-        </div>
-        <div className="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Documents to include</p>
-            {docs.length === 0 ? (
-              <p className="text-xs text-gray-400">No documents on this deal yet. Upload PDFs first.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {docs.map((d) => {
-                  const isPdf = d.mimeType === 'application/pdf';
-                  return (
-                    <label
-                      key={d.id}
-                      className={`flex items-center gap-3 rounded-xl border border-gray-100 px-3 py-2.5 transition-colors ${
-                        isPdf ? 'bg-white cursor-pointer hover:bg-gray-50' : 'bg-gray-50 opacity-60 cursor-not-allowed'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        disabled={!isPdf}
-                        checked={selected.has(d.id)}
-                        onChange={() => toggle(d.id)}
-                        className="h-4 w-4 rounded accent-brand-navy"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-brand-navy truncate">{d.name}</p>
-                        {!isPdf && <p className="text-[11px] text-gray-400">Only PDFs can go in a packet</p>}
-                      </div>
-                      <FileText size={13} className={isPdf ? 'text-red-400 flex-shrink-0' : 'text-gray-300 flex-shrink-0'} />
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Send to</p>
-            <div className="space-y-1.5">
-              {signable.map((p) => (
-                <label key={p.id} className="flex items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors">
-                  <input
-                    type="radio"
-                    name="packet-recipient"
-                    checked={effectiveRecipientId === p.id}
-                    onChange={() => setRecipientId(p.id)}
-                    className="h-4 w-4 accent-brand-navy"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-brand-navy truncate">{p.name}</p>
-                    <p className="text-xs text-gray-400 truncate">{p.email}</p>
-                  </div>
-                  <span className="text-[10px] font-bold uppercase text-gray-300">{p.role}</span>
-                </label>
-              ))}
-              <label className="flex items-center gap-3 rounded-xl border border-gray-100 bg-white px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors">
-                <input
-                  type="radio"
-                  name="packet-recipient"
-                  checked={effectiveRecipientId === 'custom'}
-                  onChange={() => setRecipientId('custom')}
-                  className="h-4 w-4 accent-brand-navy"
-                />
-                <p className="text-sm font-semibold text-brand-navy">Someone else</p>
-              </label>
-              {recipientId === 'custom' && (
-                <div className="space-y-1.5 pl-7">
-                  <input
-                    type="text"
-                    value={customName}
-                    onChange={(e) => setCustomName(e.target.value)}
-                    placeholder="Recipient name"
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-brand-navy outline-none focus:border-brand-navy/30"
-                  />
-                  <input
-                    type="email"
-                    value={customEmail}
-                    onChange={(e) => setCustomEmail(e.target.value)}
-                    placeholder="Recipient email"
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-brand-navy outline-none focus:border-brand-navy/30"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {err && <p className="text-xs text-red-500">{err}</p>}
-        </div>
-        <div className="border-t px-5 py-4 flex gap-3">
-          <button onClick={onClose} className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-semibold text-gray-500 hover:bg-gray-50">Cancel</button>
-          <button
-            onClick={handleSend}
-            disabled={sending || !canSend}
-            className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-sm font-bold text-white hover:bg-brand-navy/90 disabled:opacity-40"
-          >
-            <Send size={13} /> {sending ? 'Sending…' : 'Send packet'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function DocumentsTab({
   deal,
   docs,
@@ -3101,7 +2922,6 @@ function DocumentsTab({
   onRefresh: () => void;
 }) {
   const [showUpload, setShowUpload] = useState(false);
-  const [showPacket, setShowPacket] = useState(false);
   const [showSendForm, setShowSendForm] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -3109,6 +2929,22 @@ function DocumentsTab({
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   // Agent info previews the agent's own role row in the template modal.
   const activeUser = useAuthStore((s) => s.activeUser);
+  // Disclosures are tracked, never sent from RTF — the lender delivers them
+  // out-of-band (ARIVE will feed this in v2). Manual toggle for now.
+  const [disclosuresDone, setDisclosuresDone] = useState(deal.disclosuresComplete ?? false);
+  const [disclosuresSaving, setDisclosuresSaving] = useState(false);
+
+  async function toggleDisclosures(next: boolean) {
+    setDisclosuresSaving(true);
+    try {
+      await setDisclosuresComplete(deal.id ?? '', next);
+      setDisclosuresDone(next);
+    } catch {
+      // leave the previous state; user can retry
+    } finally {
+      setDisclosuresSaving(false);
+    }
+  }
 
   const stageReq = STAGE_GATE[deal.stage];
   const stageDocFound = stageReq ? docs.some((d) => d.name === stageReq.name) : false;
@@ -3268,12 +3104,17 @@ function DocumentsTab({
             >
               <Plus size={14} /> Upload Document
             </button>
-            <button
-              onClick={() => setShowPacket(true)}
-              className="flex items-center gap-1.5 text-sm font-medium text-brand-navy hover:text-brand-navy/70 transition-colors"
-            >
-              <FileStack size={14} /> Send disclosure packet
-            </button>
+            <label className="flex items-center gap-1.5 cursor-pointer text-sm text-gray-500">
+              <input
+                type="checkbox"
+                checked={disclosuresDone}
+                disabled={disclosuresSaving}
+                onChange={(e) => toggleDisclosures(e.target.checked)}
+                className="h-3.5 w-3.5 rounded accent-brand-navy"
+              />
+              Disclosures complete
+              <span className="text-[10px] text-gray-300">(lender sends these)</span>
+            </label>
           </div>
           <button
             onClick={onRefresh}
@@ -3299,15 +3140,6 @@ function DocumentsTab({
           dealId={deal.id ?? ''}
           onClose={() => setSigningDoc(null)}
           onSent={() => { setSigningDoc(null); onRefresh(); }}
-        />
-      )}
-
-      {showPacket && (
-        <SendDisclosurePacketModal
-          dealId={deal.id ?? ''}
-          docs={docs}
-          onClose={() => setShowPacket(false)}
-          onSent={() => { setShowPacket(false); onRefresh(); }}
         />
       )}
 

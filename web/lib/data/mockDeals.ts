@@ -132,6 +132,7 @@ export type Deal = {
   /** Deal flags — populated from real API */
   preApproved?: boolean;
   baaSigned?: boolean;
+  disclosuresComplete?: boolean;
 };
 
 export const MOCK_DEALS: Deal[] = [

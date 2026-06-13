@@ -65,6 +65,7 @@ export type DealRow = {
   smooth_exit: unknown;
   pre_approved: boolean;
   baa_signed: boolean;
+  disclosures_complete: boolean;
   commission_pct: string | null;
   created_at: Date;
   updated_at: Date;
@@ -97,7 +98,7 @@ export async function listDealsForUser(
            deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
            deals.fee_status, deals.fee_amount_cents, deals.fee_paid_at,
            deals.fast_pass, deals.smooth_exit,
-           deals.pre_approved, deals.baa_signed, deals.commission_pct::text AS commission_pct,
+           deals.pre_approved, deals.baa_signed, deals.disclosures_complete, deals.commission_pct::text AS commission_pct,
            deals.created_at, deals.updated_at,
            u.name AS agent_name, u.email AS agent_email, u.phone AS agent_phone,
            (SELECT COUNT(*) FROM tasks t
@@ -125,7 +126,7 @@ export async function getDealForAgent(
            title, address, price::text AS price, arive_linked,
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,
-           fast_pass, smooth_exit, pre_approved, baa_signed,
+           fast_pass, smooth_exit, pre_approved, baa_signed, disclosures_complete,
            commission_pct::text AS commission_pct,
            created_at, updated_at
     FROM deals
