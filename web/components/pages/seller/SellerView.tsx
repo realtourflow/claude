@@ -8,6 +8,7 @@ import { Task } from "@/lib/data/mockTasks";
 import ClientNotifications from "@/components/ClientNotifications";
 import { useDealStageStore } from "@/lib/store/dealStageStore";
 import { useMyDeals } from "@/hooks/useMyDeals";
+import PortalDealDocuments from "@/components/portal/PortalDealDocuments";
 import { useTasks } from "@/hooks/useTasks";
 import { useTaskCompletion } from "@/hooks/useTaskCompletion";
 import { useMessages, postMessage } from "@/hooks/useMessages";
@@ -185,38 +186,6 @@ function MessagesTab({ dealId }: { dealId: string }) {
 }
 
 // ─── Shared: Documents tab ────────────────────────────────────────────────────
-
-const SELLER_DOCS = [
-  { id: 'd1', name: 'Listing Agreement',    status: 'signed',             date: '2026-02-01' },
-  { id: 'd2', name: 'Seller Disclosures',   status: 'pending_signature',  date: '2026-02-10' },
-  { id: 'd3', name: 'Purchase Agreement',   status: 'signed',             date: '2026-02-14' },
-  { id: 'd4', name: 'Repair Addendum',      status: 'pending_review',     date: '2026-02-15' },
-];
-const DOC_STATUS: Record<string, { label: string; style: string }> = {
-  signed:            { label: 'Signed',        style: 'bg-green-100 text-green-700' },
-  pending_review:    { label: 'Review needed', style: 'bg-amber-100 text-amber-700' },
-  pending_signature: { label: 'Sign now',      style: 'bg-red-100 text-red-700' },
-};
-
-function DocumentsTab() {
-  return (
-    <div className="space-y-2">
-      {SELLER_DOCS.map((doc) => {
-        const s = DOC_STATUS[doc.status];
-        return (
-          <div key={doc.id} className="flex items-center gap-3 rounded-xl bg-white border border-gray-100 px-4 py-3">
-            <FileText size={16} className="flex-shrink-0 text-gray-300" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-brand-navy truncate">{doc.name}</p>
-              <p className="text-[11px] text-gray-400">{doc.date}</p>
-            </div>
-            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${s.style}`}>{s.label}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // ─── Shared: Agent card ───────────────────────────────────────────────────────
 
@@ -1370,7 +1339,7 @@ export default function SellerView() {
             </div>
           )}
           {activeTab === 'messages' && <MessagesTab dealId={deal.id} />}
-          {activeTab === 'documents' && <DocumentsTab />}
+          {activeTab === 'documents' && <PortalDealDocuments dealId={deal.id} />}
         </>
       )}
 

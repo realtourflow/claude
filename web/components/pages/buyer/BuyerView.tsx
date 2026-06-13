@@ -22,8 +22,8 @@ import MetroMap from "@/components/MetroMap";
 import VendorDirectory from "@/components/VendorDirectory";
 import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
 import { useMLSListings, MLSListing } from "@/hooks/useMLS";
-import { useAgentDocTemplatesForDeal, DOC_TYPE_LABELS } from "@/hooks/useAgentDocs";
-import { useDocuments, getDownloadUrl as getDealDocDownloadUrl, requestUploadUrl, confirmUpload } from "@/hooks/useDocuments";
+import PortalDealDocuments from "@/components/portal/PortalDealDocuments";
+import { useDocuments, getSigningUrl, requestUploadUrl, confirmUpload } from "@/hooks/useDocuments";
 import ClientNotifications from "@/components/ClientNotifications";
 import { FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/data/mockFastPass";
 
@@ -324,93 +324,6 @@ function MessagesTab({ dealId }: { dealId: string }) {
           <Send size={15} />
         </button>
       </div>
-    </div>
-  );
-}
-
-// ─── Shared: Documents tab ────────────────────────────────────────────────────
-
-function DocumentsTab({ dealId }: { dealId: string }) {
-  const { templates, loading: tLoading, getDownloadUrl: getTemplateUrl } = useAgentDocTemplatesForDeal(dealId);
-  const { docs, loading: dLoading } = useDocuments(dealId);
-  const [downloading, setDownloading] = useState<string | null>(null);
-
-  async function handleDownload(id: string, isTemplate: boolean) {
-    setDownloading(id);
-    try {
-      const url = isTemplate ? await getTemplateUrl(id) : await getDealDocDownloadUrl(id);
-      window.open(url, '_blank');
-    } catch {
-      // ignore
-    } finally {
-      setDownloading(null);
-    }
-  }
-
-  if (tLoading || dLoading) {
-    return <div className="py-6 text-center text-sm text-gray-400">Loading documents…</div>;
-  }
-
-  if (templates.length === 0 && docs.length === 0) {
-    return (
-      <div className="rounded-xl bg-white px-4 py-8 text-center text-sm text-gray-400">
-        No documents yet — your agent will share forms here.
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {templates.length > 0 && (
-        <section>
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">Agent Forms</p>
-          <div className="space-y-2">
-            {templates.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 rounded-xl bg-white border border-gray-100 px-4 py-3">
-                <FileText size={16} className="flex-shrink-0 text-gray-300" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-brand-navy truncate">{t.name}</p>
-                  <p className="text-[11px] text-gray-400">{DOC_TYPE_LABELS[t.docType] ?? t.docType}</p>
-                </div>
-                <button
-                  onClick={() => handleDownload(t.id, true)}
-                  disabled={downloading === t.id}
-                  className="flex items-center gap-1 rounded-lg bg-brand-navy/5 px-2.5 py-1 text-xs font-semibold text-brand-navy hover:bg-brand-navy/10 disabled:opacity-50 transition-colors"
-                >
-                  {downloading === t.id ? <Loader2 size={11} className="animate-spin" /> : <ExternalLink size={11} />}
-                  Open
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-      {docs.length > 0 && (
-        <section>
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">Deal Documents</p>
-          <div className="space-y-2">
-            {docs.map((d) => (
-              <div key={d.id} className="flex items-center gap-3 rounded-xl bg-white border border-gray-100 px-4 py-3">
-                <FileText size={16} className="flex-shrink-0 text-gray-300" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-brand-navy truncate">{d.name}</p>
-                  <p className="text-[11px] text-gray-400">
-                    {new Date(d.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleDownload(d.id, false)}
-                  disabled={downloading === d.id}
-                  className="flex items-center gap-1 rounded-lg bg-brand-navy/5 px-2.5 py-1 text-xs font-semibold text-brand-navy hover:bg-brand-navy/10 disabled:opacity-50 transition-colors"
-                >
-                  {downloading === d.id ? <Loader2 size={11} className="animate-spin" /> : <ExternalLink size={11} />}
-                  Open
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   );
 }
@@ -932,11 +845,26 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
   // email link; deals.baa_signed flips when the envelope completes). The
   // portal just reflects where it stands.
   const { docs: dealDocs } = useDocuments(deal.id);
-  const baaPending = dealDocs.some(
+  const baaDoc = dealDocs.find(
     (d) =>
       d.purpose === 'baa' &&
       !['completed', 'voided', 'declined'].includes(d.docusignStatus ?? ''),
   );
+  const baaPending = !!baaDoc;
+  // Stage 2: portal buyers sign embedded — straight into DocuSign from here.
+  const baaSignable = !!baaDoc?.myRecipientStatus &&
+    ['sent', 'delivered'].includes(baaDoc.myRecipientStatus);
+  const [baaSigning, setBaaSigning] = useState(false);
+  async function handleSignBaa() {
+    if (!baaDoc) return;
+    setBaaSigning(true);
+    try {
+      const url = await getSigningUrl(deal.id, baaDoc.id);
+      window.location.assign(url);
+    } catch {
+      setBaaSigning(false);
+    }
+  }
 
   async function handleOfferInterest(propertyId: string, _address: string) {
     await setOfferRequested(propertyId, true).catch(() => {});
@@ -1038,7 +966,21 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
             </div>
           </div>
 
-          {!baaSigned && baaPending && (
+          {!baaSigned && baaPending && baaSignable && (
+            <button
+              onClick={handleSignBaa}
+              disabled={baaSigning}
+              className="flex w-full items-center justify-between rounded-xl border border-amber-300 bg-white px-4 py-3 text-left hover:bg-amber-50 transition-colors disabled:opacity-50"
+            >
+              <div>
+                <p className="text-sm font-bold text-brand-navy">Sign your buyer agency agreement</p>
+                <p className="text-xs text-gray-400 mt-0.5">Takes about a minute — you&apos;ll sign right here, no email needed.</p>
+              </div>
+              <ChevronRight size={16} className="text-brand-navy flex-shrink-0" />
+            </button>
+          )}
+
+          {!baaSigned && baaPending && !baaSignable && (
             <div className="flex w-full items-start gap-3 rounded-xl border border-amber-300 bg-white px-4 py-3">
               <div>
                 <p className="text-sm font-bold text-brand-navy">Buyer agency agreement sent — check your email</p>
@@ -1879,7 +1821,7 @@ export default function BuyerView() {
             </div>
           )}
           {activeTab === 'messages' && <MessagesTab dealId={deal.id} />}
-          {activeTab === 'documents' && <DocumentsTab dealId={deal.id} />}
+          {activeTab === 'documents' && <PortalDealDocuments dealId={deal.id} />}
         </>
       )}
 

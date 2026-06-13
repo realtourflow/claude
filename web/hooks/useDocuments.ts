@@ -226,6 +226,19 @@ export async function setDisclosuresComplete(
   return api.patch(`/deals/${dealId}/disclosures`, { complete });
 }
 
+// Embedded signing: mints a single-use (~5 min) recipient-view URL for the
+// CALLER's slot on the document's envelope. Generated on click, never stored.
+export async function getSigningUrl(
+  dealId: string,
+  documentId: string,
+): Promise<string> {
+  const res = await api.post<{ url: string }>(
+    `/deals/${dealId}/documents/${documentId}/docusign/signing-url`,
+    {},
+  );
+  return res.url;
+}
+
 export async function refreshDocuSignStatus(
   dealId: string,
   documentId: string,
