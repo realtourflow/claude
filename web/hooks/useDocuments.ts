@@ -212,18 +212,13 @@ export async function sendTemplateForSignature(
   });
 }
 
-// Merges the selected PDFs into one packet document and sends it for
-// signature to a single recipient. Returns the new packet document row.
-export async function sendDisclosurePacket(
+// Disclosures are tracked, not sent: the lender delivers them out-of-band and
+// RTF records completion (manual now; ARIVE feeds it in v2).
+export async function setDisclosuresComplete(
   dealId: string,
-  documentIds: string[],
-  signer: { email: string; name: string },
-): Promise<Document> {
-  const d = await api.post<ApiDocument>(`/deals/${dealId}/disclosure-packet`, {
-    document_ids: documentIds,
-    signer,
-  });
-  return apiDocToFrontend(d);
+  complete: boolean,
+): Promise<{ disclosures_complete: boolean }> {
+  return api.patch(`/deals/${dealId}/disclosures`, { complete });
 }
 
 export async function refreshDocuSignStatus(
