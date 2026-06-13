@@ -9,7 +9,7 @@ import {
 } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { createHmac } from "node:crypto";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import type { StreamingBlobPayloadOutputTypes } from "@smithy/types";
 import { POST as sendForSignatureRoute } from "@/app/api/deals/[id]/documents/[documentId]/send-for-signature/route";
 import { POST as refreshRoute } from "@/app/api/deals/[id]/documents/[documentId]/docusign/refresh/route";
@@ -58,6 +58,13 @@ function makeFakeDocusign(): FakeDocusign {
     async getEnvelopeStatus() {
       return fake.statusValue;
     },
+    async downloadCombinedDocument() {
+      return new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF
+    },
+    async listRecipients() {
+      return [];
+    },
+
   };
   return fake;
 }
@@ -407,6 +414,106 @@ describe("POST /api/deals/[id]/documents/[documentId]/docusign/refresh", () => {
     expect(res.status).toBe(403);
   });
 
+  it("self-heals on refresh: syncs recipients and archives a completed envelope", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const doc = await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "Buyer Agency Agreement",
+        s3_key: "",
+        purpose: "baa",
+        docusign_envelope_id: "env-heal",
+        docusign_status: "sent",
+      },
+    });
+    await prisma.docusign_recipients.create({
+      data: {
+        document_id: doc.id,
+        envelope_id: "env-heal",
+        user_id: agent.id,
+        email: "sarah@example.com",
+        name: "Sarah Johnson",
+        role: "Agent",
+        recipient_id: "1",
+        routing_order: 1,
+        status: "sent",
+      },
+    });
+    fakeDocusign.statusValue = "completed";
+    fakeDocusign.listRecipients = async () => [
+      { email: "SARAH@example.com", name: "Sarah Johnson", status: "completed", recipientId: "z1" },
+    ];
+
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/documents/${doc.id}/docusign/refresh`,
+      {
+        method: "POST",
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }
+    );
+    const res = await refreshRoute(req, ctx(deal.id, doc.id));
+    expect(res.status).toBe(200);
+
+    // Recipients synced (case-insensitive email match), PDF archived, BAA flipped.
+    const recip = await prisma.docusign_recipients.findFirst({
+      where: { document_id: doc.id },
+    });
+    expect(recip?.status).toBe("completed");
+    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(1);
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row?.docusign_signed_s3_key).toBeTruthy();
+    const dealRow = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(dealRow?.baa_signed).toBe(true);
+  });
+
+  it("refresh on a still-pending envelope syncs recipients without archiving", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const doc = await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "x.pdf",
+        s3_key: "k",
+        docusign_envelope_id: "env-pending",
+        docusign_status: "sent",
+      },
+    });
+    await prisma.docusign_recipients.create({
+      data: {
+        document_id: doc.id,
+        envelope_id: "env-pending",
+        email: "mike@example.com",
+        name: "Mike",
+        role: "Buyer",
+        recipient_id: "1",
+        routing_order: 1,
+        status: "sent",
+      },
+    });
+    fakeDocusign.statusValue = "delivered";
+    fakeDocusign.listRecipients = async () => [
+      { email: "mike@example.com", name: "Mike", status: "delivered", recipientId: "z2" },
+    ];
+
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/documents/${doc.id}/docusign/refresh`,
+      {
+        method: "POST",
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }
+    );
+    const res = await refreshRoute(req, ctx(deal.id, doc.id));
+    expect(res.status).toBe(200);
+    const recip = await prisma.docusign_recipients.findFirst({
+      where: { document_id: doc.id },
+    });
+    expect(recip?.status).toBe("delivered");
+    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
+  });
+
   it("404 when the document has no envelope", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const deal = await createDeal({ agent_id: agent.id });
@@ -502,6 +609,142 @@ describe("POST /api/docusign/webhook", () => {
     expect(res.status).toBe(200);
     const row = await prisma.documents.findUnique({ where: { id: doc.id } });
     expect(row?.docusign_status).toBe("sent"); // unchanged — no status to apply
+  });
+});
+
+describe("POST /api/docusign/webhook (status automation + archival)", () => {
+  async function seedEnvelope(opts: { purpose?: string } = {}) {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|b",
+      email: "mike@example.com",
+      name: "Mike Smith",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    const doc = await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "Buyer Agency Agreement",
+        s3_key: "",
+        purpose: opts.purpose ?? "",
+        docusign_envelope_id: "env-auto",
+        docusign_status: "sent",
+      },
+    });
+    await prisma.docusign_recipients.createMany({
+      data: [
+        {
+          document_id: doc.id,
+          envelope_id: "env-auto",
+          user_id: buyer.id,
+          email: "mike@example.com",
+          name: "Mike Smith",
+          role: "Buyer",
+          recipient_id: "1",
+          routing_order: 1,
+          status: "sent",
+        },
+        {
+          document_id: doc.id,
+          envelope_id: "env-auto",
+          user_id: agent.id,
+          email: "sarah@example.com",
+          name: "Sarah Johnson",
+          role: "Agent",
+          recipient_id: "2",
+          routing_order: 2,
+          status: "sent",
+        },
+      ],
+    });
+    return { agent, buyer, deal, doc };
+  }
+
+  function webhookReq(payload: unknown) {
+    return new Request("http://localhost/api/docusign/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  it("a recipient event updates the matching recipient row by email (case-insensitive)", async () => {
+    const { doc } = await seedEnvelope();
+    const res = await webhookRoute(
+      webhookReq({
+        event: "recipient-completed",
+        data: {
+          envelopeId: "env-auto",
+          envelopeSummary: {
+            status: "sent",
+            recipients: {
+              signers: [
+                { email: "MIKE@Example.com", status: "completed", recipientId: "x9" },
+                { email: "sarah@example.com", status: "delivered", recipientId: "x10" },
+              ],
+            },
+          },
+        },
+      })
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.docusign_recipients.findMany({
+      where: { document_id: doc.id },
+      orderBy: { routing_order: "asc" },
+    });
+    expect(rows[0].status).toBe("completed");
+    expect(rows[0].signed_at).not.toBeNull();
+    expect(rows[1].status).toBe("delivered");
+    expect(rows[1].signed_at).toBeNull();
+  });
+
+  it("envelope-completed archives the combined PDF to S3 and links it", async () => {
+    const { doc } = await seedEnvelope();
+    const res = await webhookRoute(
+      webhookReq({
+        event: "envelope-completed",
+        data: {
+          envelopeId: "env-auto",
+          envelopeSummary: { status: "completed" },
+        },
+      })
+    );
+    expect(res.status).toBe(200);
+
+    const puts = s3Mock.commandCalls(PutObjectCommand);
+    expect(puts).toHaveLength(1);
+    expect(puts[0].args[0].input.ContentType).toBe("application/pdf");
+
+    const row = await prisma.documents.findUnique({ where: { id: doc.id } });
+    expect(row?.docusign_status).toBe("completed");
+    expect(row?.docusign_signed_s3_key).toBeTruthy();
+    expect(row?.docusign_completed_at).not.toBeNull();
+  });
+
+  it("a duplicate completed delivery is idempotent (no second upload)", async () => {
+    await seedEnvelope();
+    const payload = {
+      event: "envelope-completed",
+      data: { envelopeId: "env-auto", envelopeSummary: { status: "completed" } },
+    };
+    await webhookRoute(webhookReq(payload));
+    await webhookRoute(webhookReq(payload));
+    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(1);
+  });
+
+  it("completing a purpose='baa' document flips deals.baa_signed", async () => {
+    const { deal } = await seedEnvelope({ purpose: "baa" });
+    await webhookRoute(
+      webhookReq({
+        event: "envelope-completed",
+        data: { envelopeId: "env-auto", envelopeSummary: { status: "completed" } },
+      })
+    );
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.baa_signed).toBe(true);
   });
 });
 

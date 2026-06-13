@@ -54,6 +54,11 @@ const shape = z.object({
   // parsed lazily so a malformed value breaks template routes with a clear
   // error instead of every env() call app-wide.
   DOCUSIGN_TEMPLATES: z.string().default("{}"),
+  // Public webhook URL DocuSign POSTs envelope/recipient events to (e.g.
+  // https://app.realtourflow.com/api/docusign/webhook). When set, every
+  // envelope is created with a code-controlled eventNotification — survives
+  // Go-Live with no admin-UI Connect setup. Empty = no eventNotification.
+  DOCUSIGN_WEBHOOK_URL: z.string().default(""),
 
   ARIVE_API_URL: z.string().default(""),
   ARIVE_API_KEY: z.string().default(""),

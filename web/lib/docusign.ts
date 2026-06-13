@@ -51,6 +51,13 @@ export type TemplateRole = {
   tabs?: TemplateRoleTabs;
 };
 
+export type EnvelopeRecipientStatus = {
+  email: string;
+  name: string;
+  status: string;
+  recipientId: string;
+};
+
 export type DocusignClient = {
   enabled(): boolean;
   createEnvelope(
@@ -63,6 +70,10 @@ export type DocusignClient = {
     roles: TemplateRole[]
   ): Promise<string>;
   getEnvelopeStatus(envelopeId: string): Promise<string>;
+  // The combined (all documents + signatures) PDF of a completed envelope.
+  downloadCombinedDocument(envelopeId: string): Promise<Uint8Array>;
+  // Authoritative per-recipient statuses straight from DocuSign (self-heal).
+  listRecipients(envelopeId: string): Promise<EnvelopeRecipientStatus[]>;
 };
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -199,6 +210,7 @@ export class DefaultDocusignClient implements DocusignClient {
     const ext = dot >= 0 ? docName.slice(dot + 1).toLowerCase() : "pdf";
 
     const envelope = {
+      ...this.eventNotification(),
       emailSubject: "Please sign: " + docName,
       documents: [
         {
@@ -245,6 +257,33 @@ export class DefaultDocusignClient implements DocusignClient {
     return this.postEnvelope(token, envelope);
   }
 
+  // Code-controlled webhook subscription, attached per envelope so it works
+  // identically on demo and prod (Go-Live needs no admin-UI Connect setup).
+  // requireAcknowledgment makes DocuSign retry non-2xx deliveries.
+  private eventNotification(): object | undefined {
+    const url = env().DOCUSIGN_WEBHOOK_URL;
+    if (!url) return undefined;
+    return {
+      eventNotification: {
+        url,
+        requireAcknowledgment: "true",
+        deliveryMode: "SIM",
+        events: [
+          "envelope-completed",
+          "envelope-declined",
+          "envelope-voided",
+          "recipient-completed",
+          "recipient-delivered",
+        ],
+        eventData: {
+          version: "restv2.1",
+          format: "json",
+          includeData: ["recipients"],
+        },
+      },
+    };
+  }
+
   // Template-based send: field placement/tabs are tagged once on the DocuSign
   // template, so the payload carries only the template id + role assignments.
   async createTemplateEnvelope(
@@ -253,6 +292,7 @@ export class DefaultDocusignClient implements DocusignClient {
   ): Promise<string> {
     const token = await this.token();
     const envelope = {
+      ...this.eventNotification(),
       templateId,
       templateRoles: roles.map((r) => ({
         roleName: r.roleName,
@@ -311,6 +351,46 @@ export class DefaultDocusignClient implements DocusignClient {
     }
     const result = (await res.json()) as { status?: string };
     return result.status ?? "";
+  }
+
+  async downloadCombinedDocument(envelopeId: string): Promise<Uint8Array> {
+    const token = await this.token();
+    const e = env();
+    const url = `${this.baseURL()}/restapi/v2.1/accounts/${e.DOCUSIGN_ACCOUNT_ID}/envelopes/${envelopeId}/documents/combined`;
+    const res = await this.fetchImpl(url, {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new Error(
+        `docusign download combined: status ${res.status}: ${await safeText(res)}`
+      );
+    }
+    return new Uint8Array(await res.arrayBuffer());
+  }
+
+  async listRecipients(envelopeId: string): Promise<EnvelopeRecipientStatus[]> {
+    const token = await this.token();
+    const e = env();
+    const url = `${this.baseURL()}/restapi/v2.1/accounts/${e.DOCUSIGN_ACCOUNT_ID}/envelopes/${envelopeId}/recipients`;
+    const res = await this.fetchImpl(url, {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new Error(
+        `docusign list recipients: status ${res.status}: ${await safeText(res)}`
+      );
+    }
+    const result = (await res.json()) as {
+      signers?: { email?: string; name?: string; status?: string; recipientId?: string }[];
+    };
+    return (result.signers ?? []).map((s) => ({
+      email: s.email ?? "",
+      name: s.name ?? "",
+      status: s.status ?? "",
+      recipientId: s.recipientId ?? "",
+    }));
   }
 }
 

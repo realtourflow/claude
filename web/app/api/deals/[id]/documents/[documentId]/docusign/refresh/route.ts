@@ -3,6 +3,10 @@ import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasDealAccess } from "@/lib/deals";
 import { getDocusignClient } from "@/lib/docusign";
+import {
+  handleEnvelopeCompleted,
+  syncRecipientStatuses,
+} from "@/lib/docusign-archive";
 
 type Ctx = { params: Promise<{ id: string; documentId: string }> };
 
@@ -43,6 +47,18 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       where: { id: documentId },
       data: { docusign_status: status },
     });
+
+    // Self-heal: sync authoritative per-recipient statuses, and archive the
+    // signed PDF (+ BAA flip) when completed — covers any missed webhook.
+    try {
+      const recipients = await docusign.listRecipients(doc.docusign_envelope_id);
+      await syncRecipientStatuses(doc.docusign_envelope_id, recipients);
+    } catch (err) {
+      console.error("recipient sync failed during refresh", err);
+    }
+    if (status === "completed") {
+      await handleEnvelopeCompleted(doc.docusign_envelope_id);
+    }
 
     return json({ status });
   })) as Response;
