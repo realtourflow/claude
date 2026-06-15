@@ -39,12 +39,16 @@ const fieldMapEntrySchema = z.object({
 const entrySchema = z.object({
   templateId: z.string().min(1),
   label: z.string().min(1),
-  roleMapping: z.record(z.string(), z.string().min(1)),
+  roleMapping: z.record(z.string(), z.string().min(1)).default({}),
   // Allowlist: '' (plain document) or 'baa' (buyer agency agreement).
   purpose: z.enum(["", "baa"]).default(""),
   // Board/association that owns the form (e.g. BIRMINGHAM_AAR). Empty =
   // universal — visible to every market (the BAA).
   board: z.string().default(""),
+  // Recipient derivation mode (see lib/contract-forms ContractForm.routing).
+  routing: z.enum(["by-role", "consumers"]).default("by-role"),
+  // Ordered template role names for "consumers" mode; [0] required.
+  consumerRoles: z.array(z.string()).default([]),
   // factOrTermKey -> tab mapping driving contract prefill.
   fieldMap: z.record(z.string(), fieldMapEntrySchema).default({}),
 });
@@ -110,6 +114,8 @@ function allForms(): Record<string, TemplateConfig> {
       roleMapping: form.roleMapping,
       purpose: form.purpose as TemplateConfig["purpose"],
       board: form.board,
+      routing: form.routing ?? "by-role",
+      consumerRoles: form.consumerRoles ?? [],
       fieldMap: form.fieldMap,
     };
   }

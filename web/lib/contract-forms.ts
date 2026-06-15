@@ -25,12 +25,22 @@ export type ContractForm = {
   label: string;
   // "" = universal (every market). Otherwise a market code (lib/markets).
   board: string;
-  // Source taxonomy metadata (e.g. "D"); informational, not logic.
-  category: string;
+  // Source taxonomy metadata; informational, not logic.
+  keyType: string; // e.g. "BOARD" | "UNIFORM"
+  category: string; // e.g. "D" | "E"
   // "" | "baa" — "baa" makes envelope completion flip deals.baa_signed.
   purpose: string;
-  // deal participant role -> template role name.
+  // Recipient derivation:
+  //  - "by-role" (default): roleMapping maps each deal participant role to one
+  //    template role (e.g. buyer→Buyer, agent→Agent).
+  //  - "consumers": the deal's client-side participants (buyers on a buy deal,
+  //    sellers on a sell deal) fill consumerRoles in order — Consumer1 required,
+  //    the rest optional; no agent signer. Used by statewide UNIFORM notices.
+  routing?: "by-role" | "consumers";
+  // deal participant role -> template role name (by-role mode).
   roleMapping: Record<string, string>;
+  // Ordered template role names for "consumers" mode; [0] is required.
+  consumerRoles?: string[];
   fieldMap: Record<string, FieldMapEntry>;
 };
 
@@ -40,6 +50,7 @@ export const CONTRACT_FORMS: ContractForm[] = [
     label: "Buyer Agency Agreement",
     // Used on ALL Alabama deals regardless of area — universal, not Baldwin-only.
     board: "",
+    keyType: "BOARD",
     category: "D",
     purpose: "baa",
     roleMapping: { buyer: "Buyer", agent: "Agent" },
@@ -65,6 +76,27 @@ export const CONTRACT_FORMS: ContractForm[] = [
       baa_comp_flat: { label: "baa_comp_flat", type: "text", role: "Agent" },
       baa_comp_other: { label: "baa_comp_other", type: "text", role: "Agent" },
       baa_tail_days: { label: "baa_tail_days", type: "text", role: "Agent" },
+    },
+  },
+  {
+    key: "al_wire_fraud_notice",
+    label: "Wire Fraud Prevention Notice",
+    // Alabama REALTORS statewide uniform notice — every market, both sides.
+    board: "",
+    keyType: "UNIFORM",
+    category: "E",
+    purpose: "",
+    // The signers are the deal's consumers (buyers on a buy deal, sellers on a
+    // sell deal); no agent signs. One shared template for both sides.
+    routing: "consumers",
+    roleMapping: {},
+    consumerRoles: ["Consumer1", "Consumer2"], // Consumer2 optional
+    // All auto-sourced from the deal — no agent-entered terms. consumer_name /
+    // consumer_name_2 are the 1st / 2nd consumer; brokerage_name is the agent's.
+    fieldMap: {
+      consumer_name: { label: "consumer_name", type: "text", role: "Consumer1" },
+      consumer_name_2: { label: "consumer_name_2", type: "text", role: "Consumer2" },
+      brokerage_name: { label: "brokerage_name", type: "text", role: "Consumer1" },
     },
   },
 ];

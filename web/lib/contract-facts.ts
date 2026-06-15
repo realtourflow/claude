@@ -19,6 +19,10 @@ export const AUTO_VALUE_KEYS = [
   "buyer_name",
   "agent_name",
   "brokerage_name",
+  // The deal's client signers (buyer or seller side), 1st and 2nd — used by
+  // statewide consumer notices (e.g. the wire-fraud notice).
+  "consumer_name",
+  "consumer_name_2",
 ] as const;
 const AUTO_KEY_SET = new Set<string>(AUTO_VALUE_KEYS);
 
@@ -174,7 +178,7 @@ export async function getMergedContractValues(
   dealId: string,
   formKey: string
 ): Promise<Record<string, unknown>> {
-  const [facts, deal, termsRow, buyers] = await Promise.all([
+  const [facts, deal, termsRow, clients] = await Promise.all([
     prisma.deal_contract_facts.findUnique({ where: { deal_id: dealId } }),
     prisma.deals.findUnique({
       where: { id: dealId },
@@ -185,9 +189,8 @@ export async function getMergedContractValues(
       select: { terms: true },
     }),
     prisma.deal_participants.findMany({
-      where: { deal_id: dealId, role: "buyer" },
-      select: { users: { select: { name: true } } },
-      orderBy: { user_id: "asc" },
+      where: { deal_id: dealId, role: { in: ["buyer", "seller"] } },
+      select: { role: true, user_id: true, users: { select: { name: true } } },
     }),
   ]);
 
@@ -195,10 +198,24 @@ export async function getMergedContractValues(
 
   // Auto-sourced party/agent identity (see AUTO_VALUE_KEYS). Only set when
   // present so a missing value leaves the template tab blank for the signer.
-  const buyerNames = buyers
-    .map((b) => b.users?.name?.trim())
+  // Sort by user_id to match assignConsumerRoles' Consumer1/Consumer2 order
+  // exactly, so consumer_name prefill lands on the right signer.
+  const orderedClients = clients
+    .slice()
+    .sort((a, b) => a.user_id.localeCompare(b.user_id));
+  const clientNames = orderedClients
+    .map((c) => c.users?.name?.trim())
     .filter((n): n is string => !!n);
+  const buyerNames = orderedClients
+    .filter((c) => c.role === "buyer")
+    .map((c) => c.users?.name?.trim())
+    .filter((n): n is string => !!n);
+
   if (buyerNames.length > 0) values.buyer_name = buyerNames.join(" & ");
+  // consumer_name / consumer_name_2 = 1st / 2nd client signer (buyer or seller
+  // side), in the same userId order assignConsumerRoles uses.
+  if (clientNames[0]) values.consumer_name = clientNames[0];
+  if (clientNames[1]) values.consumer_name_2 = clientNames[1];
   if (deal?.users?.name) values.agent_name = deal.users.name;
   if (deal?.users?.brokerage) values.brokerage_name = deal.users.brokerage;
   if (facts) {
