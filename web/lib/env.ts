@@ -47,13 +47,18 @@ const shape = z.object({
   // (HMAC-SHA256 over the raw body) and rejects anything else with 401. Empty =
   // signature verification disabled (legacy/demo — the handler trusts the POST).
   DOCUSIGN_CONNECT_HMAC_KEY: z.string().default(""),
-  // JSON map of formKey → {templateId, label, roleMapping, purpose?} for
-  // template-based sending (lib/docusign-templates.ts). Template IDs differ
-  // between the demo and production DocuSign accounts, so they live in env —
-  // Go-Live is an ID swap, never a code change. Kept as a raw string here and
-  // parsed lazily so a malformed value breaks template routes with a clear
-  // error instead of every env() call app-wide.
+  // JSON map of formKey → {templateId, label, roleMapping, purpose?} for ad-hoc
+  // / override forms defined entirely in env (lib/docusign-templates.ts). The
+  // committed registry (lib/contract-forms.ts) is the primary source now; this
+  // still works and wins on key conflict. Parsed lazily so a malformed value
+  // breaks template routes with a clear error instead of every env() call.
   DOCUSIGN_TEMPLATES: z.string().default("{}"),
+  // JSON map of committed-form key → DocuSign templateId, e.g.
+  // {"buyer_agency_agreement":"<demo-or-prod-template-guid>"}. The committed
+  // registry holds each form's structure; only its template id is env-specific,
+  // so Go-Live is swapping these ids. A committed form with no id here is not
+  // live (hidden from the picker, unsendable).
+  DOCUSIGN_TEMPLATE_IDS: z.string().default("{}"),
   // Public webhook URL DocuSign POSTs envelope/recipient events to (e.g.
   // https://app.realtourflow.com/api/docusign/webhook). When set, every
   // envelope is created with a code-controlled eventNotification — survives
