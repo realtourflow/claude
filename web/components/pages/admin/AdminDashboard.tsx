@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { FAST_PASS_UPSELLS } from "@/lib/data/mockFastPass";
 import { NEXT_STEP_LABELS, SMOOTH_EXIT_UPSELLS, nextStepQualifiesForBridge } from "@/lib/data/mockSmoothExit";
+import { marketLabel } from "@/lib/markets";
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -1293,8 +1294,15 @@ function UserManagement() {
             {style.label}
           </span>
         </td>
-        <td className="px-5 py-3 text-center">
-          <span className="text-xs text-gray-400">—</span>
+        <td className="px-5 py-3">
+          {user.role === 'agent' ? (
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-brand-navy">{marketLabel(user.market ?? '')}</div>
+              <div className="text-[11px] text-gray-400 truncate">{user.brokerage || 'No brokerage'}</div>
+            </div>
+          ) : (
+            <span className="text-xs text-gray-300">—</span>
+          )}
         </td>
         <td className="px-5 py-3">
           {isDeactivated ? (
@@ -1375,7 +1383,7 @@ function UserManagement() {
                     <th className="px-5 py-3">User</th>
                     <th className="px-5 py-3">Email</th>
                     <th className="px-5 py-3">Role</th>
-                    <th className="px-5 py-3 text-center">Deals</th>
+                    <th className="px-5 py-3">Market / Brokerage</th>
                     <th className="px-5 py-3">Status</th>
                     <th className="px-5 py-3 text-right">Actions</th>
                   </tr>

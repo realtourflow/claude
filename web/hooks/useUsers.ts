@@ -9,6 +9,8 @@ export type AppUser = {
   name: string;
   role: string;
   phone?: string | null;
+  market?: string;
+  brokerage?: string;
   createdAt: string;
   deactivatedAt?: string | null;
 };
@@ -19,6 +21,8 @@ type ApiUser = {
   name: string;
   role: string;
   phone?: string | null;
+  market?: string;
+  brokerage?: string;
   created_at: string;
   deactivated_at?: string | null;
 };
@@ -30,6 +34,8 @@ function fromApi(u: ApiUser): AppUser {
     name: u.name,
     role: u.role,
     phone: u.phone,
+    market: u.market ?? "",
+    brokerage: u.brokerage ?? "",
     createdAt: u.created_at,
     deactivatedAt: u.deactivated_at,
   };
