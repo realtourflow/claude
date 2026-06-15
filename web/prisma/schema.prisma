@@ -403,6 +403,7 @@ model users {
   mls_secret                                    String?
   onboarding_complete                           Boolean               @default(false)
   market                                        String                @default("")
+  brokerage                                     String                @default("")
   agent_doc_templates                           agent_doc_templates[]
   agent_invites_agent_invites_claimed_byTousers agent_invites[]       @relation("agent_invites_claimed_byTousers")
   agent_invites_agent_invites_invited_byTousers agent_invites[]       @relation("agent_invites_invited_byTousers")
