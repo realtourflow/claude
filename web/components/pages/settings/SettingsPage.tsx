@@ -21,6 +21,7 @@ import { useMLSConnection } from "@/hooks/useMLS";
 import { uploadAgentPhoto } from "@/hooks/useAgentPhoto";
 import { useIntegrations } from "@/hooks/useIntegrations";
 import { settingsTabFromSearch } from "@/lib/settings-nav";
+import { MARKETS } from "@/lib/markets";
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
@@ -443,6 +444,8 @@ function ProfileSection() {
     phone: '',
     title: '',
     licenseNumber: '',
+    market: '',
+    brokerage: '',
     bio: '',
   });
   const [photoUrl, setPhotoUrl] = useState<string>('');
@@ -464,6 +467,8 @@ function ProfileSection() {
       phone: (settings.phone as string) ?? '',
       title: (settings.title as string) ?? '',
       licenseNumber: (settings.licenseNumber as string) ?? '',
+      market: (settings.market as string) ?? '',
+      brokerage: (settings.brokerage as string) ?? '',
       bio: (settings.bio as string) ?? '',
     }));
     setPhotoUrl((settings.photoUrl as string) ?? '');
@@ -473,12 +478,17 @@ function ProfileSection() {
     setSaving(true);
     try {
       await Promise.all([
-        saveProfile(form.name, form.phone),
+        saveProfile(form.name, form.phone, {
+          market: form.market,
+          brokerage: form.brokerage,
+        }),
         saveSettings({
           name: form.name,
           phone: form.phone,
           title: form.title,
           licenseNumber: form.licenseNumber,
+          market: form.market,
+          brokerage: form.brokerage,
           bio: form.bio,
         }),
       ]);
@@ -573,6 +583,7 @@ function ProfileSection() {
           { label: 'Phone', key: 'phone', placeholder: '(205) 555-0100' },
           { label: 'Title', key: 'title', placeholder: 'e.g. Realtor, Senior Agent' },
           { label: 'License #', key: 'licenseNumber', placeholder: 'e.g. AL-012345' },
+          { label: 'Brokerage', key: 'brokerage', placeholder: 'e.g. RE/MAX, Keller Williams' },
         ].map(({ label, key, placeholder }) => (
           <div key={key} className="flex items-center gap-4 px-5 py-3.5">
             <label className="w-28 flex-shrink-0 text-xs font-semibold text-gray-400 uppercase tracking-wide">
@@ -586,6 +597,23 @@ function ProfileSection() {
             />
           </div>
         ))}
+
+        {/* Market — drives which board contract forms this agent can send */}
+        <div className="flex items-center gap-4 px-5 py-3.5">
+          <label className="w-28 flex-shrink-0 text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Market
+          </label>
+          <select
+            value={form.market}
+            onChange={(e) => setForm((f) => ({ ...f, market: e.target.value }))}
+            className="flex-1 rounded-lg border border-transparent bg-gray-50 px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-navy/20 focus:bg-white focus:ring-2 focus:ring-brand-navy/10 transition-all"
+          >
+            <option value="">Select your market…</option>
+            {MARKETS.map((m) => (
+              <option key={m.code} value={m.code}>{m.label}</option>
+            ))}
+          </select>
+        </div>
 
         {/* Bio */}
         <div className="px-5 py-3.5">

@@ -38,9 +38,13 @@ export function useSettings() {
     }
   }
 
-  async function saveProfile(name: string, phone: string) {
+  async function saveProfile(
+    name: string,
+    phone: string,
+    extra?: { market?: string; brokerage?: string },
+  ) {
     try {
-      await api.patch('/me/profile', { name, phone });
+      await api.patch('/me/profile', { name, phone, ...(extra ?? {}) });
     } catch {
       throw new Error('Failed to save profile');
     }
