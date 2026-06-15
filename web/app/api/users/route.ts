@@ -12,6 +12,10 @@ export async function GET(req: Request): Promise<Response> {
           name: true,
           role: true,
           phone: true,
+          // Surfaced so admin (Paul) can see each agent's board (drives forms)
+          // and brokerage (to wire brokerage-specific DocuSign forms).
+          market: true,
+          brokerage: true,
           created_at: true,
           deactivated_at: true,
         },

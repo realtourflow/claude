@@ -15,6 +15,7 @@ import { api } from "@/lib/api-client";
 import { useAuthStore } from "@/lib/store/authStore";
 import { uploadAgentPhoto } from "@/hooks/useAgentPhoto";
 import { useAgentDocs } from "@/hooks/useAgentDocs";
+import { MARKETS } from "@/lib/markets";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ type AgentSetupData = {
   licenseNumber: string;
   photoUrl: string;
   bio: string;
+  market: string;
   brokerage: string;
   brokerageAddress: string;
   tcName: string;
@@ -64,7 +66,7 @@ const DEFAULT_SELLER_MSG =
 
 const EMPTY: AgentSetupData = {
   name: '', title: '', phone: '', licenseNumber: '', photoUrl: '', bio: '',
-  brokerage: '', brokerageAddress: '', tcName: '', tcEmail: '', tcPhone: '', tcLinkedUserId: '',
+  market: '', brokerage: '', brokerageAddress: '', tcName: '', tcEmail: '', tcPhone: '', tcLinkedUserId: '',
   buyerMessage: DEFAULT_BUYER_MSG, sellerMessage: DEFAULT_SELLER_MSG,
   lenderChoice: '', otherLenderName: '',
   notifDealStage: true, notifClientMsg: true, notifOverdue: true,
@@ -85,7 +87,7 @@ const STEP_LABELS: Record<number, string> = {
   3:  'Step 3 of 13 · Your Profile',
   4:  'Step 4 of 13 · Your Profile',
   5:  'Step 5 of 13 · Your Profile',
-  6:  'Step 6 of 13 · Brokerage',
+  6:  'Step 6 of 13 · Market & Brokerage',
   7:  'Step 7 of 13 · Your Team',
   8:  'Step 8 of 13 · Client Experience',
   9:  'Step 9 of 13 · Preferences',
@@ -432,80 +434,112 @@ function BioScreen({
   );
 }
 
-// ─── Screen 6: Brokerage ─────────────────────────────────────────────────────
+// ─── Screen 6: Market & Brokerage ────────────────────────────────────────────
 
-function BrokerageScreen({
-  onSelect,
+function MarketBrokerageScreen({
+  market,
+  onChangeMarket,
+  onContinue,
 }: {
-  onSelect: (name: string, address: string) => void;
+  market: string;
+  onChangeMarket: (code: string) => void;
+  onContinue: (brokerage: string, address: string) => void;
 }) {
   const [otherSelected, setOtherSelected] = useState(false);
+  const [brokerage, setBrokerage] = useState('');
   const [customName, setCustomName] = useState('');
   const [customAddress, setCustomAddress] = useState('');
 
   const namedOptions = BROKERAGE_OPTIONS.filter((b) => b !== 'Other');
+  const effectiveBrokerage = otherSelected ? customName.trim() : brokerage;
+  const canContinue = !!market && !!effectiveBrokerage;
+
+  function pickNamed(b: string) {
+    setBrokerage(b);
+    setOtherSelected(false);
+  }
 
   return (
     <div className="flex flex-col items-center">
-      <Question text="What brokerage are you with?" />
-      <div className="w-full max-w-xs space-y-2.5">
-        {/* Named brokerages — auto-advance */}
-        {namedOptions.map((b) => (
-          <OptionBtn
-            key={b}
-            label={b}
-            selected={false}
-            onClick={() => onSelect(b, '')}
-          />
-        ))}
-
-        {/* Other — expands inline form */}
-        <button
-          onClick={() => setOtherSelected(true)}
-          className={[
-            'w-full rounded-xl py-4 text-center text-base font-bold transition-all active:scale-[0.98]',
-            otherSelected
-              ? 'bg-brand-navy text-white'
-              : 'bg-gray-100 text-brand-navy hover:bg-gray-200',
-          ].join(' ')}
-        >
-          Other
-        </button>
-
-        {/* Inline expansion for Other */}
-        {otherSelected && (
-          <div className="rounded-xl border border-brand-navy/20 bg-brand-navy/5 px-4 py-4 space-y-3">
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
-                Brokerage name <span className="text-red-400">*</span>
-              </label>
-              <input
-                autoFocus
-                type="text"
-                value={customName}
-                onChange={(e) => setCustomName(e.target.value)}
-                placeholder="e.g. River City Realty"
-                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+      <Question text="Your market & brokerage" note="Your market sets which contract forms you'll use." />
+      <div className="w-full max-w-xs space-y-5">
+        {/* Market — required, single choice. Drives form visibility. */}
+        <div>
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Market <span className="text-red-400">*</span>
+          </label>
+          <div className="space-y-2.5">
+            {MARKETS.map((m) => (
+              <OptionBtn
+                key={m.code}
+                label={m.label}
+                selected={market === m.code}
+                onClick={() => onChangeMarket(m.code)}
               />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
-                Office address <span className="font-normal normal-case text-gray-300">(optional)</span>
-              </label>
-              <input
-                type="text"
-                value={customAddress}
-                onChange={(e) => setCustomAddress(e.target.value)}
-                placeholder="e.g. 100 Riverchase Pkwy, Hoover, AL 35244"
-                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
-              />
-            </div>
-            <ContinueBtn
-              onClick={() => onSelect(customName.trim(), customAddress.trim())}
-              disabled={!customName.trim()}
-            />
+            ))}
           </div>
-        )}
+        </div>
+
+        {/* Brokerage — required (informational; Paul wires brokerage forms). */}
+        <div>
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Brokerage <span className="text-red-400">*</span>
+          </label>
+          <div className="space-y-2.5">
+            {namedOptions.map((b) => (
+              <OptionBtn
+                key={b}
+                label={b}
+                selected={!otherSelected && brokerage === b}
+                onClick={() => pickNamed(b)}
+              />
+            ))}
+            <button
+              onClick={() => { setOtherSelected(true); setBrokerage(''); }}
+              className={[
+                'w-full rounded-xl py-4 text-center text-base font-bold transition-all active:scale-[0.98]',
+                otherSelected ? 'bg-brand-navy text-white' : 'bg-gray-100 text-brand-navy hover:bg-gray-200',
+              ].join(' ')}
+            >
+              Other
+            </button>
+
+            {otherSelected && (
+              <div className="rounded-xl border border-brand-navy/20 bg-brand-navy/5 px-4 py-4 space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    Brokerage name <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    placeholder="e.g. River City Realty"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    Office address <span className="font-normal normal-case text-gray-300">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={customAddress}
+                    onChange={(e) => setCustomAddress(e.target.value)}
+                    placeholder="e.g. 100 Riverchase Pkwy, Hoover, AL 35244"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <ContinueBtn
+          onClick={() => onContinue(effectiveBrokerage, otherSelected ? customAddress.trim() : '')}
+          disabled={!canContinue}
+        />
       </div>
     </div>
   );
@@ -1072,9 +1106,14 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
   const isSolo = !data.tcName;
 
   useEffect(() => {
+    // Persist the queryable profile columns: name/phone plus market (drives
+    // which board forms the agent sees) and brokerage (informational — Paul
+    // wires brokerage-specific forms from it).
     const profileUpdate: Record<string, string> = {};
     if (data.name) profileUpdate.name = data.name;
     if (data.phone) profileUpdate.phone = data.phone;
+    if (data.market) profileUpdate.market = data.market;
+    if (data.brokerage) profileUpdate.brokerage = data.brokerage;
     api.patch('/me/profile', Object.keys(profileUpdate).length > 0 ? profileUpdate : {})
       .then(() => markOnboardingComplete())
       .catch(() => markOnboardingComplete());
@@ -1085,6 +1124,7 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
       title: data.title,
       phone: data.phone,
       licenseNumber: data.licenseNumber,
+      market: data.market,
       brokerage: data.brokerage,
       brokerageAddress: data.brokerageAddress,
       bio: data.bio,
@@ -1126,6 +1166,7 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
 
   const summary = [
     { label: 'Profile',    value: data.title ? `${data.title}${data.brokerage ? ` · ${data.brokerage}` : ''}` : 'Complete', ok: true },
+    { label: 'Market',     value: MARKETS.find((m) => m.code === data.market)?.label ?? 'Not set', ok: !!data.market },
     { label: 'TC',         value: isSolo ? 'Solo mode — TC tasks built into your view' : data.tcName, ok: true },
     { label: 'Lender',     value: data.lenderChoice === 'mountain' ? 'Mountain Mortgage (ARIVE integrated)' : data.lenderChoice === 'other' ? 'Other lender — milestones managed manually' : 'Will configure in Settings', ok: !!data.lenderChoice },
     { label: 'Messages',   value: 'Buyer & seller templates saved', ok: true },
@@ -1254,7 +1295,11 @@ export default function AgentOnboarding() {
       );
 
       case 6: return (
-        <BrokerageScreen onSelect={(name, address) => { set('brokerage', name); set('brokerageAddress', address); advance(); }} />
+        <MarketBrokerageScreen
+          market={data.market}
+          onChangeMarket={(code) => set('market', code)}
+          onContinue={(name, address) => { set('brokerage', name); set('brokerageAddress', address); advance(); }}
+        />
       );
 
       case 7: return (

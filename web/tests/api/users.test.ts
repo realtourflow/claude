@@ -251,3 +251,25 @@ describe("PATCH /api/users/[id]/deactivate", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("GET /api/users — market + brokerage (admin)", () => {
+  it("returns market and brokerage so admin can wire board/brokerage forms", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    void admin;
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|ag" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { market: "BALDWIN_GULF_COAST", brokerage: "RE/MAX" },
+    });
+    const res = await listRoute(
+      makeRequest("http://localhost/api/users", {
+        auth: await authHeader("auth0|admin", ["admin"]),
+      })
+    );
+    expect(res.status).toBe(200);
+    const rows = (await res.json()) as { id: string; market: string; brokerage: string }[];
+    const row = rows.find((r) => r.id === agent.id);
+    expect(row?.market).toBe("BALDWIN_GULF_COAST");
+    expect(row?.brokerage).toBe("RE/MAX");
+  });
+});
