@@ -1,27 +1,25 @@
 /**
- * Environment-aware DocuSign template configuration.
+ * DocuSign template configuration — resolves a form key to its template id,
+ * label, role mapping, and fieldMap.
  *
- * Agents send standard forms (BAA, listing agreement, disclosures…) as DocuSign
- * TEMPLATES: fields are tagged once on the template in the DocuSign account, so
- * placement is always correct — no coordinate tabs at send time. Template IDs
- * differ between the demo and production accounts, so the mapping lives in the
- * DOCUSIGN_TEMPLATES env var (JSON) and Go-Live is an ID swap, not a code change.
+ * Two sources, merged:
+ *   1. The committed registry (lib/contract-forms.ts) — each form's structure
+ *      lives in code; its template id comes from the DOCUSIGN_TEMPLATE_IDS env
+ *      map (demo vs prod differ). A committed form with no id set is not live.
+ *   2. DOCUSIGN_TEMPLATES env — full ad-hoc / override entries; wins on key
+ *      conflict.
  *
- * Shape:
- *   { "<formKey>": { "templateId": "...", "label": "Buyer Agency Agreement",
- *                    "roleMapping": { "buyer": "Buyer", "agent": "Agent" },
- *                    "purpose": "baa" } }
+ * Fields are tagged once on the DocuSign template, so placement is always
+ * correct — no coordinate tabs at send time. Go-Live = swapping template ids in
+ * env, not a code change.
  *
- * roleMapping maps deal participant roles (buyer/seller/agent) to the template's
- * role names. purpose ('' | 'baa') marks special documents — the BAA form sets
- * it so envelope completion can flip deals.baa_signed in a later phase.
- *
- * Parsing is lazy and validated here (not in env.ts's zod schema) so a malformed
- * value fails template routes with a clear TemplateConfigError instead of
- * breaking every env() consumer app-wide.
+ * Env parsing is lazy and validated here (not in env.ts's zod schema) so a
+ * malformed value fails template routes with a clear TemplateConfigError
+ * instead of breaking every env() consumer app-wide.
  */
 import { z } from "zod";
 import { env } from "./env";
+import { CONTRACT_FORMS } from "./contract-forms";
 
 export class TemplateConfigError extends Error {}
 
@@ -77,12 +75,63 @@ function parseConfig(): Record<string, TemplateConfig> {
   return result.data;
 }
 
+// Template ids for committed forms: { formKey: templateId }.
+function parseTemplateIds(): Record<string, string> {
+  const raw = env().DOCUSIGN_TEMPLATE_IDS;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new TemplateConfigError(
+      "DOCUSIGN_TEMPLATE_IDS is not valid JSON — fix the env var value"
+    );
+  }
+  const result = z.record(z.string(), z.string()).safeParse(parsed);
+  if (!result.success) {
+    throw new TemplateConfigError(
+      "DOCUSIGN_TEMPLATE_IDS must be a JSON object of formKey → templateId"
+    );
+  }
+  return result.data;
+}
+
+// All resolvable forms keyed by form key: committed forms whose template id is
+// set in env, overlaid by full DOCUSIGN_TEMPLATES env entries (env wins).
+// Committed forms with no template id are omitted — not live yet.
+function allForms(): Record<string, TemplateConfig> {
+  const ids = parseTemplateIds();
+  const out: Record<string, TemplateConfig> = {};
+  for (const form of CONTRACT_FORMS) {
+    const templateId = ids[form.key];
+    if (!templateId) continue; // not live until its id is configured
+    out[form.key] = {
+      templateId,
+      label: form.label,
+      roleMapping: form.roleMapping,
+      purpose: form.purpose as TemplateConfig["purpose"],
+      board: form.board,
+      fieldMap: form.fieldMap,
+    };
+  }
+  // Env entries override / extend the committed registry.
+  return { ...out, ...parseConfig() };
+}
+
 export function getTemplateConfig(formKey: string): TemplateConfig {
-  const config = parseConfig();
-  const entry = config[formKey];
+  // A committed form whose id isn't set yet → a clear "not live" error rather
+  // than "unknown form".
+  const committedNoId =
+    CONTRACT_FORMS.some((f) => f.key === formKey) && !parseTemplateIds()[formKey];
+
+  const entry = allForms()[formKey];
   if (!entry) {
+    if (committedNoId) {
+      throw new TemplateConfigError(
+        `form "${formKey}" has no template id yet — set it in DOCUSIGN_TEMPLATE_IDS to go live`
+      );
+    }
     throw new UnknownFormError(
-      `no DocuSign template configured for form "${formKey}" — add it to DOCUSIGN_TEMPLATES`
+      `no DocuSign template configured for form "${formKey}"`
     );
   }
   return entry;
@@ -99,7 +148,7 @@ export type TemplateListing = {
 };
 
 export function listTemplates(): TemplateListing[] {
-  const config = parseConfig();
+  const config = allForms();
   return Object.entries(config).map(([key, entry]) => ({
     key,
     label: entry.label,

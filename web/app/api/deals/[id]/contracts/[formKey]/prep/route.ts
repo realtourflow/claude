@@ -7,10 +7,13 @@ import {
   UnknownFormError,
 } from "@/lib/docusign-templates";
 import {
+  AUTO_VALUE_KEYS,
   FACT_FIELDS,
   getMergedContractValues,
   type FactKey,
 } from "@/lib/contract-facts";
+
+const AUTO_KEYS = new Set<string>(AUTO_VALUE_KEYS);
 
 type Ctx = { params: Promise<{ id: string; formKey: string }> };
 
@@ -64,7 +67,9 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     }));
 
     const board_fields = Object.entries(template.fieldMap)
-      .filter(([key]) => !(key in FACT_FIELDS))
+      // Exclude core facts (shown in `core`) and auto-sourced party/agent
+      // fields (filled automatically, not agent-editable).
+      .filter(([key]) => !(key in FACT_FIELDS) && !AUTO_KEYS.has(key))
       .map(([key, entry]) => ({
         key,
         label: entry.label,
