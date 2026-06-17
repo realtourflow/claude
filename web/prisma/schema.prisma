@@ -416,6 +416,7 @@ model users {
   deals                                            deals[]
   documents                                        documents[]
   docusign_recipients                              docusign_recipients[]
+  known_forms                                      known_forms[]
   messages                                         messages[]
   notifications                                    notifications[]
   oauth_tokens                                     oauth_tokens[]
@@ -518,41 +519,69 @@ model uploaded_form_fields {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model uploaded_forms {
-  id                                      String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_id                                String                 @db.Uuid
-  label                                   String
-  side                                    String                 @default("both")
-  status                                  String                 @default("pending_review")
-  source_s3_key                           String
-  source_file_name                        String
-  mime_type                               String                 @default("application/pdf")
-  file_size                               BigInt                 @default(0)
-  file_sha256                             String                 @default("")
-  attested_by                             String                 @db.Uuid
-  attested_at                             DateTime               @default(now()) @db.Timestamptz(6)
-  attestation_statement                   String                 @default("")
-  docusign_template_id                    String?
-  role_mapping                            Json                   @default("{}")
-  routing                                 String                 @default("by-role")
-  consumer_roles                          Json                   @default("[]")
-  field_map                               Json                   @default("{}")
-  purpose                                 String                 @default("")
-  promoted                                Boolean                @default(false)
-  reviewed_by                             String?                @db.Uuid
-  reviewed_at                             DateTime?              @db.Timestamptz(6)
-  review_notes                            String?
-  created_at                              DateTime               @default(now()) @db.Timestamptz(6)
-  updated_at                              DateTime               @default(now()) @db.Timestamptz(6)
-  board                                   String                 @default("")
-  uploaded_form_fields                    uploaded_form_fields[]
-  users_uploaded_forms_agent_idTousers    users                  @relation("uploaded_forms_agent_idTousers", fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users_uploaded_forms_attested_byTousers users                  @relation("uploaded_forms_attested_byTousers", fields: [attested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  users_uploaded_forms_reviewed_byTousers users?                 @relation("uploaded_forms_reviewed_byTousers", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                                                                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id                                                              String                 @db.Uuid
+  label                                                                 String
+  side                                                                  String                 @default("both")
+  status                                                                String                 @default("pending_review")
+  source_s3_key                                                         String
+  source_file_name                                                      String
+  mime_type                                                             String                 @default("application/pdf")
+  file_size                                                             BigInt                 @default(0)
+  file_sha256                                                           String                 @default("")
+  attested_by                                                           String                 @db.Uuid
+  attested_at                                                           DateTime               @default(now()) @db.Timestamptz(6)
+  attestation_statement                                                 String                 @default("")
+  docusign_template_id                                                  String?
+  role_mapping                                                          Json                   @default("{}")
+  routing                                                               String                 @default("by-role")
+  consumer_roles                                                        Json                   @default("[]")
+  field_map                                                             Json                   @default("{}")
+  purpose                                                               String                 @default("")
+  promoted                                                              Boolean                @default(false)
+  reviewed_by                                                           String?                @db.Uuid
+  reviewed_at                                                           DateTime?              @db.Timestamptz(6)
+  review_notes                                                          String?
+  created_at                                                            DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                                                            DateTime               @default(now()) @db.Timestamptz(6)
+  board                                                                 String                 @default("")
+  structure_sha256                                                      String                 @default("")
+  recognized_from_known_form_id                                         String?                @db.Uuid
+  known_forms_known_forms_source_form_idTouploaded_forms                known_forms[]          @relation("known_forms_source_form_idTouploaded_forms")
+  uploaded_form_fields                                                  uploaded_form_fields[]
+  users_uploaded_forms_agent_idTousers                                  users                  @relation("uploaded_forms_agent_idTousers", fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_uploaded_forms_attested_byTousers                               users                  @relation("uploaded_forms_attested_byTousers", fields: [attested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  known_forms_uploaded_forms_recognized_from_known_form_idToknown_forms known_forms?           @relation("uploaded_forms_recognized_from_known_form_idToknown_forms", fields: [recognized_from_known_form_id], references: [id], onUpdate: NoAction)
+  users_uploaded_forms_reviewed_byTousers                               users?                 @relation("uploaded_forms_reviewed_byTousers", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([agent_id], map: "idx_uploaded_forms_agent_id")
   @@index([status], map: "idx_uploaded_forms_status")
   @@index([status, promoted, agent_id], map: "idx_uploaded_forms_visibility")
   @@index([board], map: "idx_uploaded_forms_board")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model known_forms {
+  id                                                                       String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  label                                                                    String
+  side                                                                     String           @default("both")
+  board                                                                    String           @default("")
+  purpose                                                                  String           @default("")
+  fingerprint                                                              String
+  field_count                                                              Int              @default(0)
+  page_count                                                               Int              @default(0)
+  fields                                                                   Json             @default("[]")
+  role_mapping                                                             Json             @default("{}")
+  active                                                                   Boolean          @default(true)
+  source_form_id                                                           String?          @db.Uuid
+  created_by                                                               String?          @db.Uuid
+  created_at                                                               DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at                                                               DateTime         @default(now()) @db.Timestamptz(6)
+  users                                                                    users?           @relation(fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  uploaded_forms_known_forms_source_form_idTouploaded_forms                uploaded_forms?  @relation("known_forms_source_form_idTouploaded_forms", fields: [source_form_id], references: [id], onUpdate: NoAction)
+  uploaded_forms_uploaded_forms_recognized_from_known_form_idToknown_forms uploaded_forms[] @relation("uploaded_forms_recognized_from_known_form_idToknown_forms")
+
+  @@unique([fingerprint, board], map: "idx_known_forms_fingerprint_board")
 }
 
 enum checklist_assignee {

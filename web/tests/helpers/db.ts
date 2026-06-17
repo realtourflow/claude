@@ -21,6 +21,7 @@ const USER_DATA_TABLES = [
   "tracked_properties",
   "agent_doc_templates",
   "uploaded_form_fields",
+  "known_forms",
   "uploaded_forms",
   "tasks",
   "deals",

@@ -3,6 +3,12 @@ import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { getObjectBytes, deleteObject } from "@/lib/s3";
 import { extractAcroFields } from "@/lib/form-ai/extract";
+import { PDFDocument } from "pdf-lib";
+import {
+  matchKnownForm,
+  copyKnownFields,
+  type KnownFormRow,
+} from "@/lib/known-forms";
 import {
   FORM_SIDES,
   type FormSide,
@@ -122,26 +128,49 @@ export async function POST(req: Request): Promise<Response> {
       }
 
       const statement = await getAttestationStatement();
-      // Capture the form's market identity now (defaults to the agent's market).
-      // Unused until promote-to-all, but recorded from day one to avoid a backfill.
       const agentUser = await prisma.users.findUnique({
         where: { id: userId },
         select: { market: true },
       });
+      const agentMarket = agentUser?.market ?? "";
+
+      // Recognition (Layer 1): match the form's AcroForm structure against the
+      // known-forms catalog. A hit pre-fills the verified mapping and skips the
+      // AI mapper; generic / ambiguous / errored cases fall through to the AI
+      // pipeline. Never auto-approves — the form still goes through the gate.
+      let fingerprint = "";
+      let known: KnownFormRow | null = null;
+      try {
+        const pageCount = (
+          await PDFDocument.load(bytes, { ignoreEncryption: true })
+        ).getPageCount();
+        const r = await matchKnownForm({ fields, pageCount, market: agentMarket });
+        fingerprint = r.fingerprint;
+        known = r.known;
+      } catch (err) {
+        console.error("form recognition failed; using AI pipeline", err);
+      }
 
       const form = await prisma.uploaded_forms.create({
         data: {
           agent_id: userId,
           label,
           side,
-          board: agentUser?.market ?? "",
+          // A recognized form inherits the catalog's market; otherwise default to
+          // the agent's market (recorded from day one to avoid a backfill).
+          board: known?.board ?? agentMarket,
           source_s3_key: body.s3_key,
           source_file_name: body.file_name ?? "",
           mime_type: body.mime_type ?? "application/pdf",
           file_size: bytes.length,
           file_sha256: sha256Hex(bytes),
+          structure_sha256: fingerprint,
+          recognized_from_known_form_id: known?.id ?? null,
           attested_by: userId,
           attestation_statement: statement,
+          ...(known?.role_mapping
+            ? { role_mapping: known.role_mapping as object }
+            : {}),
         },
         select: {
           id: true,
@@ -153,7 +182,19 @@ export async function POST(req: Request): Promise<Response> {
         },
       });
 
-      const counts = await runFieldPipeline({ formId: form.id, side, fields });
+      // Recognized → copy the verified field map (no AI call). Else AI pipeline.
+      // A copy failure falls back to the pipeline so the upload never 500s.
+      let counts: { fieldCount: number; needsReviewCount: number };
+      if (known) {
+        try {
+          counts = await copyKnownFields(form.id, known);
+        } catch (err) {
+          console.error("copyKnownFields failed; using AI pipeline", err);
+          counts = await runFieldPipeline({ formId: form.id, side, fields });
+        }
+      } else {
+        counts = await runFieldPipeline({ formId: form.id, side, fields });
+      }
 
       return json(
         {
