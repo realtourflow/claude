@@ -98,3 +98,53 @@ export async function runFieldPipeline(input: {
     needsReviewCount: rows.filter((r) => r.needs_review).length,
   };
 }
+
+// A uploaded_form_fields row (Decimal columns are typed loosely so the same
+// serializer works on a Prisma row regardless of select shape).
+export type FormFieldRow = {
+  id: string;
+  detected_name: string;
+  detected_type: string;
+  page_number: number;
+  pos_x: unknown;
+  pos_y: unknown;
+  width: unknown;
+  height: unknown;
+  nearby_text: string;
+  ai_core_key: string | null;
+  ai_role: string | null;
+  ai_confidence: unknown;
+  ai_rationale: string;
+  needs_review: boolean;
+  final_core_key: string | null;
+  final_role: string | null;
+  final_type: string | null;
+  decision: string;
+};
+
+const toNum = (v: unknown): number | null =>
+  v === null || v === undefined ? null : Number(v);
+
+/** Serializes a detected-field row to the API shape (Decimals → numbers). */
+export function serializeFormField(f: FormFieldRow) {
+  return {
+    id: f.id,
+    detected_name: f.detected_name,
+    detected_type: f.detected_type,
+    page_number: f.page_number,
+    pos_x: toNum(f.pos_x),
+    pos_y: toNum(f.pos_y),
+    width: toNum(f.width),
+    height: toNum(f.height),
+    nearby_text: f.nearby_text,
+    ai_core_key: f.ai_core_key,
+    ai_role: f.ai_role,
+    ai_confidence: toNum(f.ai_confidence),
+    ai_rationale: f.ai_rationale,
+    needs_review: f.needs_review,
+    final_core_key: f.final_core_key,
+    final_role: f.final_role,
+    final_type: f.final_type,
+    decision: f.decision,
+  };
+}

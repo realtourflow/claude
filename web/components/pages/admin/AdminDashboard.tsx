@@ -8,6 +8,7 @@ import { useDeals } from "@/hooks/useDeals";
 import { useUsers, AppUser } from "@/hooks/useUsers";
 import { useSystemConfig, usePromoCodes, useAuditLog, SystemConfig, CreatePromoCodeInput } from "@/hooks/useAdmin";
 import { Deal } from "@/lib/data/mockDeals";
+import { FormReview } from "@/components/pages/admin/FormReview";
 import {
   AlertTriangle,
   TrendingUp,
@@ -2246,6 +2247,7 @@ export default function AdminDashboard() {
     case 'promotions':  return <Promotions />;
     case 'config':      return <AdminSystemConfig />;
     case 'audit':       return <AuditLog />;
+    case 'forms':       return <FormReview />;
     default:            return <PipelineOverview deals={deals} />;
   }
 }
