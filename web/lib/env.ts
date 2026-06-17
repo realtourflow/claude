@@ -98,6 +98,12 @@ const shape = z.object({
   // sender; set to a verified-domain address (e.g. "RealTourFlow
   // <invites@realtourflow.com>") in production.
   RESEND_FROM: z.string().default("RealTourFlow <onboarding@resend.dev>"),
+
+  // AI field-mapping for the agent form-upload pipeline (lib/form-ai). Empty key
+  // disables the mapper — uploaded forms then land with every field flagged for
+  // human review. The model is swappable; defaults to the latest Opus.
+  ANTHROPIC_API_KEY: z.string().default(""),
+  FORM_AI_MODEL: z.string().default("claude-opus-4-8"),
 });
 
 const schema = shape
