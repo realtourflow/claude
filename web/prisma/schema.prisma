@@ -543,6 +543,7 @@ model uploaded_forms {
   review_notes                            String?
   created_at                              DateTime               @default(now()) @db.Timestamptz(6)
   updated_at                              DateTime               @default(now()) @db.Timestamptz(6)
+  board                                   String                 @default("")
   uploaded_form_fields                    uploaded_form_fields[]
   users_uploaded_forms_agent_idTousers    users                  @relation("uploaded_forms_agent_idTousers", fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users_uploaded_forms_attested_byTousers users                  @relation("uploaded_forms_attested_byTousers", fields: [attested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -551,6 +552,7 @@ model uploaded_forms {
   @@index([agent_id], map: "idx_uploaded_forms_agent_id")
   @@index([status], map: "idx_uploaded_forms_status")
   @@index([status, promoted, agent_id], map: "idx_uploaded_forms_visibility")
+  @@index([board], map: "idx_uploaded_forms_board")
 }
 
 enum checklist_assignee {

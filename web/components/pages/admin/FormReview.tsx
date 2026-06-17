@@ -93,6 +93,7 @@ export function FormReview() {
         <div>
           {selectedId ? (
             <FormDetail
+              key={selectedId}
               id={selectedId}
               onResolved={() => {
                 void list.refetch();
@@ -112,11 +113,15 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
   const [rejecting, setRejecting] = useState(false);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  // Edited signer map; null until the admin changes it, then it overrides the
+  // server-derived default. Reset per form via the `key` on FormDetail.
+  const [roleMapEdit, setRoleMapEdit] = useState<Record<string, string> | null>(null);
 
   if (loading || !detail) return <p className="text-sm text-gray-400">Loading…</p>;
 
   const unresolved = detail.fields.filter((f) => f.needs_review).length;
   const editable = detail.status === "pending_review";
+  const roleMap = roleMapEdit ?? detail.derived_signers.roleMapping;
 
   return (
     <div className="space-y-4">
@@ -175,6 +180,36 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
         </table>
       </div>
 
+      {editable && Object.keys(roleMap).length > 0 && (
+        <div className="rounded-lg border border-gray-100 p-3">
+          <h3 className="text-sm font-semibold text-brand-navy">Signers</h3>
+          <p className="mb-2 text-xs text-gray-400">
+            Derived from the field roles — edit the template role names before
+            approving.
+          </p>
+          <div className="space-y-1.5">
+            {Object.entries(roleMap).map(([participant, role]) => (
+              <div key={participant} className="flex items-center gap-2 text-sm">
+                <span className="w-24 shrink-0 capitalize text-gray-500">
+                  {participant}
+                </span>
+                <span className="text-gray-300">→</span>
+                <input
+                  value={role}
+                  onChange={(e) =>
+                    setRoleMapEdit((m) => ({
+                      ...(m ?? roleMap),
+                      [participant]: e.target.value,
+                    }))
+                  }
+                  className="flex-1 rounded border border-gray-200 px-2 py-1 text-xs"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {editable && (
         <div className="flex items-center gap-2">
           <button
@@ -183,7 +218,11 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
             onClick={async () => {
               setBusy(true);
               try {
-                await approve();
+                await approve({
+                  role_mapping: roleMap,
+                  routing: "by-role",
+                  consumer_roles: [],
+                });
                 onResolved();
               } finally {
                 setBusy(false);

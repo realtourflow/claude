@@ -49,6 +49,11 @@ export type AdminFormDetail = {
   docusign_template_id: string | null;
   preview_url: string;
   core_keys: CoreKey[];
+  derived_signers: {
+    roleMapping: Record<string, string>;
+    routing: string;
+    consumerRoles: string[];
+  };
   fields: AdminFormField[];
 };
 
@@ -79,8 +84,15 @@ export function useAdminForm(id: string | null) {
     await query.refetch();
   }
 
-  async function approve(): Promise<void> {
-    await api.post(`/admin/forms/${id}`, { action: "approve" });
+  async function approve(signers?: {
+    role_mapping: Record<string, string>;
+    routing?: string;
+    consumer_roles?: string[];
+  }): Promise<void> {
+    await api.post(`/admin/forms/${id}`, {
+      action: "approve",
+      ...(signers ? { signers } : {}),
+    });
     await query.refetch();
     void queryClient.invalidateQueries({ queryKey: ["admin-forms"] });
   }

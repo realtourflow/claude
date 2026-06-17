@@ -1,14 +1,55 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { S3Client } from "@aws-sdk/client-s3";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+} from "vitest";
+import { mockClient } from "aws-sdk-client-mock";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  type GetObjectCommandOutput,
+} from "@aws-sdk/client-s3";
+import { PDFDocument } from "pdf-lib";
 import { GET as listForms } from "@/app/api/admin/forms/route";
 import { GET as detail, POST as action } from "@/app/api/admin/forms/[id]/route";
 import { PATCH as patchField } from "@/app/api/admin/forms/[id]/fields/[fieldId]/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setS3ClientForTesting } from "@/lib/s3";
+import { setDocusignForTesting, type DocusignClient } from "@/lib/docusign";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
+
+const s3Mock = mockClient(S3Client);
+let PDF: Uint8Array;
+let lastTemplateSigners: unknown[] = [];
+
+// A full DocusignClient fake (createTemplateFromDocument captures its signers).
+const fakeDocusign: DocusignClient = {
+  enabled: () => true,
+  createEnvelope: async () => "env",
+  createTemplateEnvelope: async () => "env",
+  getEnvelopeStatus: async () => "sent",
+  downloadCombinedDocument: async () => new Uint8Array(),
+  listRecipients: async () => [],
+  createRecipientView: async () => "https://view",
+  createTemplateFromDocument: async (input) => {
+    lastTemplateSigners = input.signers;
+    return "tmpl-xyz";
+  },
+};
+
+function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
+  return {
+    transformToByteArray: async () => bytes,
+  } as unknown as GetObjectCommandOutput["Body"];
+}
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
@@ -20,10 +61,23 @@ beforeAll(async () => {
     }),
     "test-bucket"
   );
+  setDocusignForTesting(fakeDocusign);
+  const doc = await PDFDocument.create();
+  doc.addPage([612, 792]);
+  PDF = await doc.save();
+});
+
+afterAll(() => {
+  setDocusignForTesting(undefined);
 });
 
 beforeEach(async () => {
   await truncateAll();
+  s3Mock.reset();
+  s3Mock.on(PutObjectCommand).resolves({});
+  s3Mock.on(DeleteObjectCommand).resolves({});
+  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(PDF) });
+  lastTemplateSigners = [];
 });
 
 type FieldSeed = {
@@ -88,14 +142,11 @@ async function actionReq(id: string, body: object) {
 }
 
 async function patchReq(id: string, fieldId: string, body: object) {
-  return new Request(
-    `http://localhost/api/admin/forms/${id}/fields/${fieldId}`,
-    {
-      method: "PATCH",
-      headers: { "content-type": "application/json", authorization: await adminHdr() },
-      body: JSON.stringify(body),
-    }
-  );
+  return new Request(`http://localhost/api/admin/forms/${id}/fields/${fieldId}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", authorization: await adminHdr() },
+    body: JSON.stringify(body),
+  });
 }
 
 describe("admin form review — access + queue", () => {
@@ -134,11 +185,16 @@ describe("admin form review — access + queue", () => {
     expect(body[0].needs_review_count).toBe(1);
   });
 
-  it("detail returns fields and a preview url", async () => {
+  it("detail returns fields, a preview url, and derived signers", async () => {
     await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const id = await seedForm(agent.id, [
-      { detected_name: "buyer_name", ai_core_key: "buyer_name", needs_review: false },
+      {
+        detected_name: "buyer_name",
+        ai_core_key: "buyer_name",
+        ai_role: "Buyer",
+        needs_review: false,
+      },
     ]);
 
     const res = await detail(
@@ -152,10 +208,12 @@ describe("admin form review — access + queue", () => {
       status: string;
       preview_url: string;
       fields: unknown[];
+      derived_signers: { roleMapping: Record<string, string> };
     };
     expect(body.status).toBe("pending_review");
     expect(body.fields).toHaveLength(1);
     expect(body.preview_url).toMatch(/^https:\/\//);
+    expect(body.derived_signers.roleMapping).toMatchObject({ buyer: "Buyer" });
   });
 });
 
@@ -212,11 +270,10 @@ describe("admin form review — correction + approve/reject", () => {
     expect(res.status).toBe(422);
   });
 
-  it("approve assembles the field_map and flips to ready (not yet sendable)", async () => {
+  it("approve creates the DocuSign template, assembles field_map, and flips to ready", async () => {
     const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const id = await seedForm(agent.id, [
-      // AI-confident → auto-accepted, lands in the map
       {
         detected_name: "buyer_name",
         detected_type: "text",
@@ -224,9 +281,7 @@ describe("admin form review — correction + approve/reject", () => {
         ai_role: "Buyer",
         needs_review: false,
       },
-      // signature → must be resolved; excluded from the prefill map
       { detected_name: "sig", detected_type: "signature", needs_review: true },
-      // unmapped text → admin corrects to purchase_price
       { detected_name: "price", detected_type: "text", ai_core_key: null, needs_review: true },
     ]);
     const fields = await prisma.uploaded_form_fields.findMany({ where: { form_id: id } });
@@ -251,23 +306,22 @@ describe("admin form review — correction + approve/reject", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       status: string;
-      field_map: Record<string, { label: string; type: string; role?: string }>;
+      docusign_template_id: string;
+      field_map: Record<string, { label: string; type: string }>;
+      role_mapping: Record<string, string>;
     };
     expect(body.status).toBe("ready");
+    expect(body.docusign_template_id).toBe("tmpl-xyz");
     expect(Object.keys(body.field_map).sort()).toEqual(["buyer_name", "purchase_price"]);
-    expect(body.field_map.buyer_name).toMatchObject({
-      label: "buyer_name",
-      type: "text",
-      role: "Buyer",
-    });
-    expect(body.field_map.purchase_price).toMatchObject({ label: "purchase_price", type: "text" });
-    expect(body.field_map.sig).toBeUndefined();
+    expect(body.role_mapping).toMatchObject({ buyer: "Buyer" });
+
+    // The template was created with the placed tabs.
+    expect(lastTemplateSigners.length).toBeGreaterThan(0);
 
     const row = await prisma.uploaded_forms.findUnique({ where: { id } });
     expect(row?.status).toBe("ready");
     expect(row?.reviewed_by).toBe(admin.id);
-    // Approved but NOT sendable until the DocuSign template + resolver land (step 5).
-    expect(row?.docusign_template_id).toBeNull();
+    expect(row?.docusign_template_id).toBe("tmpl-xyz");
   });
 
   it("reject marks the form rejected with notes", async () => {

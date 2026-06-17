@@ -169,6 +169,19 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
     expect(agree.needs_review).toBe(true);
   });
 
+  it("captures board = the agent's market at upload", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { market: "BALDWIN" },
+    });
+    const res = await createForm(await postForm(agent.id, "auth0|a"));
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const row = await prisma.uploaded_forms.findUnique({ where: { id } });
+    expect(row?.board).toBe("BALDWIN");
+  });
+
   it("400 when the licensing attestation is not checked", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const req = new Request("http://localhost/api/me/forms", {

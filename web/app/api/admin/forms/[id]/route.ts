@@ -2,14 +2,22 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { hasRole } from "@/lib/roles";
 import { resolveUserId } from "@/lib/users";
-import { getDownloadUrl } from "@/lib/s3";
-import { serializeFormField } from "@/lib/uploaded-forms";
+import { getDownloadUrl, getObjectBytes } from "@/lib/s3";
+import { getDocusignClient } from "@/lib/docusign";
+import {
+  serializeFormField,
+  deriveSigners,
+  buildTemplateSigners,
+  type FormSide,
+  type SignersConfig,
+} from "@/lib/uploaded-forms";
 import { CORE_KEYS } from "@/lib/form-ai/core-keys";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 // GET /api/admin/forms/:id — full review detail: form + agent + attestation +
-// a pre-signed preview URL of the source PDF + every detected field. Admin only.
+// a pre-signed preview URL of the source PDF + every detected field + the
+// derived signer config (the "derive" half of derive-then-confirm). Admin only.
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const { id } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -65,20 +73,30 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       created_at: form.created_at.toISOString(),
       docusign_template_id: form.docusign_template_id,
       preview_url: previewUrl,
-      // The canonical key registry for the review dropdowns (server-sourced so
-      // the client never duplicates it).
       core_keys: CORE_KEYS,
+      // Derived signers (admin confirms/edits, then passes back on approve).
+      derived_signers: deriveSigners(fields, form.side as FormSide),
       fields: fields.map(serializeFormField),
     });
   })) as Response;
 }
 
-type ActionBody = { action?: "approve" | "reject"; review_notes?: string };
+type SignersOverride = {
+  role_mapping?: Record<string, string>;
+  routing?: string;
+  consumer_roles?: string[];
+};
+type ActionBody = {
+  action?: "approve" | "reject";
+  review_notes?: string;
+  signers?: SignersOverride;
+};
 
-// POST /api/admin/forms/:id — the review gate. action=approve assembles the
-// field_map from the resolved field decisions and flips the form to `ready`
-// (NOT yet sendable — the DocuSign template + resolver land in a later step).
-// action=reject marks it rejected. Both require the form to be pending_review.
+// POST /api/admin/forms/:id — the review gate. action=approve resolves the
+// signers (your confirmed config, else the derived default), assembles the
+// field_map, creates the DocuSign template (tabs placed at the detected field
+// coordinates), stores the template id + send-config, and flips to `ready` —
+// at which point the form is genuinely sendable. action=reject records a reason.
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -98,7 +116,14 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
     const form = await prisma.uploaded_forms.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        label: true,
+        side: true,
+        source_s3_key: true,
+        source_file_name: true,
+      },
     });
     if (!form) return error("form not found", 404);
     if (form.status !== "pending_review") {
@@ -130,10 +155,23 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       );
     }
 
-    // Assemble the field_map (coreKey -> { label, type, role }) from the
-    // effective decision per field. Admin-touched fields use final_*; untouched
-    // AI-confident fields use the AI proposal. Only prefillable (text/checkbox)
-    // mapped fields make it in — signatures/initials and skips are excluded.
+    const docusign = getDocusignClient();
+    if (!docusign.enabled() || !docusign.createTemplateFromDocument) {
+      return error("DocuSign is not configured for template creation", 503);
+    }
+
+    // Signers: the admin's confirmed config, else the derived default.
+    const o = body.signers;
+    const signers: SignersConfig =
+      o && o.role_mapping
+        ? {
+            roleMapping: o.role_mapping,
+            routing: o.routing === "consumers" ? "consumers" : "by-role",
+            consumerRoles: o.consumer_roles ?? [],
+          }
+        : deriveSigners(fields, form.side as FormSide);
+
+    // Assemble the prefill field_map from the effective decision per field.
     const fieldMap: Record<string, { label: string; type: string; role?: string }> = {};
     for (const f of fields) {
       const touched = f.decision !== "pending";
@@ -145,6 +183,26 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       fieldMap[coreKey] = { label: coreKey, type, ...(role ? { role } : {}) };
     }
 
+    // Create the DocuSign template from the PDF with tabs at the field coords.
+    let templateId: string;
+    try {
+      const bytes = await getObjectBytes(form.source_s3_key);
+      const templateSigners = await buildTemplateSigners({
+        pdfBytes: bytes,
+        fields,
+        roleMapping: signers.roleMapping,
+      });
+      templateId = await docusign.createTemplateFromDocument({
+        name: `${form.label} — ${form.id}`,
+        documentName: form.source_file_name || "form.pdf",
+        documentBytes: bytes,
+        signers: templateSigners,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return error("failed to create DocuSign template: " + msg, 502);
+    }
+
     await prisma.uploaded_forms.update({
       where: { id },
       data: {
@@ -152,8 +210,18 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         reviewed_by: adminId,
         reviewed_at: new Date(),
         field_map: fieldMap,
+        role_mapping: signers.roleMapping,
+        routing: signers.routing,
+        consumer_roles: signers.consumerRoles,
+        docusign_template_id: templateId,
       },
     });
-    return json({ id, status: "ready", field_map: fieldMap });
+    return json({
+      id,
+      status: "ready",
+      field_map: fieldMap,
+      role_mapping: signers.roleMapping,
+      docusign_template_id: templateId,
+    });
   })) as Response;
 }

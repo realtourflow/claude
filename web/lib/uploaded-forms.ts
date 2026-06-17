@@ -4,10 +4,12 @@
  * Kept out of the route handlers so the pipeline is unit-testable.
  */
 import { createHash } from "node:crypto";
+import { PDFDocument } from "pdf-lib";
 import { prisma } from "./db";
 import { getFieldMapper } from "./form-ai/mapper";
 import { CORE_KEYS } from "./form-ai/core-keys";
 import type { CoreKeyProposal, DetectedField } from "./form-ai/types";
+import type { TemplateSignerSpec, TemplateTabSpec } from "./docusign";
 
 // The default licensing attestation. The live wording is admin-editable in
 // system_config (config.form_attestation_statement); each upload snapshots
@@ -124,6 +126,132 @@ export type FormFieldRow = {
 
 const toNum = (v: unknown): number | null =>
   v === null || v === undefined ? null : Number(v);
+
+// ─── Template assembly (admin approval) ────────────────────────────────────
+
+// A field row as needed to build the DocuSign template (Prisma row is wider).
+export type ApprovedFieldRow = {
+  detected_name: string;
+  detected_type: string;
+  page_number: number;
+  pos_x: unknown;
+  pos_y: unknown;
+  width: unknown;
+  height: unknown;
+  ai_core_key: string | null;
+  ai_role: string | null;
+  final_core_key: string | null;
+  final_role: string | null;
+  final_type: string | null;
+  decision: string;
+};
+
+type Effective = { coreKey: string | null; role: string | null; type: string; label: string };
+
+// The decided values for a field: the admin's correction if touched, else the
+// AI proposal. label is the DocuSign tab data label — the core key when mapped
+// (so prefill matches), else the detected name (a blank the signer fills).
+function effective(f: ApprovedFieldRow): Effective {
+  const touched = f.decision !== "pending";
+  const coreKey = touched ? f.final_core_key : f.ai_core_key;
+  const role = (touched ? f.final_role : f.ai_role) ?? null;
+  const type = (touched ? f.final_type : f.detected_type) ?? f.detected_type ?? "text";
+  return { coreKey, role, type, label: coreKey ?? f.detected_name };
+}
+
+function normalizeParticipant(templateRole: string): string {
+  const r = templateRole.toLowerCase();
+  if (r.includes("buyer")) return "buyer";
+  if (r.includes("seller")) return "seller";
+  if (r.includes("agent")) return "agent";
+  return r;
+}
+
+export type SignersConfig = {
+  roleMapping: Record<string, string>;
+  routing: "by-role" | "consumers";
+  consumerRoles: string[];
+};
+
+// The "derive" half of derive-then-confirm: a by-role signers config inferred
+// from the roles assigned to the form's fields. The admin can override it at
+// approval. Falls back to one role keyed off the form's side.
+export function deriveSigners(fields: ApprovedFieldRow[], side: FormSide): SignersConfig {
+  const roles: string[] = [];
+  for (const f of fields) {
+    const role = effective(f).role;
+    if (role && !roles.includes(role)) roles.push(role);
+  }
+  if (roles.length === 0) roles.push(side === "sell" ? "Seller" : "Buyer");
+  const roleMapping: Record<string, string> = {};
+  for (const role of roles) roleMapping[normalizeParticipant(role)] = role;
+  return { roleMapping, routing: "by-role", consumerRoles: [] };
+}
+
+type TabBucket =
+  | "textTabs"
+  | "checkboxTabs"
+  | "signHereTabs"
+  | "initialHereTabs"
+  | "dateSignedTabs";
+
+const TAB_BUCKET: Record<string, TabBucket> = {
+  text: "textTabs",
+  checkbox: "checkboxTabs",
+  signature: "signHereTabs",
+  initial: "initialHereTabs",
+  date: "dateSignedTabs",
+};
+
+/**
+ * Builds DocuSign template signer specs from the approved fields — converting
+ * each field's PDF rectangle (bottom-left origin) to DocuSign tab coordinates
+ * (points from the page top-left) and grouping tabs under the signer that owns
+ * them. Text/checkbox tabs are labeled with the core key (so prefill matches);
+ * unmapped fillables keep the detected name. Fields with no role land on the
+ * first role. This is what makes uploaded-form placement match a hand-built one.
+ */
+export async function buildTemplateSigners(input: {
+  pdfBytes: Uint8Array;
+  fields: ApprovedFieldRow[];
+  roleMapping: Record<string, string>;
+}): Promise<TemplateSignerSpec[]> {
+  const doc = await PDFDocument.load(input.pdfBytes, { ignoreEncryption: true });
+  const heights = doc.getPages().map((p) => p.getHeight());
+  const fallbackHeight = heights[0] ?? 792;
+
+  const roleNames = Array.from(new Set(Object.values(input.roleMapping)));
+  if (roleNames.length === 0) roleNames.push("Signer");
+  const signers = new Map<string, TemplateSignerSpec>();
+  roleNames.forEach((roleName, i) =>
+    signers.set(roleName, { roleName, recipientId: String(i + 1), routingOrder: i + 1 })
+  );
+  const defaultRole = roleNames[0];
+  const num = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
+
+  for (const f of input.fields) {
+    const eff = effective(f);
+    const bucket = TAB_BUCKET[eff.type] ?? "textTabs";
+    const roleName = eff.role && signers.has(eff.role) ? eff.role : defaultRole;
+    const signer = signers.get(roleName)!;
+
+    const page = f.page_number || 1;
+    const pageHeight = heights[page - 1] ?? fallbackHeight;
+    const w = num(f.width);
+    const h = num(f.height);
+    // PDF rect is bottom-left origin; DocuSign yPosition is from the page top.
+    const tab: TemplateTabSpec = {
+      tabLabel: eff.label,
+      pageNumber: page,
+      x: num(f.pos_x),
+      y: pageHeight - num(f.pos_y) - h,
+      ...(bucket === "textTabs" ? { width: w, height: h } : {}),
+    };
+    (signer[bucket] ??= []).push(tab);
+  }
+
+  return roleNames.map((r) => signers.get(r)!);
+}
 
 /** Serializes a detected-field row to the API shape (Decimals → numbers). */
 export function serializeFormField(f: FormFieldRow) {
