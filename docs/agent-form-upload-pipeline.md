@@ -323,10 +323,12 @@ A new **"My Forms"** area in Settings, beside the existing **Documents** tab
 become *sendable* forms. The upload form:
 
 - File picker (PDF only for v2), label, side (buy/sell/both).
-- **A required checkbox:** *"I attest that I am licensed and permitted to use and
-  host this form."* — its exact wording is snapshotted into
-  `attestation_statement`; submit is blocked until it's checked; the API rejects
-  any submit without it.
+- **A required checkbox** with the attestation statement. The wording is **not
+  hardcoded** — it's read from `system_config` (admin-editable via the existing
+  `/api/admin/config`, no deploy needed) and the exact text shown is **snapshotted
+  per upload** into `attestation_statement`, so each form records the precise
+  wording that agent agreed to even if the config changes later. Submit is blocked
+  until it's checked; the API rejects any submit without it.
 - After upload: a status chip (Pending review → Ready / Rejected) and, when
   ready, the form simply appears in the deal send picker.
 
@@ -341,7 +343,7 @@ become *sendable* forms. The upload form:
    vision detection as a clean future swap **behind the same extractor
    interface**. If a flat PDF is uploaded, we detect that and tell the agent
    "this form isn't fillable yet — needs manual setup" rather than guess badly.
-   *(Your call: AcroForm-first, or hold for vision too?)*
+   *(Confirmed in review: AcroForm-first; vision is a later swap.)*
 
 2. **Per-form custom terms.** v2 maps detected fields to the **existing** core
    keys only. Brand-new per-form term fields (like the BAA's bespoke
@@ -413,12 +415,15 @@ with no further changes.
 
 ---
 
-## 14. Open questions for you
+## 14. Decisions (locked — 2026-06-16 review)
 
-1. **AcroForm-first** for v2 (§10.1) — ship it, or wait for flat-PDF/vision too?
-2. **Default AI provider = Anthropic Claude** — agreed? (Swappable regardless.)
-3. **Review queue placement** — a new section inside the existing Admin dashboard,
-   or a dedicated `/admin/forms` page? (Recommend a section, like agent-invites.)
-4. **Attestation wording** — is *"I attest that I am licensed and permitted to use
-   and host this form."* the exact text you want stored, or do you have legal
-   wording to drop in?
+1. **PDF scope: AcroForm (fillable) PDFs first.** Flat/scanned PDFs get a clear
+   "needs manual setup" message; vision/OCR detection is a later swap behind the
+   same extractor interface.
+2. **Default AI provider: Anthropic Claude** (structured output via tool use),
+   behind the swappable `FieldMapper` interface.
+3. **Review gate UI: a section in the existing Admin dashboard** (mirrors the
+   agent-invites pattern), not a separate page.
+4. **Attestation wording: configurable via `system_config`** (admin-editable, no
+   deploy), with the exact shown text snapshotted per upload into
+   `attestation_statement` (see §9).
