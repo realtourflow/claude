@@ -56,6 +56,16 @@ export function makeAgentDocS3Key(agentId: string, fileName: string): string {
   return `agent-templates/${agentId}/${Date.now()}/${safe}`;
 }
 
+/**
+ * Generates an agent-scoped S3 key for an uploaded form (the form-upload
+ * pipeline), with a timestamp prefix. Separate `agent-forms/` namespace so it
+ * never collides with doc templates (`agent-templates/`) or deal docs.
+ */
+export function makeAgentFormS3Key(agentId: string, fileName: string): string {
+  const safe = fileName.split("/").pop()!.replace(/\s+/g, "-");
+  return `agent-forms/${agentId}/${Date.now()}/${safe}`;
+}
+
 export async function getUploadUrl(input: {
   key: string;
   contentType?: string;
