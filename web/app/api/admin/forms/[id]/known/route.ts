@@ -72,13 +72,18 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
     const num = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
     // Snapshot each field's effective decision into the catalog answer key.
+    // core_key, role, AND type are all captured as the admin's effective value
+    // (final_* when touched) — mirrors effective() in uploaded-forms.ts so a
+    // recognized re-upload reproduces the exact template the admin approved.
     const fields: KnownField[] = fieldRows.map((f) => {
       const touched = f.decision !== "pending";
       const coreKey = touched ? f.final_core_key : f.ai_core_key;
       const role = (touched ? f.final_role : f.ai_role) ?? null;
+      const effectiveType = (touched ? f.final_type : f.detected_type) ?? f.detected_type;
       return {
         detected_name: f.detected_name,
         detected_type: f.detected_type,
+        effective_type: effectiveType,
         page_number: f.page_number,
         pos_x: num(f.pos_x),
         pos_y: num(f.pos_y),

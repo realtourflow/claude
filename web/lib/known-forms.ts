@@ -15,7 +15,12 @@ import {
 // One field in a known form's verified "answer key".
 export type KnownField = {
   detected_name: string;
+  // Raw extractor type (audit; equals what re-detection yields since the
+  // fingerprint matched on type). detected_type is what the row's detected_type
+  // column gets; effective_type is the admin's approved type and drives the
+  // resolved field's final_type → DocuSign tab bucket.
   detected_type: string;
+  effective_type: string;
   page_number: number;
   pos_x: number;
   pos_y: number;
@@ -107,7 +112,10 @@ export async function copyKnownFields(
       needs_review: f.needs_review,
       final_core_key: resolved ? f.core_key : null,
       final_role: resolved ? f.role : null,
-      final_type: resolved ? f.detected_type : null,
+      // Replay the admin's approved type (not the raw detected type) so a
+      // recognized re-upload templates to the same DocuSign tab bucket the
+      // admin signed off on. Fall back to detected_type for legacy rows.
+      final_type: resolved ? f.effective_type ?? f.detected_type : null,
       decision: resolved ? "accepted" : "pending",
     };
   });

@@ -392,6 +392,47 @@ describe("admin save-as-known — promote into the recognition catalog", () => {
     expect(kf?.fingerprint).toBe(body.fingerprint);
   });
 
+  it("snapshots the admin's corrected field TYPE into the catalog (not the raw type)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Field comes off the extractor as plain text; admin reclassifies it to date.
+    const id = await seedForm(agent.id, [
+      { detected_name: "close", detected_type: "text", needs_review: true },
+    ]);
+    const field = await prisma.uploaded_form_fields.findFirstOrThrow({
+      where: { form_id: id },
+    });
+    await patchField(
+      await patchReq(id, field.id, {
+        final_core_key: "closing_date",
+        final_type: "date",
+        final_role: "Buyer",
+        decision: "corrected",
+      }),
+      { params: Promise.resolve({ id, fieldId: field.id }) }
+    );
+    await action(await actionReq(id, { action: "approve" }), {
+      params: Promise.resolve({ id }),
+    });
+
+    const res = await saveKnown(await knownReq(id, await adminHdr()), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { known_form_id: string };
+    const kf = await prisma.known_forms.findUniqueOrThrow({
+      where: { id: body.known_form_id },
+    });
+    const catalog = kf.fields as Array<{
+      detected_name: string;
+      detected_type: string;
+      effective_type: string;
+    }>;
+    const close = catalog.find((f) => f.detected_name === "close")!;
+    expect(close.detected_type).toBe("text"); // raw extractor type preserved
+    expect(close.effective_type).toBe("date"); // admin's correction captured
+  });
+
   it("409 when the form is not approved (still pending)", async () => {
     await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });

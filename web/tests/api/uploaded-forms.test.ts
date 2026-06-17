@@ -186,8 +186,11 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
         field_count: fp.fieldCount,
         page_count: 1,
         fields: [
-          { detected_name: "buyer_name", detected_type: "text", page_number: 1, pos_x: 72, pos_y: 700, width: 200, height: 18, core_key: "buyer_name", role: "Buyer", needs_review: false },
-          { detected_name: "agree_terms", detected_type: "checkbox", page_number: 1, pos_x: 72, pos_y: 660, width: 12, height: 12, core_key: null, role: null, needs_review: true },
+          { detected_name: "buyer_name", detected_type: "text", effective_type: "text", page_number: 1, pos_x: 72, pos_y: 700, width: 200, height: 18, core_key: "buyer_name", role: "Buyer", needs_review: false },
+          // Admin reclassified this field's type (raw text → date) on the
+          // original; the catalog must replay the EFFECTIVE type, not the raw one.
+          { detected_name: "close_date", detected_type: "text", effective_type: "date", page_number: 1, pos_x: 72, pos_y: 630, width: 120, height: 18, core_key: "closing_date", role: "Buyer", needs_review: false },
+          { detected_name: "agree_terms", detected_type: "checkbox", effective_type: "checkbox", page_number: 1, pos_x: 72, pos_y: 660, width: 12, height: 12, core_key: null, role: null, needs_review: true },
         ],
         role_mapping: { buyer: "Buyer" },
       },
@@ -206,7 +209,7 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
       field_count: number;
       needs_review_count: number;
     };
-    expect(body.field_count).toBe(2);
+    expect(body.field_count).toBe(3);
     expect(body.needs_review_count).toBe(1);
 
     const row = await prisma.uploaded_forms.findUnique({ where: { id: body.id } });
@@ -220,6 +223,13 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
     expect(buyer.ai_core_key).toBe("buyer_name");
     expect(buyer.decision).toBe("accepted");
     expect(buyer.needs_review).toBe(false);
+
+    // The admin's type correction is replayed: final_type is the EFFECTIVE
+    // type (date), while detected_type keeps the raw extractor type (text).
+    const date = fields.find((f) => f.detected_name === "close_date")!;
+    expect(date.detected_type).toBe("text");
+    expect(date.final_type).toBe("date");
+    expect(date.decision).toBe("accepted");
   });
 
   it("captures board = the agent's market at upload", async () => {

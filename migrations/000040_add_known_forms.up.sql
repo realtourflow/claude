@@ -17,15 +17,19 @@ CREATE TABLE known_forms (
   page_count    INT  NOT NULL DEFAULT 0,
 
   -- The curated "answer key": one object per field —
-  -- { detected_name, detected_type, page_number, pos_x, pos_y, width, height,
-  --   core_key, role, needs_review }. Copied into uploaded_form_fields on a match.
+  -- { detected_name, detected_type, effective_type, page_number, pos_x, pos_y,
+  --   width, height, core_key, role, needs_review }. effective_type is the
+  -- admin's approved type (drives the DocuSign tab); detected_type is the raw
+  -- extractor type. Copied into uploaded_form_fields on a match.
   fields        JSONB NOT NULL DEFAULT '[]'::jsonb,
   role_mapping  JSONB NOT NULL DEFAULT '{}'::jsonb,
 
   active        BOOLEAN NOT NULL DEFAULT true,
   -- Provenance when promoted from an approved upload via "save as known".
+  -- Both nullable + SET NULL so deleting the source form or author just nulls
+  -- the pointer (matches promo_codes.created_by / audit_log.actor_id).
   source_form_id UUID REFERENCES uploaded_forms(id) ON DELETE SET NULL,
-  created_by    UUID REFERENCES users(id),
+  created_by    UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
