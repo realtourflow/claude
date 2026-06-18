@@ -29,8 +29,17 @@ export type ContractForm = {
   category: string;
   // "" | "baa" — "baa" makes envelope completion flip deals.baa_signed.
   purpose: string;
-  // deal participant role -> template role name.
+  // Recipient derivation:
+  //  - "by-role" (default): roleMapping maps each deal participant role to one
+  //    template role (e.g. buyer→Buyer, agent→Agent).
+  //  - "consumers": the deal's client-side participants (buyers on a buy deal,
+  //    sellers on a sell deal) fill consumerRoles in order — Consumer1 required,
+  //    the rest optional; no agent signer. Used by statewide UNIFORM notices.
+  routing?: "by-role" | "consumers";
+  // deal participant role -> template role name (by-role mode).
   roleMapping: Record<string, string>;
+  // Ordered template role names for "consumers" mode; [0] is required.
+  consumerRoles?: string[];
   fieldMap: Record<string, FieldMapEntry>;
 };
 
@@ -66,6 +75,26 @@ export const CONTRACT_FORMS: ContractForm[] = [
       baa_tail_days: { label: "baa_tail_days", type: "text", role: "Agent" },
     },
   },
+  {
+    key: "al_wire_fraud_notice",
+    label: "Wire Fraud Prevention Notice",
+    // Alabama REALTORS statewide uniform notice — every market, both sides.
+    board: "",
+    category: "E",
+    purpose: "",
+    // The signers are the deal's consumers (buyers on a buy deal, sellers on a
+    // sell deal); no agent signs. One shared template for both sides.
+    routing: "consumers",
+    roleMapping: {},
+    consumerRoles: ["Consumer1", "Consumer2"], // Consumer2 optional
+    // All auto-sourced from the deal — no agent-entered terms. consumer_name /
+    // consumer_name_2 are the 1st / 2nd consumer; brokerage_name is the agent's.
+    fieldMap: {
+      consumer_name: { label: "consumer_name", type: "text", role: "Consumer1" },
+      consumer_name_2: { label: "consumer_name_2", type: "text", role: "Consumer2" },
+      brokerage_name: { label: "brokerage_name", type: "text", role: "Consumer1" },
+    },
+  },
 
   // ── Forms wired from RTF_Envelope_Template_Build_Spec (see
   //    docs/RTF_envelope_template_field_map.md). Each goes LIVE only once its
@@ -86,9 +115,9 @@ export const CONTRACT_FORMS: ContractForm[] = [
   //    • DUP LABELS: a key can prefill on only ONE role; where the spec repeats a
   //      label across roles (e.g. seller_name in a body line AND a print line) the
   //      entry targets the primary role; the other tab stays signer-filled.
-  //    • EXCLUDED: the consumer-signed forms (Wire Fraud, Brokerage Disclosure,
-  //      Documentation Fee) need consumer→side routing that lives on the paused
-  //      wire-fraud branch — they're wired there, not here.
+  //    • CONSUMER-SIGNED: the Wire Fraud Notice (above) uses the "consumers"
+  //      routing mode — client-side signers, no agent. The other consumer forms
+  //      (Brokerage Disclosure, Documentation Fee) still need wiring.
   {
     key: "lead_based_paint_disclosure",
     label: "Lead-Based Paint Disclosure",

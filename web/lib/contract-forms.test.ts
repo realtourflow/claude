@@ -12,10 +12,16 @@ describe("CONTRACT_FORMS registry invariants", () => {
 
   for (const form of CONTRACT_FORMS) {
     describe(form.key, () => {
-      const roleNames = new Set(Object.values(form.roleMapping));
+      // A form routes EITHER by participant role (roleMapping) or, for the
+      // statewide consumer notices, by ordered consumerRoles. The valid template
+      // role names — and the non-empty check — depend on which mode it uses.
+      const isConsumers = form.routing === "consumers";
+      const roleNames = new Set(
+        isConsumers ? form.consumerRoles ?? [] : Object.values(form.roleMapping)
+      );
 
-      it("has a non-empty roleMapping with non-empty role names", () => {
-        expect(Object.keys(form.roleMapping).length).toBeGreaterThan(0);
+      it("has a non-empty set of template roles with non-empty names", () => {
+        expect(roleNames.size).toBeGreaterThan(0);
         for (const v of roleNames) expect(v.length).toBeGreaterThan(0);
       });
 
