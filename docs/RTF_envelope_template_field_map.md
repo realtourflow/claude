@@ -27,13 +27,28 @@ and the code is corrected to match.
   roles (a body line and a print line), only the primary one auto-fills.
 
 ## Auto-fill vs agent-entered
-- **Auto-filled from the deal:** `buyer_name`, `agent_name`, `brokerage_name`, and any
-  key that exactly matches a core fact (`purchase_price`, `closing_date`,
-  `legal_description`, `earnest_money_amount`, …).
-- **Agent-entered (prep step):** everything else, incl. `seller_name`,
-  `property_city`/`property_zip`/`ppin`/`loan_amount`/`effective_date` (these don't
-  match the fact names yet, so they aren't auto-sourced — see the TODO in
-  `contract-forms.ts`).
+The agent can fill any cell from what they know; the app pre-fills what the deal
+already tracks. A saved value (term) always wins over an auto-fill.
+
+- **Direct auto-fill:** `buyer_name`, `agent_name`, `brokerage_name`, `seller_name`
+  (from participants), and any key that exactly matches a core fact
+  (`purchase_price`, `closing_date`, `legal_description`, `earnest_money_amount`, …).
+- **Aliased auto-fill** (`CONTRACT_FIELD_ALIASES` in `lib/contract-facts.ts`) — a
+  form's own label inherits a deal value without renaming the tag:
+
+  | Form label | ← deal source |
+  |---|---|
+  | property_address | deals.address |
+  | property_city / property_state / property_zip | fact city / state / zip |
+  | ppin | fact parcel_or_ppin |
+  | loan_amount | fact loan_amount_or_pct |
+  | effective_date | fact acceptance_binding_date |
+  | possession_date | fact possession |
+  | buyer_broker_comp_percentage | fact buyer_broker_comp |
+  | buyer_agent | deal agent name |
+
+- **Agent-entered only (no deal source):** `property_county`, `mls_id`, the financing/
+  agency/contingency election checkboxes, negotiated dates, etc.
 
 ---
 
@@ -135,7 +150,12 @@ Initials (Buyer1) on pg 1 + para 5. Sig+Date: Agent, Buyer1, Buyer2.
 **Sigs:** Seller1–4 + `agent_name`(LA print). `Seller's Initials` on EVERY page (Seller1).
 **Land/Lot variant:** same core, fewer condition checkboxes (`baldwin_listing_agreement_land`).
 
-### 9. FORM 300 — Birmingham General/Financed Residential Contract — roles `Buyer1–2`·`Seller1–2`·`Listing Licensee` · 13 pages
+### 9. FORM 300 — Birmingham General/Financed Residential Contract — roles `Buyer1`·`Buyer2`·`Seller1`·`Seller2`·`BuyerAgent` · 13 pages
+> As built, **every data field sits on the `BuyerAgent` role** (the buyer's agent
+> prepares the offer); only `buyer_name` (Buyer1) and `seller_name` (Seller1) are on
+> the signers. The wired `form_300_birmingham` fieldMap in `contract-forms.ts` is the
+> authoritative, expanded label set (financing, agency, title, inspection, termite,
+> sewer/septic, warranty, settlement, assignability elections).
 **Core:** `buyer_name`(B1)·`seller_name`(S1) · `property_city/county/address/zip`(B1) · `legal_description`·`ppin`·`mls_id`(B1) ·
 `purchase_price`·`earnest_money_amount`(B1) · `loan_amount`(B1) · `closing_date`(B1) · `effective_date`(Listing Licensee).
 **Elections:** `listing_agency_role`·`selling_agency_role`·`purchase_money_type`·`loan_type`(cb) · `loan_percent`·`finance_application_days` ·
