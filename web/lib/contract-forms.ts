@@ -43,13 +43,15 @@ export const CONTRACT_FORMS: ContractForm[] = [
     category: "D",
     purpose: "baa",
     roleMapping: { buyer: "Buyer", agent: "Agent" },
-    // Source: Baldwin REALTORS BAA (Baldwin_BuyerSide_Form_Fields.xlsx §5).
-    // Labels mirror the template Data Labels (snake_case). Signature / date /
-    // initial fields are handled by the template roles, not prefilled here.
-    // DEFERRED (not prefilled in v1 — completed during signing): the election
-    // checkbox groups (covered-property any/specific, compensation type,
-    // dual-agency does/does-not, disclosure-of-identity does/does-not) need each
-    // checkbox's individual Data Label; and the buyer/agent contact blobs.
+    // Wired to the built template GUID 863df439 (old "baa_*" label scheme — the
+    // shipped version, not the expanded spec). Labels mirror the template's tab
+    // Data Labels exactly. buyer_name/agent_name are FullName tabs on the
+    // template (auto-fill the signer's name); the textTab values here are
+    // harmless no-ops for those two but drive the prep/auto-fill model.
+    // DEFERRED (completed during signing — the template uses ONE repeated label
+    // per group, so they can't be individually prefilled): the compensation /
+    // disclosure election checkboxes and the buyer/agent contact blobs. Giving
+    // those distinct labels is what the expanded spec rebuild would add.
     fieldMap: {
       // Auto-sourced from the deal at send time.
       buyer_name: { label: "buyer_name", type: "text", role: "Buyer" },
@@ -57,10 +59,7 @@ export const CONTRACT_FORMS: ContractForm[] = [
       brokerage_name: { label: "brokerage_name", type: "text", role: "Agent" },
       // Agent-entered terms (prep step) — placed on the Agent role (preparer).
       baa_term_end: { label: "baa_term_end", type: "text", role: "Agent" },
-      baa_covered_property_text: { label: "baa_covered_property_text", type: "text", role: "Agent" },
       baa_property_desc: { label: "baa_property_desc", type: "text", role: "Agent" },
-      baa_property_location: { label: "baa_property_location", type: "text", role: "Agent" },
-      baa_comp_retainer: { label: "baa_comp_retainer", type: "text", role: "Agent" },
       baa_comp_percent: { label: "baa_comp_percent", type: "text", role: "Agent" },
       baa_comp_flat: { label: "baa_comp_flat", type: "text", role: "Agent" },
       baa_comp_other: { label: "baa_comp_other", type: "text", role: "Agent" },
