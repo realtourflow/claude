@@ -156,24 +156,34 @@ async function run() {
     const detected = await detector.detect({ pdfBytes });
     const proposals = await mapper.proposeMappings({ fields: detected, side: form.side, coreKeys: CORE_KEYS });
 
-    // Match each truth field to the nearest detected field on its page.
+    // Match each truth field to its nearest detected field on the same page.
+    // Separate "found it at all" (looser) from "placed precisely" (tight), and
+    // surface the SIGNED offset so a systematic shift (calibratable) is visible.
+    const median = (a: number[]) => (a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : NaN);
     const dists: number[] = [];
+    const dxs: number[] = [];
+    const dys: number[] = [];
+    let found24 = 0;
+    let found40 = 0;
     let typeOk = 0;
     let coreTotal = 0;
     let coreOk = 0;
     for (const g of truth) {
-      const cands = detected
-        .map((f, i) => ({ f, i, top: detTop(f, pageH[g.page - 1] ?? 792) }))
-        .filter((c) => c.f.page === g.page);
-      let best: { f: DetectedField; i: number; d: number } | null = null;
-      for (const c of cands) {
-        const d = Math.hypot(c.top.x - g.x, c.top.y - g.y);
-        if (!best || d < best.d) best = { f: c.f, i: c.i, d };
-      }
-      if (best && best.d <= MATCH_TOLERANCE_PT) {
+      let best: { f: DetectedField; i: number; d: number; dx: number; dy: number } | null = null;
+      detected.forEach((f, i) => {
+        if (f.page !== g.page) return;
+        const t = detTop(f, pageH[g.page - 1] ?? 792);
+        const d = Math.hypot(t.x - g.x, t.y - g.y);
+        if (!best || d < best.d) best = { f, i, d, dx: t.x - g.x, dy: t.y - g.y };
+      });
+      if (!best) continue;
+      if (best.d <= 24) found24++;
+      if (best.d <= 40) {
+        found40++;
         dists.push(best.d);
+        dxs.push(best.dx);
+        dys.push(best.dy);
         if (best.f.type === g.type) typeOk++;
-        // core-key: only score labels that have a registry core key answer.
         const answer = CORE_KEY_ANSWERS[g.label];
         if (answer) {
           coreTotal++;
@@ -181,13 +191,12 @@ async function run() {
         }
       }
     }
-    const matched = dists.length;
-    const med = dists.length ? dists.slice().sort((a, b) => a - b)[Math.floor(dists.length / 2)] : NaN;
-    console.log(`\n=== ${form.key} (${truth.length} ground-truth fields, ${detected.length} detected) ===`);
-    console.log(`recall:        ${matched}/${truth.length}  (${Math.round((100 * matched) / truth.length)}%)`);
-    console.log(`type accuracy: ${typeOk}/${matched}  (${matched ? Math.round((100 * typeOk) / matched) : 0}% of matched)`);
-    console.log(`position:      median ${Math.round(med)}pt off`);
-    console.log(`core-key:      ${coreOk}/${coreTotal} of the registry-mappable fields`);
+    const pct = (n: number) => `${Math.round((100 * n) / truth.length)}%`;
+    console.log(`\n=== ${form.key} (${truth.length} ground-truth fields · ${detected.length} detected) ===`);
+    console.log(`recall @24pt:    ${found24}/${truth.length} (${pct(found24)})   @40pt: ${found40}/${truth.length} (${pct(found40)})`);
+    console.log(`type accuracy:   ${typeOk}/${found40} (${found40 ? Math.round((100 * typeOk) / found40) : 0}% of found)`);
+    console.log(`position error:  median ${Math.round(median(dists))}pt   systematic offset dx=${Math.round(median(dxs))} dy=${Math.round(median(dys))}`);
+    console.log(`core-key:        ${coreOk}/${coreTotal} of registry-mappable fields`);
   }
 }
 
