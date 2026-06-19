@@ -18,16 +18,20 @@ export async function extractPdfText(bytes: Uint8Array): Promise<string> {
     // Quiet pdfjs in a server context.
     verbosity: 0,
   }).promise;
-  const parts: string[] = [];
-  for (let i = 1; i <= doc.numPages; i++) {
-    const page = await doc.getPage(i);
-    const content = await page.getTextContent();
-    parts.push(
-      content.items
-        .map((it) => ("str" in it ? it.str : ""))
-        .join(" ")
-    );
+  try {
+    const parts: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      parts.push(
+        content.items
+          .map((it) => ("str" in it ? it.str : ""))
+          .join(" ")
+      );
+    }
+    return parts.join("\n");
+  } finally {
+    // Always tear down (a corrupt page mid-loop must not leak the doc).
+    await doc.destroy();
   }
-  await doc.destroy();
-  return parts.join("\n");
 }

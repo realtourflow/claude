@@ -92,9 +92,8 @@ export function flatFingerprint(bytes: Uint8Array): string {
 /**
  * Recognize a FLAT upload (no AcroForm fields → no structure fingerprint) by the
  * blank's exact content hash. Same conservative match as matchKnownForm: active,
- * visible in the market, exactly one. BUILT BUT NOT WIRED — the upload route still
- * rejects flat PDFs; calling this before that 422 is the gated next step once
- * placement is reviewed.
+ * visible in the market, exactly one. The upload route tries this first on a flat
+ * upload, then falls back to matchTextLayoutKnownForm.
  */
 export async function matchFlatKnownForm(input: {
   bytes: Uint8Array;
@@ -121,13 +120,19 @@ export const TEXT_LAYOUT_MATCH_THRESHOLD = 0.5;
  * exact content hash missed — so a re-saved / re-exported same-layout copy still
  * matches a known form and gets exact catalog placement. Returns the best
  * candidate, its confidence, and the runner-up's confidence (so the caller can
- * see the margin). A match requires confidence >= threshold. BUILT, NOT WIRED.
+ * see the margin). A match requires confidence >= threshold. Wired on the flat
+ * upload path after the content hash misses.
  */
 export async function matchTextLayoutKnownForm(input: {
   fingerprint: number[];
   market: string;
   threshold: number;
 }): Promise<{ best: KnownFormRow | null; confidence: number; runnerUp: number }> {
+  // No signal (a scanned / empty-text PDF gives an all-max signature that would
+  // spuriously self-match a degenerate entry) → don't match.
+  if (!input.fingerprint.length || input.fingerprint.every((v) => v === 0xffffffff)) {
+    return { best: null, confidence: 0, runnerUp: 0 };
+  }
   const rows = await prisma.known_forms.findMany({
     where: { active: true, board: { in: ["", input.market] } },
     select: { ...KNOWN_SELECT, text_minhash: true },
