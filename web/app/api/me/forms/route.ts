@@ -6,6 +6,7 @@ import { extractAcroFields } from "@/lib/form-ai/extract";
 import { PDFDocument } from "pdf-lib";
 import {
   matchKnownForm,
+  matchFlatKnownForm,
   copyKnownFields,
   type KnownFormRow,
 } from "@/lib/known-forms";
@@ -118,14 +119,6 @@ export async function POST(req: Request): Promise<Response> {
       }
 
       const fields = await extractAcroFields(bytes);
-      if (fields.length === 0) {
-        // Flat / non-fillable PDF — nothing to map. Don't persist; clean up S3.
-        await deleteObject(body.s3_key);
-        return error(
-          "this PDF has no fillable form fields — upload a fillable (AcroForm) PDF",
-          422
-        );
-      }
 
       const statement = await getAttestationStatement();
       const agentUser = await prisma.users.findUnique({
@@ -134,21 +127,42 @@ export async function POST(req: Request): Promise<Response> {
       });
       const agentMarket = agentUser?.market ?? "";
 
-      // Recognition (Layer 1): match the form's AcroForm structure against the
-      // known-forms catalog. A hit pre-fills the verified mapping and skips the
-      // AI mapper; generic / ambiguous / errored cases fall through to the AI
-      // pipeline. Never auto-approves — the form still goes through the gate.
+      // Recognition (Layer 1): consult the known-forms catalog FIRST. FILLABLE
+      // PDFs match by AcroForm structure; FLAT PDFs (no fields) match by exact
+      // CONTENT HASH (e.g. the seeded FORM 300) — a flat upload is no longer
+      // rejected on sight. A hit pre-fills the verified field map + exact
+      // positions and skips the AI mapper. Best-effort: errors fall through and
+      // never 500. Never auto-approves — the form still goes through the gate.
       let fingerprint = "";
       let known: KnownFormRow | null = null;
       try {
-        const pageCount = (
-          await PDFDocument.load(bytes, { ignoreEncryption: true })
-        ).getPageCount();
-        const r = await matchKnownForm({ fields, pageCount, market: agentMarket });
-        fingerprint = r.fingerprint;
-        known = r.known;
+        if (fields.length === 0) {
+          const r = await matchFlatKnownForm({ bytes, market: agentMarket });
+          fingerprint = r.fingerprint;
+          known = r.known;
+        } else {
+          const pageCount = (
+            await PDFDocument.load(bytes, { ignoreEncryption: true })
+          ).getPageCount();
+          const r = await matchKnownForm({ fields, pageCount, market: agentMarket });
+          fingerprint = r.fingerprint;
+          known = r.known;
+        }
       } catch (err) {
         console.error("form recognition failed; using AI pipeline", err);
+      }
+
+      // A FLAT upload we don't recognize has no AcroForm fields to map. The
+      // vision path — which would DETECT field boxes here and feed
+      // runFieldPipeline — is built (lib/form-ai/vision.ts) but NOT wired yet,
+      // pending its accuracy review. Until then, reject flat unknowns.
+      // TODO(vision): replace this 422 with the vision detector once approved.
+      if (fields.length === 0 && !known) {
+        await deleteObject(body.s3_key);
+        return error(
+          "this PDF has no fillable fields and isn't a recognized form yet — automatic flat-form detection is coming soon",
+          422
+        );
       }
 
       const form = await prisma.uploaded_forms.create({
