@@ -6,14 +6,13 @@
  * lib/form-ai/form-300-known.json. So a recognized FORM 300 gets EXACT placement
  * with zero vision guessing.
  *
- * ⚠️ RECOGNITION KEY IS PROVISIONAL. FORM_300_FINGERPRINT here is sha256 of the
- * DocuSign template's STORED document — which DocuSign stamps with an ENVELOPEID
- * AcroForm field, so it is NOT the bytes an agent uploads (the original blank).
- * Before wiring recognition, re-derive the fingerprint from the canonical blank
- * FORM 300 PDF agents actually upload: if that blank is truly flat (0 AcroForm
- * fields) keep the content hash + matchFlatKnownForm; if it carries real fields,
- * catalog it under the structure fingerprint (matchKnownForm) instead. The
- * 88-field catalog + EXACT POSITIONS below are correct regardless and don't change.
+ * RECOGNITION KEY: the canonical blank FORM 300 (the file agents download/upload)
+ * is genuinely FLAT — 0 AcroForm fields, verified via
+ * scripts/fingerprint-form300-blank.ts — so it's recognized by the blank's
+ * CONTENT hash ("flat:"+sha256), not a structure fingerprint. The hash is of the
+ * REAL blank, NOT DocuSign's stored copy (which carries an injected ENVELOPEID
+ * field). A structure fingerprint would be preferable — it matches any copy, not
+ * just byte-identical — but isn't available for a fieldless PDF.
  *
  * The 88 fields are cataloged ON THIS ENTRY; only the handful that map to a
  * universal registry core key carry one — the FORM-300-specific elections /
@@ -36,7 +35,12 @@ const CORE_KEY_BY_LABEL: Record<string, string> = {
   legal_description: "legal_description",
 };
 
-export const FORM_300_FINGERPRINT = `flat:${data.fileSha256}`;
+// sha256 of the CANONICAL blank FORM 300 agents upload — the genuinely-flat
+// source file (NOT DocuSign's ENVELOPEID-stamped copy, whose hash is data.fileSha256).
+// Derived from the real blank via scripts/fingerprint-form300-blank.ts.
+const BLANK_FORM_300_SHA256 =
+  "c76e29aedfb99b99793a0d5cc9b9e06d94d1e7755c408cced2b5ab5bcb66833e";
+export const FORM_300_FINGERPRINT = `flat:${BLANK_FORM_300_SHA256}`;
 export const FORM_300_ROLE_MAPPING: Record<string, string> = {
   buyer: "Buyer1",
   seller: "Seller1",

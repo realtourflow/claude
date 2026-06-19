@@ -26,6 +26,13 @@ beforeEach(async () => {
 });
 
 describe("FORM 300 known-form seed", () => {
+  it("is keyed on the REAL blank's content hash (not DocuSign's stamped copy)", () => {
+    // The genuinely-flat blank agents upload — re-derived from the real file.
+    expect(FORM_300_FINGERPRINT).toBe(
+      "flat:c76e29aedfb99b99793a0d5cc9b9e06d94d1e7755c408cced2b5ab5bcb66833e"
+    );
+  });
+
   it("seeds all 88 fields; 5 map to registry core keys, the rest stay form-specific", async () => {
     const { field_count } = await seedForm300();
     expect(field_count).toBe(88);
