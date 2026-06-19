@@ -113,6 +113,55 @@ const SYSTEM_PROMPT = [
   "is used to place a real signing field. If a page has no blanks, return an empty list.",
 ].join("\n");
 
+// ── Guided mode: locate a KNOWN form's EXPECTED fields (the recognition-library
+// catalog) instead of detecting blind. The target set is fixed, so there's no
+// over-detection, and each located field is already tied to its catalog entry +
+// core key. Used when a flat upload is recognized as a known form.
+export type ExpectedField = {
+  label: string; // the catalog Data Label, e.g. "purchase_price"
+  type: DetectedFieldType;
+  page: number; // 1-based
+};
+
+const LOCATE_TOOL_NAME = "report_locations";
+const LOCATE_TOOL = {
+  name: LOCATE_TOOL_NAME,
+  description:
+    "For each requested field, report whether it appears on this page and, if so, its bounding box.",
+  input_schema: {
+    type: "object",
+    properties: {
+      fields: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "echo the requested field's label EXACTLY" },
+            found: { type: "boolean", description: "true if this field's blank is on THIS page" },
+            x: { type: "number", description: "left edge, fraction of page width 0..1 (if found)" },
+            y: { type: "number", description: "top edge, fraction of page height 0..1 (if found)" },
+            width: { type: "number", description: "fraction of page width 0..1" },
+            height: { type: "number", description: "fraction of page height 0..1" },
+          },
+          required: ["label", "found", "x", "y", "width", "height"],
+        },
+      },
+    },
+    required: ["fields"],
+  },
+} as const;
+
+const GUIDED_SYSTEM = [
+  "You are shown ONE page of a BLANK real-estate form, plus a list of SPECIFIC",
+  "fields we expect on this form (each with a label and a type). Your ONLY job is",
+  "to LOCATE each requested field on THIS page. Do NOT report any other blanks.",
+  "For each requested field: if its blank (line / box / checkbox) is on this page,",
+  "set found=true and give its bounding box as FRACTIONS of the page (x,y from the",
+  "top-left, width, height). If it is not on this page, set found=false.",
+  "Echo each label EXACTLY as given. Use the label's meaning and the printed text",
+  "on the page to find the right blank. Box the blank itself, not the printed label.",
+].join("\n");
+
 function clampFrac(n: unknown): number {
   const v = typeof n === "number" ? n : Number(n);
   if (!Number.isFinite(v)) return 0;
@@ -166,7 +215,10 @@ function toDetectedField(
 export class ClaudeVisionDetector implements VisionFieldDetector {
   constructor(
     private readonly render: PageRenderer,
-    private readonly create?: MessagesCreate
+    private readonly create?: MessagesCreate,
+    // Calibration: shift located fields UP by this many points to correct the
+    // detector's systematic downward offset (measured ~15pt). 0 = off.
+    private readonly calibrateY = 0
   ) {}
 
   enabled(): boolean {
@@ -228,6 +280,102 @@ export class ClaudeVisionDetector implements VisionFieldDetector {
       }
     });
     return fields;
+  }
+
+  /**
+   * GUIDED detection for a KNOWN form: locate the given expected fields instead
+   * of detecting blind. Returns at most one DetectedField per expected field —
+   * keyed by the catalog label (and carrying the catalog type), so there is no
+   * over-detection and each result is already tied to its core key.
+   */
+  async detectGuided(input: {
+    pdfBytes: Uint8Array;
+    expected: ExpectedField[];
+  }): Promise<DetectedField[]> {
+    const pages = await this.render(input.pdfBytes);
+    const create = this.create ?? this.realCreate();
+    const out: DetectedField[] = [];
+    for (const page of pages) {
+      const wanted = input.expected.filter((e) => e.page === page.pageNumber);
+      if (!wanted.length) continue;
+      out.push(...(await this.locatePage(create, page, wanted)));
+    }
+    return out;
+  }
+
+  private async locatePage(
+    create: MessagesCreate,
+    page: RenderedPage,
+    wanted: ExpectedField[]
+  ): Promise<DetectedField[]> {
+    const list = wanted
+      .map((e, i) => `${i + 1}. label="${e.label}" type=${e.type}`)
+      .join("\n");
+    const body = {
+      model: env().FORM_AI_MODEL,
+      max_tokens: 8192,
+      system: GUIDED_SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/png", data: page.pngBase64 },
+            },
+            { type: "text", text: `Page ${page.pageNumber}. Locate these fields:\n${list}` },
+          ],
+        },
+      ],
+      tools: [LOCATE_TOOL],
+      tool_choice: { type: "tool", name: LOCATE_TOOL_NAME },
+    };
+
+    let res: LlmMessage;
+    try {
+      res = await create(body);
+    } catch (err) {
+      throw new VisionDetectorError(
+        `vision locate (page ${page.pageNumber}) failed: ${(err as Error).message}`
+      );
+    }
+    const tool = res.content.find((b) => b.type === "tool_use");
+    const raw = (tool?.input as { fields?: unknown } | undefined)?.fields;
+    if (!Array.isArray(raw)) return [];
+
+    // Match results back to the expected set by label — drop anything we didn't
+    // ask for (so the model can't introduce over-detection), and emit one field
+    // per located expected field, carrying the CATALOG type (not the model's).
+    const byLabel = new Map(wanted.map((e) => [e.label, e]));
+    const out: DetectedField[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== "object") continue;
+      const r = item as Record<string, unknown>;
+      if (r.found !== true) continue;
+      const exp = typeof r.label === "string" ? byLabel.get(r.label) : undefined;
+      if (!exp) continue;
+      byLabel.delete(exp.label); // one location per expected field
+      const xf = clampFrac(r.x);
+      const yf = clampFrac(r.y);
+      const wf = clampFrac(r.width);
+      const hf = clampFrac(r.height);
+      const width = wf * page.widthPts;
+      const height = hf * page.heightPts;
+      out.push({
+        name: exp.label,
+        type: exp.type, // trust the verified catalog type, not the model's
+        page: page.pageNumber,
+        rect: {
+          x: xf * page.widthPts,
+          // top-fraction → PDF bottom-left y, plus the upward calibration.
+          y: page.heightPts - yf * page.heightPts - height + this.calibrateY,
+          width,
+          height,
+        },
+        nearbyText: exp.label,
+      });
+    }
+    return out;
   }
 
   private realCreate(): MessagesCreate {

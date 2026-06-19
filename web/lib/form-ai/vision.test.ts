@@ -101,3 +101,59 @@ describe("ClaudeVisionDetector", () => {
     setVisionDetectorForTesting(undefined);
   });
 });
+
+describe("ClaudeVisionDetector — guided mode", () => {
+  it("locates expected fields by label, applies calibration, drops unrequested + not-found", async () => {
+    const det = new ClaudeVisionDetector(
+      renderer([PAGE(1)]),
+      model([
+        [
+          { label: "buyer_name", found: true, x: 0.1, y: 0.2, width: 0.3, height: 0.05 },
+          { label: "not_asked", found: true, x: 0.5, y: 0.5, width: 0.1, height: 0.02 }, // not requested → dropped
+          { label: "seller_name", found: false, x: 0, y: 0, width: 0, height: 0 }, // not on page → dropped
+        ],
+      ]),
+      10 // calibrateY: shift located fields up 10pt
+    );
+    const out = await det.detectGuided({
+      pdfBytes: new Uint8Array(),
+      expected: [
+        { label: "buyer_name", type: "text", page: 1 },
+        { label: "seller_name", type: "checkbox", page: 1 },
+      ],
+    });
+    expect(out).toHaveLength(1); // only buyer_name located
+    const f = out[0];
+    expect(f.name).toBe("buyer_name");
+    expect(f.type).toBe("text"); // catalog type, trusted over the model
+    expect(f.rect.x).toBeCloseTo(61.2, 1);
+    expect(f.rect.width).toBeCloseTo(183.6, 1);
+    expect(f.rect.height).toBeCloseTo(39.6, 1);
+    // y = 792 - 0.2*792 - 39.6 + 10 (calibration up) = 604
+    expect(f.rect.y).toBeCloseTo(604, 1);
+  });
+
+  it("keeps page numbers + catalog types across pages and ignores duplicate labels", async () => {
+    const det = new ClaudeVisionDetector(
+      renderer([PAGE(1), PAGE(2)]),
+      model([
+        [
+          { label: "a", found: true, x: 0.1, y: 0.1, width: 0.2, height: 0.03 },
+          { label: "a", found: true, x: 0.4, y: 0.4, width: 0.2, height: 0.03 }, // dup → only first kept
+        ],
+        [{ label: "b", found: true, x: 0.1, y: 0.1, width: 0.2, height: 0.03 }],
+      ])
+    );
+    const out = await det.detectGuided({
+      pdfBytes: new Uint8Array(),
+      expected: [
+        { label: "a", type: "text", page: 1 },
+        { label: "b", type: "date", page: 2 },
+      ],
+    });
+    expect(out.filter((f) => f.name === "a")).toHaveLength(1);
+    expect(out.find((f) => f.name === "a")?.page).toBe(1);
+    expect(out.find((f) => f.name === "b")?.page).toBe(2);
+    expect(out.find((f) => f.name === "b")?.type).toBe("date");
+  });
+});
