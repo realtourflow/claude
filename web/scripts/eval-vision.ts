@@ -169,13 +169,14 @@ async function run() {
     let coreTotal = 0;
     let coreOk = 0;
     for (const g of truth) {
+      // for...of (not forEach) so TS narrows `best` correctly after the loop.
       let best: { f: DetectedField; i: number; d: number; dx: number; dy: number } | null = null;
-      detected.forEach((f, i) => {
-        if (f.page !== g.page) return;
+      for (const [i, f] of detected.entries()) {
+        if (f.page !== g.page) continue;
         const t = detTop(f, pageH[g.page - 1] ?? 792);
         const d = Math.hypot(t.x - g.x, t.y - g.y);
         if (!best || d < best.d) best = { f, i, d, dx: t.x - g.x, dy: t.y - g.y };
-      });
+      }
       if (!best) continue;
       if (best.d <= 24) found24++;
       if (best.d <= 40) {
