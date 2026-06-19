@@ -6,25 +6,16 @@
  *
  * Run from web/:  npx tsx --env-file=.env scripts/prove-text-layout.ts "<form300 blank.pdf>"
  */
-import { execFileSync } from "node:child_process";
-import { writeFileSync, readFileSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { createPrivateKey } from "node:crypto";
 import { SignJWT } from "jose";
 import { PDFDocument } from "pdf-lib";
 import { seedForm300 } from "../lib/form-300-seed";
 import { computeTextFingerprint } from "../lib/text-layout";
+import { extractPdfText } from "../lib/pdf-text"; // production extractor (pdfjs)
 import { matchTextLayoutKnownForm } from "../lib/known-forms";
 
 const MARKET = "BIRMINGHAM_AAR";
-const dir = mkdtempSync(join(tmpdir(), "txt-"));
-
-function textOf(bytes: Uint8Array): string {
-  const p = join(dir, `${Math.round(performance.now())}-${bytes.length}.pdf`);
-  writeFileSync(p, Buffer.from(bytes));
-  return execFileSync("pdftotext", ["-q", p, "-"]).toString();
-}
 
 async function dsDoc(guid: string): Promise<Uint8Array> {
   const e = process.env as Record<string, string>;
@@ -54,20 +45,20 @@ async function main() {
   // FORM 300 variants (should match)
   const reSaved = await (await PDFDocument.load(blank, { ignoreEncryption: true })).save(); // different bytes, same text
   const reSaved2 = await (async () => { const d = await PDFDocument.load(blank, { ignoreEncryption: true }); d.setTitle("re-exported"); d.setProducer("Adobe"); return d.save(); })();
-  const words = textOf(blank).split(/\s+/);
+  const words = (await extractPdfText(blank)).split(/\s+/);
   const perturbed = words.filter((_, i) => i % 20 !== 0).join(" "); // drop ~5% of words (re-export noise)
 
   console.log("\n=== FORM 300 copies (should MATCH) ===");
-  await check("original blank", textOf(blank), true);
-  await check("re-saved (pdf-lib)", textOf(reSaved), true);
-  await check("re-exported (metadata changed)", textOf(reSaved2), true);
+  await check("original blank", await extractPdfText(blank), true);
+  await check("re-saved (pdf-lib)", await extractPdfText(reSaved), true);
+  await check("re-exported (metadata changed)", await extractPdfText(reSaved2), true);
   await check("re-export w/ ~5% text dropped", perturbed, true);
 
   console.log("\n=== different forms (should NOT match) ===");
   const baa = await dsDoc("863df439-b514-4774-9718-c63fa714586b");
   const lead = await dsDoc("9f07a70a-705b-4cd7-8c5c-80aaf0ac487c");
-  const cBaa = await check("Buyer Agency Agreement", textOf(baa), false);
-  const cLead = await check("Lead-Based Paint Disclosure", textOf(lead), false);
+  const cBaa = await check("Buyer Agency Agreement", await extractPdfText(baa), false);
+  const cLead = await check("Lead-Based Paint Disclosure", await extractPdfText(lead), false);
 
   console.log(`\nmargin: lowest FORM-300 copy vs highest other form = (see above). Different-form max ≈ ${Math.max(cBaa, cLead).toFixed(3)}.`);
 }
