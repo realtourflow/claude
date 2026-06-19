@@ -121,6 +121,10 @@ export type ExpectedField = {
   label: string; // the catalog Data Label, e.g. "purchase_price"
   type: DetectedFieldType;
   page: number; // 1-based
+  // Approximate location from the catalog (page fractions, top-left origin) — a
+  // search hint so the model narrows to the right field among dense clusters.
+  hintX?: number;
+  hintY?: number;
 };
 
 const LOCATE_TOOL_NAME = "report_locations";
@@ -160,6 +164,10 @@ const GUIDED_SYSTEM = [
   "top-left, width, height). If it is not on this page, set found=false.",
   "Echo each label EXACTLY as given. Use the label's meaning and the printed text",
   "on the page to find the right blank. Box the blank itself, not the printed label.",
+  "Each field includes an approximate location (x≈, y≈ as page fractions from the",
+  "top-left) from a reference copy — use it to narrow to the right region (critical",
+  "when many similar checkboxes sit close together), then locate the EXACT blank on",
+  "THIS page. The copy may have shifted, so refine the box; do not just echo the hint.",
 ].join("\n");
 
 function clampFrac(n: unknown): number {
@@ -309,7 +317,13 @@ export class ClaudeVisionDetector implements VisionFieldDetector {
     wanted: ExpectedField[]
   ): Promise<DetectedField[]> {
     const list = wanted
-      .map((e, i) => `${i + 1}. label="${e.label}" type=${e.type}`)
+      .map((e, i) => {
+        const hint =
+          e.hintX !== undefined && e.hintY !== undefined
+            ? ` (approx x≈${e.hintX.toFixed(2)} y≈${e.hintY.toFixed(2)})`
+            : "";
+        return `${i + 1}. label="${e.label}" type=${e.type}${hint}`;
+      })
       .join("\n");
     const body = {
       model: env().FORM_AI_MODEL,

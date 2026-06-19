@@ -39,7 +39,7 @@ const popplerRender: PageRenderer = async (pdfBytes) => {
   writeFileSync(pdfPath, Buffer.from(pdfBytes));
   const doc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const sizes = doc.getPages().map((p) => ({ w: p.getWidth(), h: p.getHeight() }));
-  execFileSync("pdftoppm", ["-png", "-r", "150", pdfPath, join(dir, "p")]);
+  execFileSync("pdftoppm", ["-png", "-r", "300", pdfPath, join(dir, "p")]);
   const pngs = readdirSync(dir).filter((f) => f.endsWith(".png")).sort((a, b) => {
     const n = (s: string) => Number(s.match(/p-?(\d+)\.png$/)?.[1] ?? 0);
     return n(a) - n(b);
@@ -64,13 +64,21 @@ async function main() {
   const bytes = new Uint8Array(readFileSync(path));
   const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
   const pageH = doc.getPages().map((p) => p.getHeight());
+  const pageW = doc.getPages().map((p) => p.getWidth());
 
   const fields = catalog.fields as RawField[];
-  const expected: ExpectedField[] = fields.map((f) => ({
-    label: f.label,
-    type: f.type as DetectedFieldType,
-    page: f.page,
-  }));
+  const expected: ExpectedField[] = fields.map((f) => {
+    const w = pageW[f.page - 1] ?? 612;
+    const h = pageH[f.page - 1] ?? 792;
+    return {
+      label: f.label,
+      type: f.type as DetectedFieldType,
+      page: f.page,
+      // catalog position → page-fraction top-left hint
+      hintX: f.pos_x / w,
+      hintY: (h - f.pos_y - f.height) / h,
+    };
+  });
   // ground-truth top-left position per (label,page), from the catalog.
   const truth = fields.map((f) => ({
     label: f.label,
