@@ -62,12 +62,20 @@ function visibilityWhere(agentId: string, market: string) {
   };
 }
 
+// uploaded_forms.id is a uuid. A committed-form key (e.g. "buyer_agency_agreement"
+// or a typo like "mystery_form") is never a uuid, so it can't be an uploaded form
+// — and feeding it to a uuid column makes Postgres throw. Screen it out first so
+// the caller gets a clean "not found" (→ 400), not a 500 on the id cast.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** One uploaded form resolved to a TemplateConfig, or null if not resolvable. */
 export async function getAgentFormConfig(
   formKey: string,
   agentId: string,
   market: string
 ): Promise<TemplateConfig | null> {
+  if (!UUID_RE.test(formKey)) return null;
   const row = await prisma.uploaded_forms.findFirst({
     where: { id: formKey, ...visibilityWhere(agentId, market) },
     select: SELECT,
