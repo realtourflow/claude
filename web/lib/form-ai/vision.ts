@@ -235,7 +235,9 @@ export class ClaudeVisionDetector implements VisionFieldDetector {
     if (!apiKey) {
       throw new VisionNotConfiguredError("ANTHROPIC_API_KEY is not set");
     }
-    const client = new Anthropic({ apiKey });
+    // A 13-page contract is 13 calls; one transient timeout shouldn't sink the
+    // whole detect. Generous per-call timeout + retries.
+    const client = new Anthropic({ apiKey, maxRetries: 4, timeout: 180_000 });
     return async (body: unknown) => {
       const msg = await client.messages.create(
         body as Anthropic.MessageCreateParamsNonStreaming
