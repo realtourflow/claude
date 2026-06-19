@@ -6,12 +6,18 @@
  * lib/form-ai/form-300-known.json. So a recognized FORM 300 gets EXACT placement
  * with zero vision guessing.
  *
- * The underlying PDF is flat (no AcroForm fields), so it's recognized by the
- * blank's CONTENT hash ("flat:"+sha256), not the structure fingerprint — see
- * matchFlatKnownForm. The 88 fields are cataloged ON THIS ENTRY; only the handful
- * that map to a universal registry core key carry one — the FORM-300-specific
- * elections/contingencies stay form-local (core_key null), never added to the
- * universal core list.
+ * ⚠️ RECOGNITION KEY IS PROVISIONAL. FORM_300_FINGERPRINT here is sha256 of the
+ * DocuSign template's STORED document — which DocuSign stamps with an ENVELOPEID
+ * AcroForm field, so it is NOT the bytes an agent uploads (the original blank).
+ * Before wiring recognition, re-derive the fingerprint from the canonical blank
+ * FORM 300 PDF agents actually upload: if that blank is truly flat (0 AcroForm
+ * fields) keep the content hash + matchFlatKnownForm; if it carries real fields,
+ * catalog it under the structure fingerprint (matchKnownForm) instead. The
+ * 88-field catalog + EXACT POSITIONS below are correct regardless and don't change.
+ *
+ * The 88 fields are cataloged ON THIS ENTRY; only the handful that map to a
+ * universal registry core key carry one — the FORM-300-specific elections /
+ * contingencies stay form-local (core_key null), never added to the core list.
  */
 import data from "./form-ai/form-300-known.json";
 import { prisma } from "./db";
