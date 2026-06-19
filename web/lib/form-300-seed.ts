@@ -88,6 +88,8 @@ export function form300SeedRow() {
     page_count: data.pageCount,
     fields,
     role_mapping: FORM_300_ROLE_MAPPING,
+    // Text-layout fingerprint of the blank — matches re-saved/same-layout copies.
+    text_minhash: data.textMinhash as number[],
   };
 }
 
@@ -103,6 +105,7 @@ export async function seedForm300(createdBy?: string): Promise<{ id: string; fie
     page_count: row.page_count,
     fields: row.fields as object,
     role_mapping: row.role_mapping as object,
+    text_minhash: row.text_minhash as object,
     active: true,
   };
   const existing = await prisma.known_forms.findFirst({

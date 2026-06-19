@@ -12,6 +12,7 @@ import {
   computeStructureFingerprint,
   GENERIC_RATIO_THRESHOLD,
 } from "./form-ai/fingerprint";
+import { jaccard } from "./text-layout";
 
 // One field in a known form's verified "answer key".
 export type KnownField = {
@@ -105,6 +106,52 @@ export async function matchFlatKnownForm(input: {
     select: KNOWN_SELECT,
   });
   return { fingerprint, known: matches.length === 1 ? matches[0] : null };
+}
+
+// Confidence threshold for a text-layout match. Chosen from the proof
+// (scripts/prove-text-layout.ts): real FORM 300 copies scored 0.67–1.00 (re-saves
+// 1.00), while different forms (BAA, Lead Paint) scored ≤0.008 — a ~0.66 gap. 0.5
+// sits in the middle with huge margin both ways: it matches every realistic
+// same-layout copy yet rejects different forms AND major-revision/different-layout
+// versions (which should fall through to vision, not get the wrong placement).
+export const TEXT_LAYOUT_MATCH_THRESHOLD = 0.5;
+
+/**
+ * Recognize a flat upload by TEXT-LAYOUT similarity (MinHash Jaccard) when the
+ * exact content hash missed — so a re-saved / re-exported same-layout copy still
+ * matches a known form and gets exact catalog placement. Returns the best
+ * candidate, its confidence, and the runner-up's confidence (so the caller can
+ * see the margin). A match requires confidence >= threshold. BUILT, NOT WIRED.
+ */
+export async function matchTextLayoutKnownForm(input: {
+  fingerprint: number[];
+  market: string;
+  threshold: number;
+}): Promise<{ best: KnownFormRow | null; confidence: number; runnerUp: number }> {
+  const rows = await prisma.known_forms.findMany({
+    where: { active: true, board: { in: ["", input.market] } },
+    select: { ...KNOWN_SELECT, text_minhash: true },
+  });
+  let best: KnownFormRow | null = null;
+  let bestConf = 0;
+  let runnerUp = 0;
+  for (const r of rows) {
+    const sig = r.text_minhash;
+    if (!Array.isArray(sig)) continue; // entries without a text fingerprint
+    const conf = jaccard(input.fingerprint, sig as number[]);
+    if (conf > bestConf) {
+      runnerUp = bestConf;
+      bestConf = conf;
+      const { text_minhash: _omit, ...rest } = r;
+      void _omit;
+      best = rest as KnownFormRow;
+    } else if (conf > runnerUp) {
+      runnerUp = conf;
+    }
+  }
+  return bestConf >= input.threshold
+    ? { best, confidence: bestConf, runnerUp }
+    : { best: null, confidence: bestConf, runnerUp };
 }
 
 /**
