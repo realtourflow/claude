@@ -8,6 +8,10 @@
 // Legacy build runs in plain Node without a DOM/worker.
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
+// A real contract form is well under this; cap the loop so a malicious
+// many-page PDF can't run away (the text-layout signal is in the early pages).
+const MAX_PAGES = 50;
+
 export async function extractPdfText(bytes: Uint8Array): Promise<string> {
   const doc = await getDocument({
     // Copy: pdfjs transfers (detaches) the input buffer to its worker, which
@@ -20,7 +24,8 @@ export async function extractPdfText(bytes: Uint8Array): Promise<string> {
   }).promise;
   try {
     const parts: string[] = [];
-    for (let i = 1; i <= doc.numPages; i++) {
+    const pages = Math.min(doc.numPages, MAX_PAGES);
+    for (let i = 1; i <= pages; i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
       parts.push(

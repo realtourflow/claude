@@ -4,6 +4,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   DeleteObjectCommand,
   type GetObjectCommandOutput,
 } from "@aws-sdk/client-s3";
@@ -80,6 +81,7 @@ beforeEach(async () => {
   s3Mock.reset();
   s3Mock.on(PutObjectCommand).resolves({});
   s3Mock.on(DeleteObjectCommand).resolves({});
+  s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 4096 }); // within the size cap
   s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FILLABLE) });
   setFieldMapperForTesting(fakeMapper);
 });
@@ -272,6 +274,16 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
     s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT) });
     const res = await createForm(await postForm(agent.id, "auth0|a"));
     expect(res.status).toBe(422);
+    expect(await prisma.uploaded_forms.count()).toBe(0);
+  });
+
+  it("413 for an oversized upload — rejected before any parsing, persists nothing", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 30 * 1024 * 1024 }); // 30MB > 25MB cap
+    // If the route parsed the bytes it would blow up here — it must not get this far.
+    s3Mock.on(GetObjectCommand).rejects(new Error("body should not be fetched for an oversized upload"));
+    const res = await createForm(await postForm(agent.id, "auth0|a"));
+    expect(res.status).toBe(413);
     expect(await prisma.uploaded_forms.count()).toBe(0);
   });
 

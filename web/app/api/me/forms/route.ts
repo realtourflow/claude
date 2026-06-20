@@ -1,7 +1,7 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
-import { getObjectBytes, deleteObject } from "@/lib/s3";
+import { getObjectBytes, getObjectSize, deleteObject } from "@/lib/s3";
 import { extractAcroFields } from "@/lib/form-ai/extract";
 import { PDFDocument } from "pdf-lib";
 import {
@@ -21,6 +21,12 @@ import {
   runFieldPipeline,
   sha256Hex,
 } from "@/lib/uploaded-forms";
+
+// Bound the work this route does on untrusted upload bytes (it loads them into
+// pdf-lib AND pdfjs). Cap the function time and reject an oversized object before
+// buffering/parsing it — a legit blank form is well under this.
+export const maxDuration = 60;
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
 
 type FormListRow = {
   id: string;
@@ -111,6 +117,22 @@ export async function POST(req: Request): Promise<Response> {
         return error(
           "you must attest you are licensed and permitted to use and host this form",
           400
+        );
+      }
+
+      // Reject an oversized object FIRST (cheap HeadObject), before buffering or
+      // parsing it — a malicious huge/nested PDF must not OOM or time out the fn.
+      let size: number;
+      try {
+        size = await getObjectSize(body.s3_key);
+      } catch {
+        return error("uploaded file not found", 400);
+      }
+      if (size > MAX_UPLOAD_BYTES) {
+        await deleteObject(body.s3_key);
+        return error(
+          `file too large — max ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB`,
+          413
         );
       }
 
