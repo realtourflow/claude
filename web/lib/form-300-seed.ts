@@ -21,6 +21,7 @@
 import data from "./form-ai/form-300-known.json";
 import { prisma } from "./db";
 import type { KnownField } from "./known-forms";
+import { PURCHASE_AGREEMENT_KEY, resolveFormTypeId } from "./form-types-seed";
 
 // FORM 300 labels that map to a universal registry core key (auto-filled from the
 // deal). Everything else is FORM-300-specific (core_key null). NOTE: many of the
@@ -96,6 +97,10 @@ export function form300SeedRow() {
 /** Idempotent seed — upsert by the unique (fingerprint, board). */
 export async function seedForm300(createdBy?: string): Promise<{ id: string; field_count: number }> {
   const row = form300SeedRow();
+  // Link to the purchase_agreement document TYPE if it's been seeded — FORM 300 is
+  // ONE known LAYOUT of that type. Best-effort: null when types aren't seeded yet
+  // (the canonical path, scripts/seed-form-types, seeds types first).
+  const typeId = await resolveFormTypeId(PURCHASE_AGREEMENT_KEY);
   const common = {
     label: row.label,
     side: row.side,
@@ -106,6 +111,7 @@ export async function seedForm300(createdBy?: string): Promise<{ id: string; fie
     fields: row.fields as object,
     role_mapping: row.role_mapping as object,
     text_minhash: row.text_minhash as object,
+    type_id: typeId,
     active: true,
   };
   const existing = await prisma.known_forms.findFirst({

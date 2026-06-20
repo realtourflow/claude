@@ -1,0 +1,800 @@
+{
+  "key": "purchase_agreement",
+  "label": "Purchase Agreement",
+  "description": "The fields any residential purchase agreement needs, mapped to auto-fill core keys where they apply. Position-FREE: a specific layout supplies coordinates via recognition (known_forms) or guided vision per upload.",
+  "side": "both",
+  "provenance": "Curated from FORM 300 (88 fields) cross-referenced against 2 real alternate purchase agreements (Baldwin REALTORS BR 02/2026; ValleyMLS Financed Sales Contract 11/2025) by a 4-judge panel + adversarial completeness critic. 30 FORM-300-specific elections excluded; universal fields the alternates carry but FORM 300 lacked (explicit party signatures, brokerage names, USDA financing, property state, binding date, earnest-money holder, included fixtures) were added. NOTE: roles + auto-fill identity (agent_name/brokerage_name) are buy-side (FORM 300 is buy-side); sell-side role resolution is a later phase.",
+  "fieldCount": 79,
+  "fields": [
+    {
+      "label": "buyer_name",
+      "type": "text",
+      "role": "Buyer1",
+      "tier": "core",
+      "core_key": "buyer_name",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 buyer_name (Buyer1)."
+    },
+    {
+      "label": "seller_name",
+      "type": "text",
+      "role": "Seller1",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 seller_name (Seller1)."
+    },
+    {
+      "label": "effective_date",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "offer_date",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 effective_date = offer/effective date of agreement."
+    },
+    {
+      "label": "property_address",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 property_address."
+    },
+    {
+      "label": "property_city",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "city",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 property_city."
+    },
+    {
+      "label": "property_county",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 property_county."
+    },
+    {
+      "label": "property_zip",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "zip",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 property_zip."
+    },
+    {
+      "label": "legal_description",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "legal_description",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 legal_description."
+    },
+    {
+      "label": "ppin",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "parcel_or_ppin",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 ppin = parcel/PPIN."
+    },
+    {
+      "label": "mls_id",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 mls_id."
+    },
+    {
+      "label": "purchase_price",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "purchase_price",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 purchase_price."
+    },
+    {
+      "label": "listing_agent",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 listing_agent name. core_key nulled: listing agent is the counterparty, not the RTF user (no scalar collision with buyer_agent)."
+    },
+    {
+      "label": "buyer_agent",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "agent_name",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 buyer_agent name."
+    },
+    {
+      "label": "earnest_money_amount",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "earnest_money_amount",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 earnest_money_amount."
+    },
+    {
+      "label": "loan_amount",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": "loan_amount_or_pct",
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 loan_amount."
+    },
+    {
+      "label": "other_financing_description",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 other_financing_description."
+    },
+    {
+      "label": "finance_contingency_date",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 finance_contingency_date."
+    },
+    {
+      "label": "seller_concession_amount",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 seller_concession_amount."
+    },
+    {
+      "label": "buyer_broker_comp_percentage",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": "buyer_broker_comp",
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 buyer_broker_comp_percentage."
+    },
+    {
+      "label": "closing_date",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "closing_date",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 closing_date."
+    },
+    {
+      "label": "possession_date",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "possession",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 possession_date."
+    },
+    {
+      "label": "warranty_max_amount",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 warranty_max_amount (home warranty cost cap)."
+    },
+    {
+      "label": "inspection_completion_date",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 inspection_completion_date."
+    },
+    {
+      "label": "warranty_deed_type",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 warranty_deed_type."
+    },
+    {
+      "label": "listing_agent_of_seller",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "agency_role",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 agency role: listing agent represents seller."
+    },
+    {
+      "label": "listing_transaction_facilitator",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "agency_role",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 agency role: listing transaction facilitator."
+    },
+    {
+      "label": "listing_dual_agent",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "agency_role",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 agency role: listing dual agent."
+    },
+    {
+      "label": "buyer_agent_of_buyer",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "agency_role",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 agency role: buyer agent represents buyer."
+    },
+    {
+      "label": "buyer_transaction_facilitator",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "agency_role",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 agency role: buyer transaction facilitator."
+    },
+    {
+      "label": "buyer_dual_agent",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "agency_role",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 agency role: buyer dual agent."
+    },
+    {
+      "label": "cash_buyer",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "financing_type",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 financing type: cash."
+    },
+    {
+      "label": "financing_buyer",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "financing_type",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 financing type: financing/new mortgage."
+    },
+    {
+      "label": "conventional",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "financing_type",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 loan type: conventional."
+    },
+    {
+      "label": "FHA",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "financing_type",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 loan type: FHA."
+    },
+    {
+      "label": "VA",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "financing_type",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 loan type: VA."
+    },
+    {
+      "label": "other_financing",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "financing_type",
+      "required": true,
+      "source": "form_300",
+      "note": "FORM 300 loan type: other financing."
+    },
+    {
+      "label": "appraisal_contingency_is",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 appraisal contingency IS."
+    },
+    {
+      "label": "appraisal_contingency_not",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 appraisal contingency IS NOT."
+    },
+    {
+      "label": "seller_concession_yes",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 seller concession elected."
+    },
+    {
+      "label": "Buyer_broker_comp_checkbox",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 buyer broker comp election checkbox. core_key nulled: election checkbox, not the comp value (buyer_broker_comp_percentage carries it)."
+    },
+    {
+      "label": "buyer_sale_contingency_is",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 buyer sale-of-property contingency IS."
+    },
+    {
+      "label": "buyer_sale_contingency_not",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 buyer sale-of-property contingency IS NOT."
+    },
+    {
+      "label": "warranty_does",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 home warranty: does furnish."
+    },
+    {
+      "label": "warranty_does_not",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 home warranty: does not furnish."
+    },
+    {
+      "label": "warranty_paid_by_seller",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 home warranty paid by seller."
+    },
+    {
+      "label": "warranty_paid_by_buyer",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 home warranty paid by buyer."
+    },
+    {
+      "label": "paint_attached_yes",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 lead-based paint disclosure attached: yes."
+    },
+    {
+      "label": "paint_attached_no",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 lead-based paint disclosure attached: no."
+    },
+    {
+      "label": "survey_is",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 survey contingency IS."
+    },
+    {
+      "label": "survey_is_not",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 survey contingency IS NOT."
+    },
+    {
+      "label": "contingent_upon_inspection_and_repairs",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 inspection: contingent upon inspection and repairs."
+    },
+    {
+      "label": "contingent_upon_inspection_no_repair",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 inspection: contingent upon inspection, no repair."
+    },
+    {
+      "label": "not_contingent_upon_inspection",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 inspection: not contingent (as-is)."
+    },
+    {
+      "label": "buyer_title_expense",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 title expense paid by buyer."
+    },
+    {
+      "label": "seller_title_expense",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 title expense paid by seller."
+    },
+    {
+      "label": "title_split",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "form_300",
+      "note": "FORM 300 title expense split."
+    },
+    {
+      "label": "property_state",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "state",
+      "required": true,
+      "source": "alternate",
+      "note": "Universal PA concept missing from FORM 300; from Baldwin REALTORS (property_state) + ValleyMLS (property_state). FORM 300 captures city/county/zip but not state."
+    },
+    {
+      "label": "acceptance_binding_date",
+      "type": "date",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "acceptance_binding_date",
+      "required": true,
+      "source": "alternate",
+      "note": "Universal binding/acceptance date distinct from offer date; from Baldwin REALTORS (acceptance_date). FORM 300 has only effective_date."
+    },
+    {
+      "label": "earnest_money_holder",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": "earnest_money_holder",
+      "required": false,
+      "source": "alternate",
+      "note": "Universal earnest-money escrow holder; from ValleyMLS (earnest_money_holder) + Baldwin REALTORS (holder elections). FORM 300 captures amount only."
+    },
+    {
+      "label": "loan_type_usda",
+      "type": "checkbox",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "financing_type",
+      "required": true,
+      "source": "alternate",
+      "note": "Universal loan-type option; from Baldwin REALTORS (loan_type_usda). FORM 300 lacks a USDA checkbox."
+    },
+    {
+      "label": "included_fixtures",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": "included_fixtures",
+      "required": false,
+      "source": "alternate",
+      "note": "Universal personal-property / fixtures-conveying field; from Baldwin REALTORS (personal_property_conveying / itemized_fixtures). FORM 300 has no free-text fixtures field."
+    },
+    {
+      "label": "additional_provisions",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": "additional_provisions",
+      "required": false,
+      "source": "alternate",
+      "note": "Universal additional-provisions / special-stipulations text; from ValleyMLS (additional_provisions). FORM 300 has no general provisions field in the kept set."
+    },
+    {
+      "label": "title_vesting_names",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "alternate",
+      "note": "Universal manner-of-taking-title / vesting names; from Baldwin REALTORS (title_vesting_names). FORM 300 kept set has no vesting-names field."
+    },
+    {
+      "label": "time_to_respond_date",
+      "type": "date",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "alternate",
+      "note": "Universal offer-expiration / time-to-respond deadline date; from Baldwin REALTORS (time_to_respond_date). FORM 300 kept set lacks it."
+    },
+    {
+      "label": "time_to_respond_time",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "alternate",
+      "note": "Universal offer-expiration time of day; from Baldwin REALTORS (time_to_respond_time)."
+    },
+    {
+      "label": "buyer1_signature",
+      "type": "signature",
+      "role": "Buyer1",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "alternate",
+      "note": "Universal buyer signature; from Baldwin REALTORS (buyer1_signature) + ValleyMLS (purchaser_signature_1). FORM 300 kept set has no signature fields."
+    },
+    {
+      "label": "buyer1_signature_date",
+      "type": "date",
+      "role": "Buyer1",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "alternate",
+      "note": "Universal buyer signature date; from Baldwin REALTORS (buyer1_signature_date) + ValleyMLS (purchaser_date_1)."
+    },
+    {
+      "label": "buyer1_print_name",
+      "type": "text",
+      "role": "Buyer1",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "alternate",
+      "note": "Universal buyer printed name at signature; from Baldwin REALTORS (buyer1_print_name)."
+    },
+    {
+      "label": "buyer2_signature",
+      "type": "signature",
+      "role": "Buyer2",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "alternate",
+      "note": "Universal second-buyer signature; from Baldwin REALTORS (buyer2_signature) + ValleyMLS (purchaser_signature_2)."
+    },
+    {
+      "label": "buyer2_signature_date",
+      "type": "date",
+      "role": "Buyer2",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "alternate",
+      "note": "Universal second-buyer signature date; from Baldwin REALTORS (buyer2_signature_date)."
+    },
+    {
+      "label": "buyer2_print_name",
+      "type": "text",
+      "role": "Buyer2",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "alternate",
+      "note": "Universal second-buyer printed name; from Baldwin REALTORS (buyer2_print_name)."
+    },
+    {
+      "label": "seller1_signature",
+      "type": "signature",
+      "role": "Seller1",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "alternate",
+      "note": "Universal seller signature; from Baldwin REALTORS (seller1_signature) + ValleyMLS (seller_signature_1)."
+    },
+    {
+      "label": "seller1_signature_date",
+      "type": "date",
+      "role": "Seller1",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "alternate",
+      "note": "Universal seller signature date; from Baldwin REALTORS (seller1_signature_date) + ValleyMLS (seller_date_1)."
+    },
+    {
+      "label": "seller1_print_name",
+      "type": "text",
+      "role": "Seller1",
+      "tier": "core",
+      "core_key": null,
+      "required": true,
+      "source": "alternate",
+      "note": "Universal seller printed name; from Baldwin REALTORS (seller1_print_name)."
+    },
+    {
+      "label": "seller2_signature",
+      "type": "signature",
+      "role": "Seller2",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "alternate",
+      "note": "Universal second-seller signature; from Baldwin REALTORS (seller2_signature) + ValleyMLS (seller_signature_2)."
+    },
+    {
+      "label": "seller2_signature_date",
+      "type": "date",
+      "role": "Seller2",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "alternate",
+      "note": "Universal second-seller signature date; from Baldwin REALTORS (seller2_signature_date)."
+    },
+    {
+      "label": "seller2_print_name",
+      "type": "text",
+      "role": "Seller2",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "alternate",
+      "note": "Universal second-seller printed name; from Baldwin REALTORS (seller2_print_name)."
+    },
+    {
+      "label": "buyer_brokerage_name",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "core",
+      "core_key": "brokerage_name",
+      "required": true,
+      "source": "critic",
+      "note": "Buyer-side brokerage = the RTF agent's firm (buy-side); auto-fills from the deal. Added by completeness critic."
+    },
+    {
+      "label": "listing_brokerage_name",
+      "type": "text",
+      "role": "BuyerAgent",
+      "tier": "common",
+      "core_key": null,
+      "required": false,
+      "source": "critic",
+      "note": "Listing-side (counterparty) brokerage; manual. Added by completeness critic."
+    }
+  ]
+}
