@@ -4,6 +4,7 @@ import { hasRole } from "@/lib/roles";
 import { resolveUserId } from "@/lib/users";
 import { getDownloadUrl, getObjectBytes } from "@/lib/s3";
 import { getDocusignClient } from "@/lib/docusign";
+import { PDFDocument } from "pdf-lib";
 import {
   serializeFormField,
   deriveSigners,
@@ -38,6 +39,8 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
         reviewed_at: true,
         created_at: true,
         docusign_template_id: true,
+        detection_source: true,
+        placement_confirmed_at: true,
         users_uploaded_forms_agent_idTousers: {
           select: { name: true, email: true },
         },
@@ -51,10 +54,25 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     });
 
     let previewUrl = "";
+    // Page sizes (PDF points) let the overlay convert a field's pos_x/pos_y/width/
+    // height into a fraction of the rendered page image. Best-effort, like preview.
+    let pages: Array<{ page: number; width: number; height: number }> = [];
     try {
       previewUrl = await getDownloadUrl({ key: form.source_s3_key });
     } catch {
       // preview is best-effort; review can still proceed off the field list
+    }
+    try {
+      const doc = await PDFDocument.load(await getObjectBytes(form.source_s3_key), {
+        ignoreEncryption: true,
+      });
+      pages = doc.getPages().map((p, i) => ({
+        page: i + 1,
+        width: Math.round(p.getWidth()),
+        height: Math.round(p.getHeight()),
+      }));
+    } catch {
+      // sizes are best-effort; the overlay falls back to letter (612×792)
     }
 
     const agent = form.users_uploaded_forms_agent_idTousers;
@@ -72,7 +90,12 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       reviewed_at: form.reviewed_at ? form.reviewed_at.toISOString() : null,
       created_at: form.created_at.toISOString(),
       docusign_template_id: form.docusign_template_id,
+      detection_source: form.detection_source,
+      placement_confirmed_at: form.placement_confirmed_at
+        ? form.placement_confirmed_at.toISOString()
+        : null,
       preview_url: previewUrl,
+      pages,
       core_keys: CORE_KEYS,
       // Derived signers (admin confirms/edits, then passes back on approve).
       derived_signers: deriveSigners(fields, form.side as FormSide),
@@ -123,6 +146,8 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         side: true,
         source_s3_key: true,
         source_file_name: true,
+        detection_source: true,
+        placement_confirmed_at: true,
       },
     });
     if (!form) return error("form not found", 404);
@@ -151,6 +176,17 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     if (unresolved > 0) {
       return error(
         `resolve all ${unresolved} flagged field(s) before approving`,
+        422
+      );
+    }
+
+    // MANDATORY placement gate: a vision-detected form's positions are AI guesses,
+    // so a human MUST verify them in the visual overlay before the form can become
+    // sendable. This is the unskippable chokepoint — approve is the only path to
+    // status='ready' (see lib/agent-forms.visibilityWhere). No bypass.
+    if (form.detection_source === "vision" && !form.placement_confirmed_at) {
+      return error(
+        "confirm field placement in the overlay review before approving this form",
         422
       );
     }
