@@ -59,11 +59,12 @@ function FormRow({ form }: { form: UploadedForm }) {
 }
 
 export function MyFormsSection() {
-  const { forms, loading, uploadForm, getAttestation } = useAgentForms();
+  const { forms, loading, formTypes, uploadForm, getAttestation } = useAgentForms();
 
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState("");
   const [side, setSide] = useState<FormSide>("buy");
+  const [formType, setFormType] = useState("");
   const [attested, setAttested] = useState(false);
   const [statement, setStatement] = useState(
     "I attest that I am licensed and permitted to use and host this form."
@@ -104,16 +105,17 @@ export function MyFormsSection() {
     setFile(null);
     setLabel("");
     setSide("buy");
+    setFormType("");
     setAttested(false);
     if (fileRef.current) fileRef.current.value = "";
   }
 
   async function handleSubmit() {
-    if (!file || !label.trim() || !attested || submitting) return;
+    if (!file || !label.trim() || !formType || !attested || submitting) return;
     setSubmitting(true);
     setErr(null);
     try {
-      await uploadForm(file, label, side, attested);
+      await uploadForm(file, label, side, attested, formType);
       reset();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Upload failed. Please try again.");
@@ -122,7 +124,8 @@ export function MyFormsSection() {
     }
   }
 
-  const canSubmit = !!file && !!label.trim() && attested && !submitting;
+  const canSubmit =
+    !!file && !!label.trim() && !!formType && attested && !submitting;
 
   return (
     <div className="space-y-6">
@@ -145,6 +148,28 @@ export function MyFormsSection() {
             onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
             className="mt-1 block w-full text-sm text-gray-500 file:mr-3 file:rounded-lg file:border-0 file:bg-gray-100 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-brand-navy hover:file:bg-gray-200"
           />
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-semibold text-brand-navy">
+            Document type
+          </span>
+          <select
+            value={formType}
+            onChange={(e) => setFormType(e.target.value)}
+            className="mt-1 block w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-navy focus:outline-none"
+          >
+            <option value="">Select the type of document…</option>
+            {formTypes.map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-gray-400">
+            Tell us what this is (e.g. your purchase agreement) so we can place its
+            fields for you.
+          </span>
         </label>
 
         <div className="grid gap-4 sm:grid-cols-2">
