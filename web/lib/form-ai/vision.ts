@@ -27,6 +27,12 @@ import type { DetectedField, DetectedFieldType } from "./types";
 
 export interface VisionFieldDetector {
   detect(input: { pdfBytes: Uint8Array }): Promise<DetectedField[]>;
+  // Guided mode (locate a known field set). Optional so a plain detect-only fake
+  // still satisfies the interface; the detect job requires + guards for it.
+  detectGuided?(input: {
+    pdfBytes: Uint8Array;
+    expected: ExpectedField[];
+  }): Promise<DetectedField[]>;
 }
 
 export class VisionNotConfiguredError extends Error {}
@@ -416,15 +422,30 @@ export function setVisionDetectorForTesting(d: VisionFieldDetector | undefined):
   stub = d;
 }
 
+/**
+ * The test-injected detector, or undefined. The detect job uses this when set
+ * (a fake, no API/render) and otherwise builds the real ClaudeVisionDetector over
+ * the serverless renderer — keeping vision.ts free of a render.ts import cycle.
+ */
+export function getInjectedVisionDetector(): VisionFieldDetector | undefined {
+  return stub;
+}
+
+/**
+ * Upward Y calibration (PDF points) applied to located boxes. Phase 0 measured a
+ * ~15pt systematic downward offset; correcting it lifts a chunk of "near" boxes
+ * onto their fields. Passed as ClaudeVisionDetector's calibrateY.
+ */
+export const VISION_CALIBRATE_Y = 15;
+
 export function getVisionDetector(): VisionFieldDetector {
   if (stub) return stub;
-  // NOT WIRED: the production detector needs a serverless-safe PageRenderer and
-  // an accuracy eval to gate it on (see docs/flat-pdf-vision-poc.md). Until then
-  // a flat upload is not auto-detected — the route still rejects it.
+  // NOT WIRED here: the production detector is built in lib/form-detect (it needs
+  // the serverless renderer). This stub stays for any caller that hasn't migrated.
   return {
     async detect() {
       throw new VisionNotConfiguredError(
-        "flat-PDF vision detection is built but not wired (pending the accuracy gate + a prod page renderer)"
+        "flat-PDF vision detection runs via the detect job (lib/form-detect), not getVisionDetector"
       );
     },
   };

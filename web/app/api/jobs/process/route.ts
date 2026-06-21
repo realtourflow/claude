@@ -11,7 +11,11 @@
  */
 import { env } from "@/lib/env";
 import { error, json } from "@/lib/http";
-import { processCalendarJobs } from "@/lib/queue";
+import { processCalendarJobs, processFormDetectJobs } from "@/lib/queue";
+
+// Vision detect jobs are slow (a dense form is ~14 model calls + a render). Give
+// the sweep room so one can finish in a single invocation.
+export const maxDuration = 300;
 
 async function handle(req: Request): Promise<Response> {
   const secret = env().CRON_SECRET;
@@ -21,8 +25,11 @@ async function handle(req: Request): Promise<Response> {
   if (auth !== `Bearer ${secret}`) return error("unauthorized", 401);
 
   try {
-    const counts = await processCalendarJobs({ limit: 25 });
-    return json(counts);
+    const [calendar, detect] = await Promise.all([
+      processCalendarJobs({ limit: 25 }),
+      processFormDetectJobs({ limit: 3 }),
+    ]);
+    return json({ calendar, detect });
   } catch (err) {
     console.error("job sweep failed", err);
     return error("job sweep failed", 500);

@@ -14,6 +14,7 @@ import {
 } from "@/lib/known-forms";
 import { extractPdfText } from "@/lib/pdf-text";
 import { computeTextFingerprint } from "@/lib/text-layout";
+import { enqueueFormDetectJob } from "@/lib/queue";
 import {
   FORM_SIDES,
   type FormSide,
@@ -205,16 +206,68 @@ export async function POST(req: Request): Promise<Response> {
         console.error("form recognition failed; using AI pipeline", err);
       }
 
-      // A FLAT upload we don't recognize has no AcroForm fields to map. The
-      // vision path — which would DETECT field boxes here and feed
-      // runFieldPipeline — is built (lib/form-ai/vision.ts) but NOT wired yet,
-      // pending its accuracy review. Until then, reject flat unknowns.
-      // TODO(vision): replace this 422 with the vision detector once approved.
+      // A FLAT upload we don't recognize → GUIDED VISION. It needs the agent's
+      // declared type to know which field set to locate. Create the form in
+      // 'detecting' and run vision in the background (N model calls won't fit this
+      // request); it flips to pending_review when done, where the MANDATORY
+      // placement overlay gates it (detection_source='vision').
       if (fields.length === 0 && !known) {
-        await deleteObject(body.s3_key);
-        return error(
-          "this PDF has no fillable fields and isn't a recognized form yet — automatic flat-form detection is coming soon",
-          422
+        if (!formTypeId) {
+          await deleteObject(body.s3_key);
+          return error(
+            "pick the document type so we can detect this form's fields",
+            422
+          );
+        }
+        const visionForm = await prisma.uploaded_forms.create({
+          data: {
+            agent_id: userId,
+            label,
+            side,
+            board: agentMarket,
+            source_s3_key: body.s3_key,
+            source_file_name: body.file_name ?? "",
+            mime_type: body.mime_type ?? "application/pdf",
+            file_size: bytes.length,
+            file_sha256: sha256Hex(bytes),
+            structure_sha256: fingerprint,
+            form_type_id: formTypeId,
+            detection_source: "vision",
+            status: "detecting",
+            attested_by: userId,
+            attestation_statement: statement,
+          },
+          select: {
+            id: true,
+            label: true,
+            side: true,
+            status: true,
+            source_file_name: true,
+            created_at: true,
+          },
+        });
+        try {
+          await enqueueFormDetectJob(visionForm.id);
+        } catch (err) {
+          // The job row is the durability record — if we can't enqueue, don't
+          // strand a 'detecting' form. Roll back and ask the agent to retry.
+          console.error("failed to enqueue vision detect job", err);
+          await prisma.uploaded_forms.delete({ where: { id: visionForm.id } });
+          await deleteObject(body.s3_key);
+          return error("couldn't start form detection — please try again", 503);
+        }
+        return json(
+          {
+            id: visionForm.id,
+            label: visionForm.label,
+            side: visionForm.side,
+            status: visionForm.status,
+            source_file_name: visionForm.source_file_name,
+            created_at: visionForm.created_at.toISOString(),
+            field_count: 0,
+            needs_review_count: 0,
+          },
+          201
         );
       }
 
@@ -234,6 +287,9 @@ export async function POST(req: Request): Promise<Response> {
           structure_sha256: fingerprint,
           recognized_from_known_form_id: known?.id ?? null,
           form_type_id: formTypeId,
+          // Trusted positions: catalog (recognized) or exact AcroForm rects — no
+          // vision, so no placement gate (detection_source defaults handle that).
+          detection_source: known ? "recognized" : "acroform",
           attested_by: userId,
           attestation_statement: statement,
           ...(known?.role_mapping

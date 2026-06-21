@@ -4,7 +4,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 
 export type FormSide = "buy" | "sell" | "both";
-export type FormStatus = "pending_review" | "ready" | "rejected" | "archived";
+export type FormStatus =
+  | "detecting"
+  | "pending_review"
+  | "ready"
+  | "rejected"
+  | "archived";
 
 export type FormType = {
   key: string;

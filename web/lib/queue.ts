@@ -35,6 +35,11 @@ export type CalendarJobPayload = {
   id: string;
 };
 
+/** Guided-vision detect jobs (Phase 3): locate a type's fields on a flat upload. */
+export const FORM_DETECT_QUEUE = "form-detect";
+
+export type FormDetectJobPayload = { formId: string };
+
 /**
  * Retry policy: 8 attempts with exponential backoff starting at 60s
  * (≈1min → 2min → 4min → … capped at 6h), so a multi-hour provider outage is
@@ -53,6 +58,15 @@ const RETRY_OPTIONS: RetryPolicy = {
   retryDelay: 60,
   retryBackoff: true,
   retryDelayMax: 6 * 60 * 60,
+};
+
+// Vision detect is expensive (N model calls + render) — retry only a few times so
+// a genuinely broken upload doesn't burn calls indefinitely.
+const DETECT_RETRY: RetryPolicy = {
+  retryLimit: 3,
+  retryDelay: 60,
+  retryBackoff: true,
+  retryDelayMax: 30 * 60,
 };
 
 // ── lazy singleton ──────────────────────────────────────────────────────────
@@ -78,6 +92,7 @@ export function getBoss(): Promise<PgBoss> {
       boss.on("error", (err) => console.error("pg-boss error", err));
       await boss.start();
       await boss.createQueue(CALENDAR_QUEUE, { ...RETRY_OPTIONS });
+      await boss.createQueue(FORM_DETECT_QUEUE, { ...DETECT_RETRY });
       return boss;
     })();
     // A failed start must not poison the singleton — let the next caller retry.
@@ -136,6 +151,12 @@ export async function completeCalendarJob(jobId: string): Promise<void> {
   await boss.complete(CALENDAR_QUEUE, jobId, null, { includeQueued: true });
 }
 
+/** Enqueue a guided-vision detect job for a freshly-uploaded flat form. */
+export async function enqueueFormDetectJob(formId: string): Promise<string | null> {
+  const boss = await getBoss();
+  return boss.send(FORM_DETECT_QUEUE, { formId } satisfies FormDetectJobPayload, { ...DETECT_RETRY });
+}
+
 // ── the sweep (worker) ──────────────────────────────────────────────────────
 
 export type ProcessResult = { processed: number; failed: number };
@@ -184,6 +205,38 @@ export async function processCalendarJobs(
       failed += 1;
       console.error(`calendar job ${job.id} failed; pg-boss will retry with backoff`, err);
       await boss.fail(CALENDAR_QUEUE, job.id, {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return { processed, failed };
+}
+
+/**
+ * Drains guided-vision detect jobs (small batch — each is N model calls + a render,
+ * so a single sweep invocation shouldn't grab many). Same fetch/complete/fail
+ * contract as the calendar sweep; runFormDetectJob is idempotent.
+ */
+export async function processFormDetectJobs(
+  opts: { limit?: number } = {}
+): Promise<ProcessResult> {
+  const limit = opts.limit ?? 3;
+  const boss = await getBoss();
+  await boss.supervise(FORM_DETECT_QUEUE);
+  const jobs = await boss.fetch<FormDetectJobPayload>(FORM_DETECT_QUEUE, { batchSize: limit });
+  const { runFormDetectJob } = await import("./form-detect");
+
+  let processed = 0;
+  let failed = 0;
+  for (const job of jobs) {
+    try {
+      await runFormDetectJob(job.data.formId);
+      await boss.complete(FORM_DETECT_QUEUE, job.id);
+      processed += 1;
+    } catch (err) {
+      failed += 1;
+      console.error(`form-detect job ${job.id} failed; pg-boss will retry with backoff`, err);
+      await boss.fail(FORM_DETECT_QUEUE, job.id, {
         message: err instanceof Error ? err.message : String(err),
       });
     }

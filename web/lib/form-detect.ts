@@ -1,0 +1,123 @@
+/**
+ * Guided-vision detect job (Phase 3). For a FLAT upload the agent declared a type
+ * for but we don't recognize, this LOCATES the type's position-free field set on
+ * the agent's specific layout and writes uploaded_form_fields. Runs in the pg-boss
+ * background queue (a dense form is ~14 vision calls — too slow for the upload
+ * request). The form sits in 'detecting' until this flips it to 'pending_review',
+ * where the MANDATORY overlay placement review gates it (detection_source='vision').
+ *
+ * Mapping comes from the TYPE (buyer_name→buyer_name, etc.) — pre-resolved, so the
+ * human's only required job is verifying POSITION in the overlay. Vision LOCATES;
+ * the type MAPS.
+ */
+import { PDFDocument } from "pdf-lib";
+import { prisma } from "./db";
+import { getObjectBytes } from "./s3";
+import {
+  ClaudeVisionDetector,
+  getInjectedVisionDetector,
+  VISION_CALIBRATE_Y,
+  type ExpectedField,
+  type PageRenderer,
+  type VisionFieldDetector,
+} from "./form-ai/vision";
+import { napiRender } from "./form-ai/render";
+import type { DetectedField, DetectedFieldType } from "./form-ai/types";
+import type { TypeField } from "./form-types-seed";
+
+const MAX_PAGES = 50; // matches the renderer cap; bounds a malicious many-page PDF
+const VALID = new Set<DetectedFieldType>(["text", "checkbox", "signature", "initial", "date"]);
+const coerce = (t: string): DetectedFieldType => (VALID.has(t as DetectedFieldType) ? (t as DetectedFieldType) : "text");
+
+/**
+ * Detect + place fields for one 'detecting' vision form, then flip it to
+ * pending_review. Idempotent: a no-op unless the form is still 'detecting', and
+ * it replaces any prior fields in one transaction (a retried job can't double-write).
+ */
+export async function runFormDetectJob(formId: string): Promise<void> {
+  const form = await prisma.uploaded_forms.findUnique({
+    where: { id: formId },
+    select: { id: true, status: true, side: true, source_s3_key: true, form_type_id: true },
+  });
+  if (!form) return; // form deleted
+  if (form.status !== "detecting") return; // already processed (idempotent)
+  if (!form.form_type_id) {
+    // No type to guide vision — nothing to locate. Send to review empty rather
+    // than strand it in 'detecting'.
+    await prisma.uploaded_forms.update({ where: { id: formId }, data: { status: "pending_review" } });
+    return;
+  }
+
+  const type = await prisma.form_types.findUnique({
+    where: { id: form.form_type_id },
+    select: { field_set: true },
+  });
+  const fieldSet = (Array.isArray(type?.field_set) ? type!.field_set : []) as unknown as TypeField[];
+  const bytes = await getObjectBytes(form.source_s3_key);
+  const pageCount = Math.min(
+    (await PDFDocument.load(bytes, { ignoreEncryption: true })).getPageCount(),
+    MAX_PAGES
+  );
+
+  // Real path renders all pages ONCE (a memoized renderer) so each per-page locate
+  // call doesn't re-rasterize. Tests inject a fake detector — no render at all.
+  const injected = getInjectedVisionDetector();
+  let detector: VisionFieldDetector;
+  if (injected) {
+    detector = injected;
+  } else {
+    const pages = await napiRender(bytes);
+    const cached: PageRenderer = async () => pages;
+    detector = new ClaudeVisionDetector(cached, undefined, VISION_CALIBRATE_Y);
+  }
+  const detectGuided = detector.detectGuided?.bind(detector);
+  if (!detectGuided) throw new Error("vision detector has no detectGuided");
+
+  // On a NEW layout we don't know a field's page, so query EVERY page with the
+  // FULL field list and NO position hints (the exact Phase 0 protocol).
+  const base = fieldSet.map((f) => ({ label: f.label, type: coerce(f.type) }));
+  const located: DetectedField[] = [];
+  for (let p = 1; p <= pageCount; p++) {
+    const expected: ExpectedField[] = base.map((e) => ({ ...e, page: p }));
+    located.push(...(await detectGuided({ pdfBytes: bytes, expected })));
+  }
+
+  // Map each located box back to its type field (mapping is from the type, not a
+  // guess → mapping is pre-resolved; needs_review=false so ONLY placement gates).
+  const byLabel = new Map(fieldSet.map((f) => [f.label, f]));
+  const rows = located
+    .map((d) => {
+      const tf = byLabel.get(d.name);
+      if (!tf) return null;
+      return {
+        form_id: formId,
+        detected_name: d.name,
+        detected_type: d.type,
+        page_number: d.page,
+        pos_x: d.rect.x,
+        pos_y: d.rect.y,
+        width: d.rect.width,
+        height: d.rect.height,
+        nearby_text: d.nearbyText ?? tf.label,
+        ai_core_key: tf.core_key,
+        ai_role: tf.role,
+        ai_confidence: 1, // mapping known from the type
+        ai_rationale: "vision-located on the agent's layout; mapping from the document type",
+        needs_review: false, // mapping resolved; PLACEMENT is gated separately
+        final_core_key: tf.core_key,
+        final_role: tf.role,
+        final_type: tf.type,
+        decision: "accepted",
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  await prisma.$transaction(async (tx) => {
+    // Re-read under the tx so a concurrent sweep can't double-process.
+    const fresh = await tx.uploaded_forms.findUnique({ where: { id: formId }, select: { status: true } });
+    if (fresh?.status !== "detecting") return;
+    await tx.uploaded_form_fields.deleteMany({ where: { form_id: formId } });
+    if (rows.length) await tx.uploaded_form_fields.createMany({ data: rows });
+    await tx.uploaded_forms.update({ where: { id: formId }, data: { status: "pending_review" } });
+  });
+}
