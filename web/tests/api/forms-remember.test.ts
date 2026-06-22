@@ -9,6 +9,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { PDFDocument } from "pdf-lib";
 import { POST as action } from "@/app/api/admin/forms/[id]/route";
+import { POST as confirmPlacement } from "@/app/api/admin/forms/[id]/confirm-placement/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setS3ClientForTesting } from "@/lib/s3";
 import { setDocusignForTesting, type DocusignClient } from "@/lib/docusign";
@@ -107,7 +108,7 @@ describe("remember a reviewed vision form (Phase 4)", () => {
   });
 
   it("approving a vision form remembers it as a known layout (flat fingerprint + text-minhash + type link), scoped to the agent's market", async () => {
-    const agent = await createUser({ role: "agent", auth0_id: "auth0|a", market: "BIRMINGHAM_AAR" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const typeId = await resolveFormTypeId(PURCHASE_AGREEMENT_KEY);
     const id = await seedVision(agent.id, "BIRMINGHAM_AAR", typeId);
 
@@ -127,7 +128,7 @@ describe("remember a reviewed vision form (Phase 4)", () => {
   });
 
   it("the next agent's identical upload is recognized (skips vision) — and only within that market", async () => {
-    const agent = await createUser({ role: "agent", auth0_id: "auth0|a", market: "BIRMINGHAM_AAR" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const typeId = await resolveFormTypeId(PURCHASE_AGREEMENT_KEY);
     const id = await seedVision(agent.id, "BIRMINGHAM_AAR", typeId);
     await action(await approveReq(id), { params: Promise.resolve({ id }) });
@@ -141,7 +142,7 @@ describe("remember a reviewed vision form (Phase 4)", () => {
 
   it("a standard_board_form type is remembered universally (board = '')", async () => {
     await prisma.form_types.update({ where: { key: PURCHASE_AGREEMENT_KEY }, data: { standard_board_form: true } });
-    const agent = await createUser({ role: "agent", auth0_id: "auth0|a", market: "BIRMINGHAM_AAR" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const typeId = await resolveFormTypeId(PURCHASE_AGREEMENT_KEY);
     const id = await seedVision(agent.id, "BIRMINGHAM_AAR", typeId);
 
@@ -151,7 +152,7 @@ describe("remember a reviewed vision form (Phase 4)", () => {
   });
 
   it("remember failure never blocks approval (already-remembered is swallowed)", async () => {
-    const agent = await createUser({ role: "agent", auth0_id: "auth0|a", market: "BIRMINGHAM_AAR" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const typeId = await resolveFormTypeId(PURCHASE_AGREEMENT_KEY);
     const id = await seedVision(agent.id, "BIRMINGHAM_AAR", typeId);
     await action(await approveReq(id), { params: Promise.resolve({ id }) }); // first: remembers
@@ -166,12 +167,12 @@ describe("remember a reviewed vision form (Phase 4)", () => {
     expect(await prisma.known_forms.count({ where: { source_form_id: id } })).toBe(1);
   });
 
-  it("GATE ANSWER: a recognized form (the next agent) is NOT held by the placement overlay gate", async () => {
-    // A recognized upload has detection_source='recognized' (its positions were
-    // human-verified once, when remembered). The placement gate is vision-only, so
-    // it does NOT require a fresh placement confirmation — it still needs admin
-    // approval, but no re-review of placement.
-    const agent = await createUser({ role: "agent", auth0_id: "auth0|a", market: "BIRMINGHAM_AAR" });
+  it("GATE ANSWER (max-safety): a recognized form REQUIRES placement confirmation before approve — every new agent re-confirms", async () => {
+    // A recognized upload has detection_source='recognized' — its positions were
+    // verified by a PRIOR reviewer and applied to this agent's copy. Max-safety:
+    // THIS reviewer must re-confirm placement in the overlay before approval, so a
+    // first-review mistake can't propagate silently onto a contract.
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const form = await prisma.uploaded_forms.create({
       data: {
         agent_id: agent.id, label: "PA", side: "buy", board: "BIRMINGHAM_AAR",
@@ -190,8 +191,26 @@ describe("remember a reviewed vision form (Phase 4)", () => {
         decision: "accepted", final_core_key: "buyer_name", final_role: "Buyer", final_type: "text",
       },
     });
-    const res = await action(await approveReq(form.id), { params: Promise.resolve({ id: form.id }) });
-    expect(res.status).toBe(200); // approves WITHOUT a placement confirmation (vision would 422 here)
-    expect((await res.json()).status).toBe("ready");
+
+    // unconfirmed → BLOCKED (same as a vision form, not auto-approved)
+    const blocked = await action(await approveReq(form.id), { params: Promise.resolve({ id: form.id }) });
+    expect(blocked.status).toBe(422);
+    expect(await blocked.text()).toMatch(/placement/i);
+    expect((await prisma.uploaded_forms.findUniqueOrThrow({ where: { id: form.id } })).status).toBe(
+      "pending_review"
+    );
+
+    // confirm placement → now it approves
+    const confirmRes = await confirmPlacement(
+      new Request(`http://localhost/api/admin/forms/${form.id}/confirm-placement`, {
+        method: "POST",
+        headers: { authorization: await adminHdr() },
+      }),
+      { params: Promise.resolve({ id: form.id }) }
+    );
+    expect(confirmRes.status).toBe(200);
+    const ok = await action(await approveReq(form.id), { params: Promise.resolve({ id: form.id }) });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).status).toBe("ready");
   });
 });

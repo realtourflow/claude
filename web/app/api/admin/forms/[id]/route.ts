@@ -201,11 +201,21 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       );
     }
 
-    // MANDATORY placement gate: a vision-detected form's positions are AI guesses,
-    // so a human MUST verify them in the visual overlay before the form can become
-    // sendable. This is the unskippable chokepoint — approve is the only path to
-    // status='ready' (see lib/agent-forms.visibilityWhere). No bypass.
-    if (form.detection_source === "vision" && !form.placement_confirmed_at) {
+    // MANDATORY placement gate (max-safety). A form whose positions are not exact
+    // native field rects must have its placement confirmed in the overlay by THIS
+    // reviewer before it can become sendable:
+    //   - 'vision'      — AI-guessed positions.
+    //   - 'recognized'  — inherited from a remembered layout (a PRIOR reviewer's
+    //                     placement, applied to this agent's copy). We re-confirm so
+    //                     a first-review mistake can't propagate silently onto a
+    //                     legal contract.
+    // 'acroform' is exempt (the PDF itself defines the field positions). This is the
+    // unskippable chokepoint — approve is the only path to status='ready' (see
+    // lib/agent-forms.visibilityWhere). No bypass.
+    if (
+      (form.detection_source === "vision" || form.detection_source === "recognized") &&
+      !form.placement_confirmed_at
+    ) {
       return error(
         "confirm field placement in the overlay review before approving this form",
         422

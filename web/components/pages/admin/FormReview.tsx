@@ -125,10 +125,13 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
   const unresolved = detail.fields.filter((f) => f.needs_review).length;
   const editable = detail.status === "pending_review";
   const roleMap = roleMapEdit ?? detail.derived_signers.roleMapping;
-  // A vision form can't be approved until its placement is confirmed in the overlay
-  // (the server enforces this too — this just guides the admin to the gate).
+  // A vision OR recognized (remembered-layout) form can't be approved until its
+  // placement is confirmed in the overlay — every reviewer re-confirms, so a
+  // first-review mistake can't propagate. (Server enforces this too; this guides
+  // the admin to the gate.) AcroForm forms are exempt (exact native positions).
   const placementBlocked =
-    detail.detection_source === "vision" && !detail.placement_confirmed_at;
+    (detail.detection_source === "vision" || detail.detection_source === "recognized") &&
+    !detail.placement_confirmed_at;
 
   return (
     <div className="space-y-4">
