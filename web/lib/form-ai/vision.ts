@@ -432,11 +432,14 @@ export function getInjectedVisionDetector(): VisionFieldDetector | undefined {
 }
 
 /**
- * Upward Y calibration (PDF points) applied to located boxes. Phase 0 measured a
- * ~15pt systematic downward offset; correcting it lifts a chunk of "near" boxes
- * onto their fields. Passed as ClaudeVisionDetector's calibrateY.
+ * Baseline upward Y calibration (PDF points) applied to located boxes. Vision's
+ * vertical offset is real but NOT uniform — it drifts by page/layout (live testing
+ * saw ~7pt on a text-heavy page, ~15pt on a dense checkbox page). So this is just a
+ * balanced starting point; the admin overlay's per-page "shift up/down" control
+ * corrects the residual per page in one save. Passed as ClaudeVisionDetector's
+ * calibrateY.
  */
-export const VISION_CALIBRATE_Y = 15;
+export const VISION_CALIBRATE_Y = 10;
 
 export function getVisionDetector(): VisionFieldDetector {
   if (stub) return stub;

@@ -110,7 +110,7 @@ export function FormReview() {
 }
 
 function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) {
-  const { detail, loading, patchField, saveFieldPosition, confirmPlacement, approve, reject } =
+  const { detail, loading, patchField, saveFieldPosition, nudgePage, confirmPlacement, approve, reject } =
     useAdminForm(id);
   const [rejecting, setRejecting] = useState(false);
   const [notes, setNotes] = useState("");
@@ -183,6 +183,7 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
           onConfirm={async () => {
             await confirmPlacement();
           }}
+          onNudgePage={nudgePage}
         />
       ) : (
         <>

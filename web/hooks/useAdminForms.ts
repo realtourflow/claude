@@ -108,6 +108,13 @@ export function useAdminForm(id: string | null) {
     await query.refetch();
   }
 
+  // Shift every box on one page up (dy>0) or down by dy points, in one save —
+  // the fast fix for vision's per-page vertical offset. Clears confirmation.
+  async function nudgePage(page: number, dy: number): Promise<void> {
+    await api.post(`/admin/forms/${id}/nudge-page`, { page, dy });
+    await query.refetch();
+  }
+
   // The human "boxes are right" sign-off that satisfies the mandatory placement gate.
   async function confirmPlacement(): Promise<void> {
     await api.post(`/admin/forms/${id}/confirm-placement`, {});
@@ -138,6 +145,7 @@ export function useAdminForm(id: string | null) {
     loading: query.isLoading,
     patchField,
     saveFieldPosition,
+    nudgePage,
     confirmPlacement,
     approve,
     reject,

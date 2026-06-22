@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback } from "react";
-import { CheckCircle2, MousePointer2 } from "lucide-react";
+import { CheckCircle2, MousePointer2, MoveVertical } from "lucide-react";
 import type { AdminFormField } from "@/hooks/useAdminForms";
 
 type PageSize = { page: number; width: number; height: number };
@@ -25,6 +25,7 @@ export function FieldPlacementOverlay({
   confirmed,
   onSave,
   onConfirm,
+  onNudgePage,
 }: {
   formId: string;
   fields: AdminFormField[];
@@ -32,6 +33,7 @@ export function FieldPlacementOverlay({
   confirmed: boolean;
   onSave: (fieldId: string, pos: { pos_x: number; pos_y: number; width: number; height: number }) => Promise<void>;
   onConfirm: () => Promise<void>;
+  onNudgePage: (page: number, dy: number) => Promise<void>;
 }) {
   const pageById = new Map<number, PageSize>(pages.map((p) => [p.page, p]));
   const sizeOf = (page: number) => pageById.get(page) ?? { page, ...LETTER };
@@ -57,6 +59,10 @@ export function FieldPlacementOverlay({
   );
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Per-page pending vertical nudge (points, +up). Slider previews it live; release
+  // commits — saving the whole page in one shot, the fast fix for vision's
+  // per-page offset.
+  const [pageNudge, setPageNudge] = useState<Record<number, number>>({});
   const drag = useRef<{
     id: string;
     startX: number;
@@ -126,6 +132,31 @@ export function FieldPlacementOverlay({
     }
   }
 
+  // Release of the per-page slider: persist the shift (one save for the page), bake
+  // it into the box positions, and reset the slider.
+  async function commitNudge(page: number) {
+    const dy = pageNudge[page] ?? 0;
+    if (!dy) return;
+    const pg = sizeOf(page);
+    setSaving(true);
+    try {
+      await onNudgePage(page, dy);
+      setBoxes((prev) => {
+        const next = { ...prev };
+        for (const f of fields) {
+          if (f.page_number === page && next[f.id]) {
+            next[f.id] = { ...next[f.id], y: clamp01(next[f.id].y - dy / pg.height) };
+          }
+        }
+        return next;
+      });
+      setPageNudge((p) => ({ ...p, [page]: 0 }));
+      setDirty(true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const isConfirmed = confirmed && !dirty;
   const fieldsByPage = (page: number) => fields.filter((f) => f.page_number === page);
 
@@ -163,8 +194,12 @@ export function FieldPlacementOverlay({
             formId={formId}
             page={page}
             aspect={pg.width / pg.height}
+            pageHeight={pg.height}
             fields={fieldsByPage(page)}
             boxes={boxes}
+            nudge={pageNudge[page] ?? 0}
+            onNudge={(v) => setPageNudge((p) => ({ ...p, [page]: v }))}
+            onNudgeCommit={() => commitNudge(page)}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
@@ -179,8 +214,12 @@ function PageCanvas({
   formId,
   page,
   aspect,
+  pageHeight,
   fields,
   boxes,
+  nudge,
+  onNudge,
+  onNudgeCommit,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -188,17 +227,44 @@ function PageCanvas({
   formId: string;
   page: number;
   aspect: number;
+  pageHeight: number;
   fields: AdminFormField[];
   boxes: Record<string, Frac>;
+  nudge: number;
+  onNudge: (v: number) => void;
+  onNudgeCommit: () => void;
   onPointerDown: (e: React.PointerEvent, f: AdminFormField, container: HTMLElement | null) => void;
   onPointerMove: (e: React.PointerEvent) => void;
   onPointerUp: (e: React.PointerEvent) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Live nudge as a fraction of the page (subtract from each box's top).
+  const nudgeFrac = nudge / pageHeight;
   return (
     <div className="overflow-hidden rounded-lg border border-gray-200">
-      <div className="border-b border-gray-100 bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-500">
-        Page {page}
+      <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-3 py-1.5">
+        <span className="text-xs font-semibold text-gray-500">Page {page}</span>
+        {/* Per-page nudge: shift every box on this page up/down in one save — the
+            fast fix for vision's per-page vertical offset. */}
+        <label className="flex items-center gap-1.5 text-xs text-gray-500">
+          <MoveVertical size={13} className="text-gray-400" />
+          Shift page
+          <input
+            type="range"
+            min={-25}
+            max={25}
+            step={1}
+            value={nudge}
+            onChange={(e) => onNudge(Number(e.target.value))}
+            onPointerUp={onNudgeCommit}
+            onKeyUp={onNudgeCommit}
+            className="w-28 accent-brand-navy"
+            aria-label={`Shift all of page ${page} up or down`}
+          />
+          <span className="w-10 tabular-nums font-semibold text-brand-navy">
+            {nudge > 0 ? `↑${nudge}` : nudge < 0 ? `↓${-nudge}` : "0"}
+          </span>
+        </label>
       </div>
       <div
         ref={ref}
@@ -232,7 +298,7 @@ function PageCanvas({
               } hover:z-10`}
               style={{
                 left: `${b.x * 100}%`,
-                top: `${b.y * 100}%`,
+                top: `${clamp01(b.y - nudgeFrac) * 100}%`,
                 width: `${b.w * 100}%`,
                 height: `${b.h * 100}%`,
                 minWidth: 14,
