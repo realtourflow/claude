@@ -219,6 +219,11 @@ export async function saveKnownForm(input: {
   pageCount: number;
   fields: KnownField[];
   roleMapping: Record<string, string>;
+  // Text-layout fingerprint (MinHash) so a re-saved/re-exported copy of the same
+  // layout — not just byte-identical re-uploads — recognizes too.
+  textMinhash?: number[] | null;
+  // The document type this layout realizes (links the known form to its type).
+  typeId?: string | null;
   sourceFormId?: string | null;
   createdBy?: string | null;
 }): Promise<{ id: string }> {
@@ -242,6 +247,8 @@ export async function saveKnownForm(input: {
       page_count: input.pageCount,
       fields: input.fields as object,
       role_mapping: input.roleMapping as object,
+      ...(input.textMinhash ? { text_minhash: input.textMinhash as object } : {}),
+      type_id: input.typeId ?? null,
       source_form_id: input.sourceFormId ?? null,
       created_by: input.createdBy ?? null,
     },

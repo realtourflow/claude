@@ -598,18 +598,19 @@ model known_forms {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model form_types {
-  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  key            String           @unique
-  label          String
-  description    String           @default("")
-  side           String           @default("both")
-  field_set      Json             @default("[]")
-  field_count    Int              @default(0)
-  active         Boolean          @default(true)
-  created_at     DateTime         @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime         @default(now()) @db.Timestamptz(6)
-  known_forms    known_forms[]
-  uploaded_forms uploaded_forms[]
+  id                  String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key                 String           @unique
+  label               String
+  description         String           @default("")
+  side                String           @default("both")
+  field_set           Json             @default("[]")
+  field_count         Int              @default(0)
+  active              Boolean          @default(true)
+  created_at          DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime         @default(now()) @db.Timestamptz(6)
+  standard_board_form Boolean          @default(false)
+  known_forms         known_forms[]
+  uploaded_forms      uploaded_forms[]
 }
 
 enum checklist_assignee {

@@ -13,6 +13,8 @@ import {
   type SignersConfig,
 } from "@/lib/uploaded-forms";
 import { CORE_KEYS } from "@/lib/form-ai/core-keys";
+import { rememberApprovedForm } from "@/lib/remember-form";
+import { KnownFormConflictError } from "@/lib/known-forms";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -271,6 +273,21 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         docusign_template_id: templateId,
       },
     });
+
+    // Phase 4: a reviewed VISION form is now remembered as a known layout, so the
+    // next agent who uploads the same form is recognized (no vision) and inherits
+    // this reviewed placement. Best-effort — a failure, or "already remembered",
+    // must never undo the approval that already succeeded above.
+    if (form.detection_source === "vision") {
+      try {
+        await rememberApprovedForm(id, adminId);
+      } catch (err) {
+        if (!(err instanceof KnownFormConflictError)) {
+          console.error("remember-as-known failed; form stays approved", err);
+        }
+      }
+    }
+
     return json({
       id,
       status: "ready",
