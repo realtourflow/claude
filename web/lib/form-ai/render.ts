@@ -42,6 +42,34 @@ class NodeCanvasFactory {
   }
 }
 
+/**
+ * Render ONE page to a PNG buffer — the background for the admin placement overlay.
+ * Same rasterizer/DPI as the vision render, so the boxes line up with what vision saw.
+ */
+export async function renderPagePng(pdfBytes: Uint8Array, pageNum: number): Promise<Buffer> {
+  const canvasFactory = new NodeCanvasFactory();
+  const doc = await getDocument({
+    data: new Uint8Array(pdfBytes),
+    useSystemFonts: true,
+    isEvalSupported: false,
+    verbosity: 0,
+    canvasFactory,
+  } as Parameters<typeof getDocument>[0]).promise;
+  try {
+    const page = await doc.getPage(Math.max(1, Math.min(pageNum, doc.numPages)));
+    const viewport = page.getViewport({ scale: SCALE });
+    const { canvas, context } = canvasFactory.create(viewport.width, viewport.height);
+    await page.render({
+      canvasContext: context as unknown as CanvasRenderingContext2D,
+      viewport,
+    }).promise;
+    page.cleanup();
+    return canvas.toBuffer("image/png");
+  } finally {
+    await doc.destroy();
+  }
+}
+
 /** Render every page (capped) to a PNG, in the RenderedPage shape vision expects. */
 export const napiRender: PageRenderer = async (pdfBytes) => {
   const canvasFactory = new NodeCanvasFactory();

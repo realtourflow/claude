@@ -41,6 +41,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
         docusign_template_id: true,
         detection_source: true,
         placement_confirmed_at: true,
+        form_type_id: true,
         users_uploaded_forms_agent_idTousers: {
           select: { name: true, email: true },
         },
@@ -52,6 +53,21 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       where: { form_id: id },
       orderBy: [{ page_number: "asc" }, { created_at: "asc" }],
     });
+
+    // Per-field tier (core/common) from the declared type's field set — drives the
+    // overlay's color coding (core vs common). Best-effort.
+    const tierByLabel = new Map<string, string>();
+    if (form.form_type_id) {
+      const type = await prisma.form_types.findUnique({
+        where: { id: form.form_type_id },
+        select: { field_set: true },
+      });
+      const set = (Array.isArray(type?.field_set) ? type!.field_set : []) as Array<{
+        label?: string;
+        tier?: string;
+      }>;
+      for (const f of set) if (f.label) tierByLabel.set(f.label, f.tier ?? "common");
+    }
 
     let previewUrl = "";
     // Page sizes (PDF points) let the overlay convert a field's pos_x/pos_y/width/
@@ -99,7 +115,10 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       core_keys: CORE_KEYS,
       // Derived signers (admin confirms/edits, then passes back on approve).
       derived_signers: deriveSigners(fields, form.side as FormSide),
-      fields: fields.map(serializeFormField),
+      fields: fields.map((f) => ({
+        ...serializeFormField(f),
+        tier: tierByLabel.get(f.detected_name) ?? "common",
+      })),
     });
   })) as Response;
 }
