@@ -53,7 +53,7 @@ export function FieldPlacementOverlay({
   onSave: (fieldId: string, pos: { pos_x: number; pos_y: number; width: number; height: number }) => Promise<void>;
   onConfirm: () => Promise<void>;
   onNudgePage: (page: number, dy: number) => Promise<void>;
-  onAddField: (field: NewField) => Promise<void>;
+  onAddField: (field: NewField) => Promise<{ id: string; page_number: number }>;
   onDeleteField: (fieldId: string) => Promise<void>;
 }) {
   const pageById = new Map<number, PageSize>(pages.map((p) => [p.page, p]));
@@ -108,21 +108,32 @@ export function FieldPlacementOverlay({
   const [customLabel, setCustomLabel] = useState("");
   const [customType, setCustomType] = useState("text");
   const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  // The just-added field — flashed + scrolled into view so an add is never "did it
+  // even work?". Cleared after a beat.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const pageRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   // How many boxes already carry each type-field label (so the picker can flag what's
   // already placed vs still missing).
   const placedCounts = new Map<string, number>();
   for (const f of fields) placedCounts.set(f.detected_name, (placedCounts.get(f.detected_name) ?? 0) + 1);
 
-  async function addOne(input: { label: string; type: string; role?: string; core_key?: string | null }) {
+  async function addOne(input: {
+    label: string;
+    type: string;
+    role?: string;
+    core_key?: string | null;
+  }): Promise<boolean> {
     const pg = sizeOf(addPage);
     const { w, h } = sizeForType(input.type);
     // Drop it at page center; the admin drags it onto the real blank.
     const pos_x = Math.round(Math.max(0, (pg.width - w) / 2));
     const pos_y = Math.round(Math.max(0, (pg.height - h) / 2));
     setAddBusy(true);
+    setAddError(null);
     try {
-      await onAddField({
+      const created = await onAddField({
         detected_name: input.label,
         detected_type: input.type,
         page_number: addPage,
@@ -134,6 +145,16 @@ export function FieldPlacementOverlay({
         final_role: input.role || null,
       });
       setDirty(true);
+      // Make the new box impossible to miss: jump to its page and flash it.
+      setHighlightId(created.id);
+      requestAnimationFrame(() =>
+        pageRefs.current[created.page_number]?.scrollIntoView({ behavior: "smooth", block: "center" })
+      );
+      window.setTimeout(() => setHighlightId((cur) => (cur === created.id ? null : cur)), 2600);
+      return true;
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : "Could not add the field");
+      return false;
     } finally {
       setAddBusy(false);
     }
@@ -142,8 +163,8 @@ export function FieldPlacementOverlay({
   async function addCustom() {
     const label = customLabel.trim();
     if (!label) return;
-    await addOne({ label, type: customType });
-    setCustomLabel("");
+    const ok = await addOne({ label, type: customType });
+    if (ok) setCustomLabel("");
   }
 
   async function removeField(fieldId: string) {
@@ -292,6 +313,10 @@ export function FieldPlacementOverlay({
             pageHeight={pg.height}
             fields={fieldsByPage(page)}
             fracOf={fracOf}
+            highlight={highlightId}
+            registerRef={(el) => {
+              pageRefs.current[page] = el;
+            }}
             nudge={pageNudge[page] ?? 0}
             onNudge={(v) => setPageNudge((p) => ({ ...p, [page]: v }))}
             onNudgeCommit={() => commitNudge(page)}
@@ -313,6 +338,7 @@ export function FieldPlacementOverlay({
           setSearch={setSearch}
           placedCounts={placedCounts}
           busy={addBusy}
+          error={addError}
           onPick={addOne}
           customLabel={customLabel}
           setCustomLabel={setCustomLabel}
@@ -333,6 +359,8 @@ function PageCanvas({
   pageHeight,
   fields,
   fracOf,
+  highlight,
+  registerRef,
   nudge,
   onNudge,
   onNudgeCommit,
@@ -347,6 +375,8 @@ function PageCanvas({
   pageHeight: number;
   fields: AdminFormField[];
   fracOf: (f: AdminFormField) => Frac;
+  highlight: string | null;
+  registerRef: (el: HTMLDivElement | null) => void;
   nudge: number;
   onNudge: (v: number) => void;
   onNudgeCommit: () => void;
@@ -359,7 +389,7 @@ function PageCanvas({
   // Live nudge as a fraction of the page (subtract from each box's top).
   const nudgeFrac = nudge / pageHeight;
   return (
-    <div className="overflow-hidden rounded-lg border border-gray-200">
+    <div ref={registerRef} className="overflow-hidden rounded-lg border border-gray-200 scroll-mt-20">
       <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-3 py-1.5">
         <span className="text-xs font-semibold text-gray-500">Page {page}</span>
         {/* Per-page nudge: shift every box on this page up/down in one save — the
@@ -395,6 +425,7 @@ function PageCanvas({
         {fields.map((f) => {
           const b = fracOf(f);
           const core = f.tier === "core";
+          const hot = f.id === highlight;
           return (
             <div
               key={f.id}
@@ -406,7 +437,7 @@ function PageCanvas({
                 core
                   ? "border-red-500/80 bg-red-400/15 hover:bg-red-400/30"
                   : "border-blue-500/80 bg-blue-400/15 hover:bg-blue-400/30"
-              } hover:z-10`}
+              } ${hot ? "z-20 animate-pulse ring-4 ring-amber-400 ring-offset-1" : "hover:z-10"}`}
               style={{
                 left: `${b.x * 100}%`,
                 top: `${clamp01(b.y - nudgeFrac) * 100}%`,
@@ -459,6 +490,7 @@ function AddFieldDrawer({
   setSearch,
   placedCounts,
   busy,
+  error,
   onPick,
   customLabel,
   setCustomLabel,
@@ -475,6 +507,7 @@ function AddFieldDrawer({
   setSearch: (s: string) => void;
   placedCounts: Map<string, number>;
   busy: boolean;
+  error: string | null;
   onPick: (input: { label: string; type: string; role?: string; core_key?: string | null }) => void;
   customLabel: string;
   setCustomLabel: (s: string) => void;
@@ -566,11 +599,17 @@ function AddFieldDrawer({
       </div>
 
       <div className="border-t border-gray-100 px-4 py-3">
+        {error && (
+          <p className="mb-2 rounded bg-red-50 px-2 py-1 text-xs text-red-600">{error}</p>
+        )}
         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Custom field</p>
         <div className="flex items-center gap-1.5">
           <input
             value={customLabel}
             onChange={(e) => setCustomLabel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && customLabel.trim() && !busy) onAddCustom();
+            }}
             placeholder="label"
             className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 text-sm"
           />

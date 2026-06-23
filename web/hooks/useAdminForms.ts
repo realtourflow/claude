@@ -142,9 +142,14 @@ export function useAdminForm(id: string | null) {
 
   // Add a field vision missed (from the type's master list or custom), pre-placed
   // at a default spot the admin then drags onto its blank. Clears confirmation.
-  async function addField(field: NewField): Promise<void> {
-    await api.post<AdminFormField>(`/admin/forms/${id}/fields`, field);
+  // Returns the new field's id + page so the overlay can scroll to + flash it.
+  async function addField(field: NewField): Promise<{ id: string; page_number: number }> {
+    const created = await api.post<{ id: string; page_number: number }>(
+      `/admin/forms/${id}/fields`,
+      field
+    );
     await query.refetch();
+    return created;
   }
 
   // Remove a box vision put on the wrong thing. Clears confirmation.
