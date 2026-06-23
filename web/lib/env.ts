@@ -33,10 +33,13 @@ const shape = z.object({
 
   AWS_REGION: z.string().default(""),
   S3_BUCKET: z.string().default(""),
-  // Vercel Blob (Preview storage). When set, lib/s3 routes reads/writes through
-  // Blob instead of S3 — so the preview never needs AWS. Unset in production →
+  // Vercel Blob (Preview storage). When a store is configured, lib/s3 routes
+  // reads/writes through Blob instead of S3 — so the preview never needs AWS.
+  // Two auth modes: a static R/W token, OR OIDC (the newer store model) which the
+  // SDK derives from VERCEL_OIDC_TOKEN + the store id. Unset in production →
   // production keeps using S3, untouched.
   BLOB_READ_WRITE_TOKEN: z.string().default(""),
+  BLOB_STORE_ID: z.string().default(""),
 
   STRIPE_SECRET_KEY: z.string().default(""),
   STRIPE_WEBHOOK_SECRET: z.string().default(""),
