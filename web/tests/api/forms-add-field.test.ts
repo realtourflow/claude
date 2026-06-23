@@ -124,6 +124,38 @@ describe("admin adds a missing field", () => {
     expect(d.fields.find((f) => f.detected_name === "seller_name")!.tier).toBe("core");
   });
 
+  it("a CUSTOM field (new label) joins the type's master list — searchable on future forms", async () => {
+    const { id } = await seedConfirmedForm();
+    await addField(
+      await addReq(id, { detected_name: "wire_instructions_ack", detected_type: "checkbox", page_number: 1 }),
+      { params: Promise.resolve({ id }) }
+    );
+    // The picker reads the type's field_set (type_fields) — the custom field is now in it.
+    const res = await formDetail(
+      new Request(`http://localhost/api/admin/forms/${id}`, { headers: { authorization: await adminHdr() } }),
+      { params: Promise.resolve({ id }) }
+    );
+    const d = (await res.json()) as { type_fields: Array<{ label: string; type: string; source?: string; tier: string }> };
+    const tf = d.type_fields.find((t) => t.label === "wire_instructions_ack");
+    expect(tf).toBeTruthy();
+    expect(tf!.type).toBe("checkbox");
+    expect(tf!.tier).toBe("common");
+    // And it's persisted on the shared type row, not just this form.
+    const ft = await prisma.form_types.findFirstOrThrow({ where: { key: PURCHASE_AGREEMENT_KEY } });
+    const set = ft.field_set as Array<{ label: string }>;
+    expect(set.some((f) => f.label === "wire_instructions_ack")).toBe(true);
+  });
+
+  it("picking a field already on the master list does NOT duplicate it", async () => {
+    const { id } = await seedConfirmedForm();
+    await addField(await addReq(id, { detected_name: "buyer_name", detected_type: "text", page_number: 1 }), {
+      params: Promise.resolve({ id }),
+    });
+    const ft = await prisma.form_types.findFirstOrThrow({ where: { key: PURCHASE_AGREEMENT_KEY } });
+    const set = ft.field_set as Array<{ label: string }>;
+    expect(set.filter((f) => f.label === "buyer_name")).toHaveLength(1);
+  });
+
   it("validates name/type/page/core_key, and refuses a non-pending form", async () => {
     const { id } = await seedConfirmedForm();
     const noName = await addField(await addReq(id, { detected_name: "  " }), { params: Promise.resolve({ id }) });

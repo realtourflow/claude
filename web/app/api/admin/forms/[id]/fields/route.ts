@@ -64,7 +64,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
     const form = await prisma.uploaded_forms.findUnique({
       where: { id },
-      select: { status: true },
+      select: { status: true, form_type_id: true },
     });
     if (!form) return error("form not found", 404);
     if (form.status !== "pending_review") {
@@ -78,7 +78,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         where: { id },
         data: { placement_confirmed_at: null, placement_confirmed_by: null },
       });
-      return tx.uploaded_form_fields.create({
+      const row = await tx.uploaded_form_fields.create({
         data: {
           form_id: id,
           detected_name: name,
@@ -100,6 +100,36 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
           decision: "accepted",
         },
       });
+
+      // A net-new label (a custom field, not already in the type's master list) joins
+      // that list — so it's searchable in the picker on this and every future form of
+      // the type. Picked-from-list fields already exist by label → no-op (dedup).
+      if (form.form_type_id) {
+        const formType = await tx.form_types.findUnique({
+          where: { id: form.form_type_id },
+          select: { field_set: true },
+        });
+        const set = Array.isArray(formType?.field_set) ? (formType!.field_set as unknown[]) : [];
+        const known = new Set(
+          set.map((f) => (f && typeof f === "object" ? (f as { label?: string }).label : undefined))
+        );
+        if (!known.has(name)) {
+          const entry = {
+            label: name,
+            type,
+            role: body.final_role || "",
+            tier: "common",
+            core_key: body.final_core_key || null,
+            required: false,
+            source: "custom",
+          };
+          await tx.form_types.update({
+            where: { id: form.form_type_id },
+            data: { field_set: [...set, entry] as object, field_count: set.length + 1 },
+          });
+        }
+      }
+      return row;
     });
 
     return json(serializeFormField(created), 201);
