@@ -13,7 +13,11 @@ import { put, list, del } from "@vercel/blob";
 import { env } from "./env";
 
 export function blobEnabled(): boolean {
-  return !!env().BLOB_READ_WRITE_TOKEN;
+  // Blob is for the PREVIEW sandbox only. It is NEVER used in production — even if a
+  // BLOB_READ_WRITE_TOKEN is present there (e.g. the store got connected to Production
+  // by mistake). Production file storage stays 100% on S3, full stop.
+  const e = env();
+  return !!e.BLOB_READ_WRITE_TOKEN && e.VERCEL_ENV !== "production";
 }
 
 function token(): string {
