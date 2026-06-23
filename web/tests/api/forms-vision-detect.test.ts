@@ -25,7 +25,8 @@ const s3Mock = mockClient(S3Client);
 let FLAT2: Uint8Array;
 
 // Canned "located" fields — real detector replaced; labels MUST exist in the type
-// field set. detectGuided returns the fields for the page it's asked about.
+// field set. Like the real detectGuided, this returns located fields for EVERY page
+// present in the expected set (the job hands it the whole query in one call).
 const CANNED = [
   { label: "buyer_name", type: "text", page: 1, rect: { x: 72, y: 700, width: 200, height: 18 } },
   { label: "purchase_price", type: "text", page: 1, rect: { x: 400, y: 600, width: 80, height: 18 } },
@@ -34,8 +35,8 @@ const CANNED = [
 const fakeDetector: VisionFieldDetector = {
   detect: async () => [],
   detectGuided: async ({ expected }) => {
-    const page = expected[0]?.page ?? 1;
-    return CANNED.filter((c) => c.page === page).map((c) => ({
+    const pages = new Set(expected.map((e) => e.page));
+    return CANNED.filter((c) => pages.has(c.page)).map((c) => ({
       name: c.label,
       type: c.type as "text" | "signature",
       page: c.page,

@@ -110,3 +110,33 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     return json(serializeFormField(updated));
   })) as Response;
 }
+
+// DELETE /api/admin/forms/:id/fields/:fieldId — the admin removes a box vision put
+// on the wrong thing (e.g. on body text) during review. Removing a box changes
+// placement, so it CLEARS the form's placement confirmation, re-arming the gate.
+// Only while pending_review. Admin only.
+export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
+  const { id, fieldId } = await ctx.params;
+  return (await withAuth(req, async (claims): Promise<Response> => {
+    if (!hasRole(claims.roles, ["admin"])) return error("forbidden", 403);
+
+    const field = await prisma.uploaded_form_fields.findFirst({
+      where: { id: fieldId, form_id: id },
+      select: { id: true, uploaded_forms: { select: { status: true } } },
+    });
+    if (!field) return error("field not found", 404);
+    if (field.uploaded_forms.status !== "pending_review") {
+      return error("form is not pending review", 409);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.uploaded_forms.update({
+        where: { id },
+        data: { placement_confirmed_at: null, placement_confirmed_by: null },
+      });
+      await tx.uploaded_form_fields.delete({ where: { id: fieldId } });
+    });
+
+    return new Response(null, { status: 204 });
+  })) as Response;
+}

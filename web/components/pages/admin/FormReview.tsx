@@ -110,8 +110,18 @@ export function FormReview() {
 }
 
 function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) {
-  const { detail, loading, patchField, saveFieldPosition, nudgePage, confirmPlacement, approve, reject } =
-    useAdminForm(id);
+  const {
+    detail,
+    loading,
+    patchField,
+    saveFieldPosition,
+    nudgePage,
+    addField,
+    deleteField,
+    confirmPlacement,
+    approve,
+    reject,
+  } = useAdminForm(id);
   const [rejecting, setRejecting] = useState(false);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
@@ -181,12 +191,15 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
           formId={detail.id}
           fields={detail.fields}
           pages={detail.pages}
+          typeFields={detail.type_fields}
           confirmed={!!detail.placement_confirmed_at}
           onSave={saveFieldPosition}
           onConfirm={async () => {
             await confirmPlacement();
           }}
           onNudgePage={nudgePage}
+          onAddField={addField}
+          onDeleteField={deleteField}
         />
       ) : (
         <>
