@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 import { CheckCircle2, MousePointer2, MoveVertical } from "lucide-react";
 import type { AdminFormField } from "@/hooks/useAdminForms";
+import { api } from "@/lib/api-client";
 
 type PageSize = { page: number; width: number; height: number };
 // Box position as fractions of the page, TOP-LEFT origin (what CSS wants).
@@ -273,13 +274,7 @@ function PageCanvas({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={`/api/admin/forms/${formId}/page-image?page=${page}`}
-          alt={`Page ${page}`}
-          className="absolute inset-0 h-full w-full object-contain"
-          draggable={false}
-        />
+        <PageImage formId={formId} page={page} />
         {fields.map((f) => {
           const b = boxes[f.id];
           if (!b) return null;
@@ -317,5 +312,58 @@ function PageCanvas({
         })}
       </div>
     </div>
+  );
+}
+
+/**
+ * The rendered PDF page that backs the overlay. The route is admin-only (Bearer JWT),
+ * which a plain <img src> can't satisfy — so fetch it through the authed api client
+ * and show it via an object URL (revoked on unmount / page change).
+ */
+function PageImage({ formId, page }: { formId: string; page: number }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    api
+      .getBlob(`/admin/forms/${formId}/page-image?page=${page}`)
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [formId, page]);
+
+  if (failed) {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center bg-gray-50 text-xs text-gray-400">
+        Couldn’t load page {page}
+      </div>
+    );
+  }
+  if (!url) {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center bg-gray-50 text-xs text-gray-400">
+        Loading page {page}…
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt={`Page ${page}`}
+      className="absolute inset-0 h-full w-full object-contain"
+      draggable={false}
+    />
   );
 }
