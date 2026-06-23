@@ -1,10 +1,10 @@
 /**
  * Object-storage helpers — pre-signed PUT/GET URLs + object read/write/delete.
  *
- * Two backends behind one seam: S3 (production) and Vercel Blob (preview). When
- * BLOB_READ_WRITE_TOKEN is set (Preview only), every operation routes through Blob;
- * otherwise it uses S3 exactly as before, so production is untouched. Key generators
- * are backend-agnostic (a key is just a path).
+ * Two backends behind one seam: S3 (production) and Vercel Blob (preview). When a
+ * Blob store is configured (Preview only — see blobEnabled), every operation routes
+ * through Blob; otherwise it uses S3 exactly as before, so production is untouched.
+ * Key generators are backend-agnostic (a key is just a path).
  */
 import {
   S3Client,

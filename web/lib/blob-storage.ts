@@ -14,8 +14,13 @@
  * same shape as an S3 pre-signed PUT, signed with a server-only secret.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { put, list, del } from "@vercel/blob";
+import { put, del, head, get } from "@vercel/blob";
 import { env } from "./env";
+
+// The preview store is PRIVATE — blobs require authentication to read, so writes use
+// access:'private' and reads go through the SDK's authenticated get/head (NOT a raw
+// public-URL fetch).
+const ACCESS = "private" as const;
 
 export function blobEnabled(): boolean {
   // A store is configured if either auth mode is available. NEVER in production —
@@ -64,40 +69,39 @@ export async function putBlob(
   contentType: string
 ): Promise<void> {
   await put(key, Buffer.from(bytes), {
-    access: "public",
+    access: ACCESS,
     contentType,
-    addRandomSuffix: false, // pathname === key, so reads can resolve it
+    addRandomSuffix: false, // pathname === key, so reads can resolve it by key
     allowOverwrite: true,
     ...auth(),
   });
 }
 
-// Resolve a key to its blob (pathname === key since addRandomSuffix is off).
-async function find(key: string): Promise<{ url: string; size: number } | null> {
-  const { blobs } = await list({ prefix: key, limit: 1, ...auth() });
-  const b = blobs.find((x) => x.pathname === key) ?? blobs[0];
-  return b ? { url: b.url, size: b.size } : null;
-}
-
 export async function getBlobBytes(key: string): Promise<Uint8Array> {
-  const b = await find(key);
-  if (!b) throw new Error(`blob not found: ${key}`);
-  const res = await fetch(b.url);
-  if (!res.ok) throw new Error(`blob fetch ${key}: ${res.status}`);
-  return new Uint8Array(await res.arrayBuffer());
+  // Authenticated read of a private blob — the SDK sets the auth header and
+  // streams from origin (useCache:false avoids any read-after-write CDN lag, since
+  // the confirm route reads bytes immediately after the upload PUT).
+  const r = await get(key, { access: ACCESS, useCache: false, ...auth() });
+  if (!r || !r.stream) throw new Error(`blob not found: ${key}`);
+  return new Uint8Array(await new Response(r.stream).arrayBuffer());
 }
 
 export async function getBlobSize(key: string): Promise<number> {
-  return (await find(key))?.size ?? 0;
+  // head() is the cheap metadata read (no body) — throws if the blob is missing,
+  // mirroring S3 HeadObject so the caller's not-found handling is unchanged.
+  return (await head(key, { ...auth() })).size;
 }
 
 export async function getBlobUrl(key: string): Promise<string> {
-  const b = await find(key);
-  if (!b) throw new Error(`blob not found: ${key}`);
-  return b.url;
+  // The blob's canonical URL. For a private store this requires auth to fetch, so
+  // it's only used server-side / for best-effort previews — the overlay renders
+  // page images via getObjectBytes, not this URL.
+  return (await head(key, { ...auth() })).url;
 }
 
 export async function deleteBlob(key: string): Promise<void> {
-  const b = await find(key);
-  if (b) await del(b.url, { ...auth() });
+  // del() wants the URL; resolve it via head() first. Best-effort (deleteObject
+  // wraps this in try/catch), so a missing blob is a no-op.
+  const h = await head(key, { ...auth() });
+  await del(h.url, { ...auth() });
 }
