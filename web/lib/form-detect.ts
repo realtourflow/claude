@@ -22,7 +22,7 @@ import {
   type VisionFieldDetector,
 } from "./form-ai/vision";
 import { napiRender } from "./form-ai/render";
-import type { DetectedField, DetectedFieldType } from "./form-ai/types";
+import type { DetectedFieldType } from "./form-ai/types";
 import type { TypeField } from "./form-types-seed";
 
 const MAX_PAGES = 50; // matches the renderer cap; bounds a malicious many-page PDF
@@ -66,21 +66,30 @@ export async function runFormDetectJob(formId: string): Promise<void> {
   if (injected) {
     detector = injected;
   } else {
+    const renderStart = Date.now();
     const pages = await napiRender(bytes);
+    console.log(`[form-detect ${formId}] rendered ${pages.length}p in ${Date.now() - renderStart}ms`);
     const cached: PageRenderer = async () => pages;
     detector = new ClaudeVisionDetector(cached, undefined, VISION_CALIBRATE_Y);
   }
   const detectGuided = detector.detectGuided?.bind(detector);
   if (!detectGuided) throw new Error("vision detector has no detectGuided");
 
-  // On a NEW layout we don't know a field's page, so query EVERY page with the
-  // FULL field list and NO position hints (the exact Phase 0 protocol).
+  // On a NEW layout we don't know a field's page, so query EVERY page with the FULL
+  // field list and NO position hints (the exact Phase 0 protocol). Build the whole
+  // query up front and hand it to detectGuided in ONE call so it runs the per-page
+  // vision requests CONCURRENTLY — calling it once-per-page (each call seeing a single
+  // page) serialized ~30-60s/page and blew the function's 300s budget on a long form.
   const base = fieldSet.map((f) => ({ label: f.label, type: coerce(f.type) }));
-  const located: DetectedField[] = [];
+  const expected: ExpectedField[] = [];
   for (let p = 1; p <= pageCount; p++) {
-    const expected: ExpectedField[] = base.map((e) => ({ ...e, page: p }));
-    located.push(...(await detectGuided({ pdfBytes: bytes, expected })));
+    for (const e of base) expected.push({ ...e, page: p });
   }
+  const visionStart = Date.now();
+  const located = await detectGuided({ pdfBytes: bytes, expected });
+  console.log(
+    `[form-detect ${formId}] vision ${pageCount}p × ${base.length}f in ${Date.now() - visionStart}ms, located ${located.length}`
+  );
 
   // Map each located box back to its type field (mapping is from the type, not a
   // guess → mapping is pre-resolved; needs_review=false so ONLY placement gates).
