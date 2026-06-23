@@ -1,6 +1,10 @@
 /**
- * S3 helpers — pre-signed PUT/GET URLs + object delete. Mirrors the AWS SDK
- * v2 usage in the legacy Go backend.
+ * Object-storage helpers — pre-signed PUT/GET URLs + object read/write/delete.
+ *
+ * Two backends behind one seam: S3 (production) and Vercel Blob (preview). When
+ * BLOB_READ_WRITE_TOKEN is set (Preview only), every operation routes through Blob;
+ * otherwise it uses S3 exactly as before, so production is untouched. Key generators
+ * are backend-agnostic (a key is just a path).
  */
 import {
   S3Client,
@@ -11,6 +15,15 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "./env";
+import {
+  blobEnabled,
+  blobUploadPath,
+  putBlob,
+  getBlobBytes,
+  getBlobSize,
+  getBlobUrl,
+  deleteBlob,
+} from "./blob-storage";
 
 const FIFTEEN_MINUTES_SECONDS = 60 * 15;
 
@@ -71,6 +84,7 @@ export async function getUploadUrl(input: {
   key: string;
   contentType?: string;
 }): Promise<string> {
+  if (blobEnabled()) return blobUploadPath(input.key);
   const { client, bucket } = getClient();
   const cmd = new PutObjectCommand({
     Bucket: bucket,
@@ -81,6 +95,7 @@ export async function getUploadUrl(input: {
 }
 
 export async function getDownloadUrl(input: { key: string }): Promise<string> {
+  if (blobEnabled()) return getBlobUrl(input.key);
   const { client, bucket } = getClient();
   const cmd = new GetObjectCommand({
     Bucket: bucket,
@@ -94,6 +109,7 @@ export async function getDownloadUrl(input: { key: string }): Promise<string> {
  * DocuSign. Mirrors downloadS3Object in the legacy Go backend.
  */
 export async function getObjectBytes(key: string): Promise<Uint8Array> {
+  if (blobEnabled()) return getBlobBytes(key);
   const { client, bucket } = getClient();
   const result = await client.send(
     new GetObjectCommand({ Bucket: bucket, Key: key })
@@ -110,13 +126,14 @@ export async function getObjectBytes(key: string): Promise<Uint8Array> {
  * to reject an oversized upload BEFORE buffering/parsing it.
  */
 export async function getObjectSize(key: string): Promise<number> {
+  if (blobEnabled()) return getBlobSize(key);
   const { client, bucket } = getClient();
   const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
   return head.ContentLength ?? 0;
 }
 
 /**
- * Uploads bytes directly to S3 (server-side put, no pre-signed URL). Used to
+ * Uploads bytes directly to storage (server-side put, no pre-signed URL). Used to
  * store server-generated files such as merged disclosure packets.
  */
 export async function putObjectBytes(
@@ -124,6 +141,7 @@ export async function putObjectBytes(
   bytes: Uint8Array,
   contentType: string
 ): Promise<void> {
+  if (blobEnabled()) return putBlob(key, bytes, contentType);
   const { client, bucket } = getClient();
   await client.send(
     new PutObjectCommand({
@@ -138,9 +156,10 @@ export async function putObjectBytes(
 /** Best-effort delete. Logs and swallows errors — matches Go behavior. */
 export async function deleteObject(key: string): Promise<void> {
   try {
+    if (blobEnabled()) return await deleteBlob(key);
     const { client, bucket } = getClient();
     await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
   } catch (err) {
-    console.warn("s3 delete failed (ignored)", { key, err });
+    console.warn("object delete failed (ignored)", { key, err });
   }
 }
