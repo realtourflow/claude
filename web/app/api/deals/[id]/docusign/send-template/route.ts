@@ -8,6 +8,7 @@ import {
   TemplateConfigError,
   UnknownFormError,
 } from "@/lib/docusign-templates";
+import { getAgentFormConfig } from "@/lib/agent-forms";
 import {
   assignTemplateRoles,
   assignConsumerRoles,
@@ -64,9 +65,22 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     try {
       template = getTemplateConfig(body.form_key);
     } catch (err) {
-      if (err instanceof UnknownFormError) return error(err.message, 400);
-      if (err instanceof TemplateConfigError) return error(err.message, 500);
-      throw err;
+      if (err instanceof UnknownFormError) {
+        // Fall back to an approved agent-uploaded form — same TemplateConfig
+        // shape, so everything below is reused unchanged. Scoped to the deal's
+        // market (owner always; promoted forms via the board filter).
+        const agentForm = await getAgentFormConfig(
+          body.form_key,
+          userId,
+          owned.market
+        );
+        if (!agentForm) return error(err.message, 400);
+        template = agentForm;
+      } else if (err instanceof TemplateConfigError) {
+        return error(err.message, 500);
+      } else {
+        throw err;
+      }
     }
     // Board-keyed forms only send on deals in that market.
     if (template.board && template.board !== owned.market) {

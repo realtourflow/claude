@@ -122,12 +122,19 @@ export async function POST(req: Request): Promise<Response> {
       }
 
       const statement = await getAttestationStatement();
+      // Capture the form's market identity now (defaults to the agent's market).
+      // Unused until promote-to-all, but recorded from day one to avoid a backfill.
+      const agentUser = await prisma.users.findUnique({
+        where: { id: userId },
+        select: { market: true },
+      });
 
       const form = await prisma.uploaded_forms.create({
         data: {
           agent_id: userId,
           label,
           side,
+          board: agentUser?.market ?? "",
           source_s3_key: body.s3_key,
           source_file_name: body.file_name ?? "",
           mime_type: body.mime_type ?? "application/pdf",

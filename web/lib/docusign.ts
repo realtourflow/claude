@@ -51,6 +51,30 @@ export type TemplateRole = {
   tabs?: TemplateRoleTabs;
 };
 
+// One tab to place when CREATING a template (form-upload pipeline), in DocuSign
+// coordinates: points from the page TOP-LEFT. (Contrast TemplateRoleTabs above,
+// which only prefills values into tabs already placed on an existing template.)
+export type TemplateTabSpec = {
+  tabLabel: string;
+  pageNumber: number;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+};
+
+// A role (signer placeholder) on a template being created, plus its tabs by type.
+export type TemplateSignerSpec = {
+  roleName: string;
+  recipientId: string;
+  routingOrder?: number;
+  textTabs?: TemplateTabSpec[];
+  checkboxTabs?: TemplateTabSpec[];
+  signHereTabs?: TemplateTabSpec[];
+  initialHereTabs?: TemplateTabSpec[];
+  dateSignedTabs?: TemplateTabSpec[];
+};
+
 export type EnvelopeRecipientStatus = {
   email: string;
   name: string;
@@ -87,6 +111,16 @@ export type DocusignClient = {
       returnUrl: string;
     }
   ): Promise<string>;
+  // Create a reusable DocuSign template from an uploaded PDF, placing tabs at
+  // absolute coordinates and assigning each to a role. OPTIONAL so existing test
+  // fakes still satisfy DocusignClient. Returns the new templateId. Used by the
+  // form-upload pipeline at admin approval.
+  createTemplateFromDocument?(input: {
+    name: string;
+    documentName: string;
+    documentBytes: Uint8Array;
+    signers: TemplateSignerSpec[];
+  }): Promise<string>;
 };
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -324,6 +358,57 @@ export class DefaultDocusignClient implements DocusignClient {
     return this.postEnvelope(token, envelope);
   }
 
+  async createTemplateFromDocument(input: {
+    name: string;
+    documentName: string;
+    documentBytes: Uint8Array;
+    signers: TemplateSignerSpec[];
+  }): Promise<string> {
+    const token = await this.token();
+    const e = env();
+    const dot = input.documentName.lastIndexOf(".");
+    const ext = dot >= 0 ? input.documentName.slice(dot + 1).toLowerCase() : "pdf";
+    const body = {
+      name: input.name,
+      shared: "false",
+      documents: [
+        {
+          documentId: "1",
+          name: input.documentName,
+          fileExtension: ext,
+          documentBase64: Buffer.from(input.documentBytes).toString("base64"),
+        },
+      ],
+      recipients: {
+        signers: input.signers.map((s) => ({
+          roleName: s.roleName,
+          recipientId: s.recipientId,
+          routingOrder: String(s.routingOrder ?? s.recipientId),
+          tabs: templateTabsPayload(s),
+        })),
+      },
+    };
+    const url = `${this.baseURL()}/restapi/v2.1/accounts/${e.DOCUSIGN_ACCOUNT_ID}/templates`;
+    const res = await this.fetchImpl(url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.status !== 201) {
+      throw new Error(
+        `docusign create template: status ${res.status}: ${await safeText(res)}`
+      );
+    }
+    const result = (await res.json()) as { templateId?: string };
+    if (!result.templateId) {
+      throw new Error("docusign create template: response missing templateId");
+    }
+    return result.templateId;
+  }
+
   private async postEnvelope(token: string, envelope: object): Promise<string> {
     const e = env();
     const url = `${this.baseURL()}/restapi/v2.1/accounts/${e.DOCUSIGN_ACCOUNT_ID}/envelopes`;
@@ -451,6 +536,35 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+// Converts a TemplateTabSpec to the DocuSign tab wire shape (positions rounded
+// to whole points). `sized` emits width/height (text tabs carry a box;
+// signature / initial / date tabs are point-anchored).
+function tabWire(t: TemplateTabSpec, sized: boolean): Record<string, string> {
+  return {
+    documentId: "1",
+    pageNumber: String(t.pageNumber),
+    xPosition: String(Math.round(t.x)),
+    yPosition: String(Math.round(t.y)),
+    tabLabel: t.tabLabel,
+    ...(sized && t.width ? { width: String(Math.round(t.width)) } : {}),
+    ...(sized && t.height ? { height: String(Math.round(t.height)) } : {}),
+  };
+}
+
+function templateTabsPayload(s: TemplateSignerSpec): Record<string, unknown[]> {
+  const tabs: Record<string, unknown[]> = {};
+  if (s.textTabs?.length) tabs.textTabs = s.textTabs.map((t) => tabWire(t, true));
+  if (s.checkboxTabs?.length)
+    tabs.checkboxTabs = s.checkboxTabs.map((t) => tabWire(t, false));
+  if (s.signHereTabs?.length)
+    tabs.signHereTabs = s.signHereTabs.map((t) => tabWire(t, false));
+  if (s.initialHereTabs?.length)
+    tabs.initialHereTabs = s.initialHereTabs.map((t) => tabWire(t, false));
+  if (s.dateSignedTabs?.length)
+    tabs.dateSignedTabs = s.dateSignedTabs.map((t) => tabWire(t, false));
+  return tabs;
 }
 
 let real: DocusignClient | undefined;
