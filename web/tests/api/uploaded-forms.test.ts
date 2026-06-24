@@ -17,6 +17,7 @@ import { setS3ClientForTesting } from "@/lib/s3";
 import { setFieldMapperForTesting } from "@/lib/form-ai/mapper";
 import { extractAcroFields } from "@/lib/form-ai/extract";
 import { computeStructureFingerprint } from "@/lib/form-ai/fingerprint";
+import { flatFingerprint } from "@/lib/known-forms";
 import type { FieldMapper } from "@/lib/form-ai/types";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -264,12 +265,52 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
     expect(await prisma.uploaded_forms.count()).toBe(0);
   });
 
-  it("422 for a flat PDF with no fillable fields, and persists nothing", async () => {
+  it("422 for an UNRECOGNIZED flat PDF, and persists nothing", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT) });
     const res = await createForm(await postForm(agent.id, "auth0|a"));
     expect(res.status).toBe(422);
     expect(await prisma.uploaded_forms.count()).toBe(0);
+  });
+
+  it("recognizes a FLAT upload that matches a known form by content hash", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT) });
+    // Seed a flat known-form keyed on the FLAT fixture's exact content hash.
+    await prisma.known_forms.create({
+      data: {
+        label: "Known Flat Form",
+        side: "sell",
+        board: "",
+        purpose: "",
+        fingerprint: flatFingerprint(FLAT),
+        field_count: 1,
+        page_count: 1,
+        fields: [
+          { detected_name: "buyer_name", detected_type: "text", effective_type: "text", page_number: 1, pos_x: 72, pos_y: 700, width: 200, height: 18, core_key: "buyer_name", role: "Buyer", needs_review: false },
+        ],
+        role_mapping: { buyer: "Buyer" },
+        active: true,
+      },
+    });
+    // A recognized flat form must NOT touch the AI mapper.
+    setFieldMapperForTesting({
+      proposeMappings: async () => {
+        throw new Error("mapper must not run for a recognized flat form");
+      },
+    });
+
+    const res = await createForm(await postForm(agent.id, "auth0|a"));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; field_count: number };
+    expect(body.field_count).toBe(1);
+
+    const row = await prisma.uploaded_forms.findUnique({ where: { id: body.id } });
+    expect(row?.recognized_from_known_form_id).toBeTruthy();
+    expect(row?.structure_sha256).toBe(flatFingerprint(FLAT));
+    const field = await prisma.uploaded_form_fields.findFirstOrThrow({ where: { form_id: body.id } });
+    expect(field.ai_core_key).toBe("buyer_name");
+    expect(field.decision).toBe("accepted");
   });
 
   it("400 when the s3_key is outside the caller's namespace", async () => {

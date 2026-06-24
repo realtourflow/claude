@@ -5,6 +5,7 @@
  * into the catalog ("save as known"). Recognition is a pure ACCELERATOR — a
  * matched form still lands in pending_review and passes the admin gate.
  */
+import { createHash } from "node:crypto";
 import { prisma } from "./db";
 import type { DetectedField } from "./form-ai/types";
 import {
@@ -77,6 +78,30 @@ export async function matchKnownForm(input: {
       fingerprint,
       board: { in: ["", input.market] },
     },
+    select: KNOWN_SELECT,
+  });
+  return { fingerprint, known: matches.length === 1 ? matches[0] : null };
+}
+
+/** Content fingerprint for a FLAT (fieldless) PDF — the exact-bytes match signal. */
+export function flatFingerprint(bytes: Uint8Array): string {
+  return "flat:" + createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+}
+
+/**
+ * Recognize a FLAT upload (no AcroForm fields → no structure fingerprint) by the
+ * blank's exact content hash. Same conservative match as matchKnownForm: active,
+ * visible in the market, exactly one. BUILT BUT NOT WIRED — the upload route still
+ * rejects flat PDFs; calling this before that 422 is the gated next step once
+ * placement is reviewed.
+ */
+export async function matchFlatKnownForm(input: {
+  bytes: Uint8Array;
+  market: string;
+}): Promise<{ fingerprint: string; known: KnownFormRow | null }> {
+  const fingerprint = flatFingerprint(input.bytes);
+  const matches = await prisma.known_forms.findMany({
+    where: { active: true, fingerprint, board: { in: ["", input.market] } },
     select: KNOWN_SELECT,
   });
   return { fingerprint, known: matches.length === 1 ? matches[0] : null };

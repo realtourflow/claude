@@ -1,0 +1,911 @@
+{
+  "guid": "07746681-f55d-49c2-a47a-e54593fe84f0",
+  "templateName": "Purchase_Agreement",
+  "pageCount": 13,
+  "pageHeights": [
+    792,
+    792,
+    792,
+    792,
+    792,
+    792,
+    792,
+    792,
+    792,
+    792,
+    792,
+    792,
+    792
+  ],
+  "acroFormFieldCount": 1,
+  "fileSha256": "74db8033a40c026e16e0667f991fb2e703c251907e7cf5747237d0e205d43044",
+  "roleMapping": {
+    "Buyer1": "Buyer1",
+    "Buyer2": "Buyer2",
+    "BuyerAgent": "BuyerAgent",
+    "Seller1": "Seller1",
+    "Seller2": "Seller2"
+  },
+  "fields": [
+    {
+      "role": "Buyer1",
+      "label": "buyer_name",
+      "type": "text",
+      "page": 1,
+      "pos_x": 185,
+      "pos_y": 707,
+      "width": 237,
+      "height": 19
+    },
+    {
+      "role": "Buyer1",
+      "label": "not_sewer",
+      "type": "initial",
+      "page": 7,
+      "pos_x": 431,
+      "pos_y": 230,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "effective_date",
+      "type": "text",
+      "page": 13,
+      "pos_x": 160,
+      "pos_y": 582,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "property_city",
+      "type": "text",
+      "page": 1,
+      "pos_x": 389,
+      "pos_y": 643,
+      "width": 139,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "property_county",
+      "type": "text",
+      "page": 1,
+      "pos_x": 99,
+      "pos_y": 631,
+      "width": 85,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "property_address",
+      "type": "text",
+      "page": 1,
+      "pos_x": 80,
+      "pos_y": 611,
+      "width": 206,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "property_zip",
+      "type": "text",
+      "page": 1,
+      "pos_x": 429,
+      "pos_y": 613,
+      "width": 109,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "legal_description",
+      "type": "text",
+      "page": 1,
+      "pos_x": 131,
+      "pos_y": 587,
+      "width": 308,
+      "height": 21
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "ppin",
+      "type": "text",
+      "page": 1,
+      "pos_x": 308,
+      "pos_y": 564,
+      "width": 133,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "mls_id",
+      "type": "text",
+      "page": 1,
+      "pos_x": 479,
+      "pos_y": 564,
+      "width": 68,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "purchase_price",
+      "type": "text",
+      "page": 1,
+      "pos_x": 424,
+      "pos_y": 386,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "listing_agent",
+      "type": "text",
+      "page": 1,
+      "pos_x": 149,
+      "pos_y": 483,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_agent",
+      "type": "text",
+      "page": 1,
+      "pos_x": 414,
+      "pos_y": 485,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "earnest_money_amount",
+      "type": "text",
+      "page": 1,
+      "pos_x": 421,
+      "pos_y": 358,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "loan_amount",
+      "type": "text",
+      "page": 1,
+      "pos_x": 411,
+      "pos_y": 222,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "other_financing_description",
+      "type": "text",
+      "page": 1,
+      "pos_x": 158,
+      "pos_y": 223,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "finance_contingency_date",
+      "type": "text",
+      "page": 1,
+      "pos_x": 406,
+      "pos_y": 148,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "seller_concession_amount",
+      "type": "text",
+      "page": 2,
+      "pos_x": 339,
+      "pos_y": 457,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_broker_comp_percentage",
+      "type": "text",
+      "page": 2,
+      "pos_x": 426,
+      "pos_y": 525,
+      "width": 22,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "closing_date",
+      "type": "text",
+      "page": 3,
+      "pos_x": 73,
+      "pos_y": 719,
+      "width": 120,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "possession_date",
+      "type": "text",
+      "page": 3,
+      "pos_x": 260,
+      "pos_y": 667,
+      "width": 71,
+      "height": 19
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "warranty_max_amount",
+      "type": "text",
+      "page": 9,
+      "pos_x": 175,
+      "pos_y": 257,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "inspection_completion_date",
+      "type": "text",
+      "page": 7,
+      "pos_x": 37,
+      "pos_y": 591,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "warranty_deed_type",
+      "type": "text",
+      "page": 4,
+      "pos_x": 364,
+      "pos_y": 566,
+      "width": 84,
+      "height": 22
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "listing_agent_of_seller",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 32,
+      "pos_y": 486,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "listing_transaction_facilitator",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 31,
+      "pos_y": 458,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "listing_dual_agent",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 31,
+      "pos_y": 472,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_agent_of_buyer",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 287,
+      "pos_y": 486,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_transaction_facilitator",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 286,
+      "pos_y": 457,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_dual_agent",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 286,
+      "pos_y": 472,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "cash_buyer",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 68,
+      "pos_y": 303,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "financing_buyer",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 67,
+      "pos_y": 254,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "conventional",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 460,
+      "pos_y": 254,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "FHA",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 29,
+      "pos_y": 242,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "VA",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 68,
+      "pos_y": 241,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "other_financing",
+      "type": "checkbox",
+      "page": 1,
+      "pos_x": 100,
+      "pos_y": 242,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "appraisal_contingency_is",
+      "type": "checkbox",
+      "page": 2,
+      "pos_x": 284,
+      "pos_y": 745,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "appraisal_contingency_not",
+      "type": "checkbox",
+      "page": 2,
+      "pos_x": 312,
+      "pos_y": 744,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "seller_concession_yes",
+      "type": "checkbox",
+      "page": 2,
+      "pos_x": 49,
+      "pos_y": 473,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "Buyer_broker_comp_checkbox",
+      "type": "checkbox",
+      "page": 2,
+      "pos_x": 47,
+      "pos_y": 539,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_sale_contingency_is",
+      "type": "checkbox",
+      "page": 2,
+      "pos_x": 374,
+      "pos_y": 192,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_sale_contingency_not",
+      "type": "checkbox",
+      "page": 2,
+      "pos_x": 400,
+      "pos_y": 194,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "assignable_is",
+      "type": "checkbox",
+      "page": 11,
+      "pos_x": 302,
+      "pos_y": 447,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "assignable_is_not",
+      "type": "checkbox",
+      "page": 11,
+      "pos_x": 326,
+      "pos_y": 447,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_assigns",
+      "type": "checkbox",
+      "page": 11,
+      "pos_x": 509,
+      "pos_y": 447,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_does_not_assign",
+      "type": "checkbox",
+      "page": 11,
+      "pos_x": 239,
+      "pos_y": 434,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "settlement_buyer",
+      "type": "checkbox",
+      "page": 10,
+      "pos_x": 254,
+      "pos_y": 109,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "settlement_seller",
+      "type": "checkbox",
+      "page": 10,
+      "pos_x": 303,
+      "pos_y": 109,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "settlement_split",
+      "type": "checkbox",
+      "page": 10,
+      "pos_x": 365,
+      "pos_y": 107,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "warranty_does",
+      "type": "checkbox",
+      "page": 9,
+      "pos_x": 193,
+      "pos_y": 303,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "warranty_does_not",
+      "type": "checkbox",
+      "page": 9,
+      "pos_x": 229,
+      "pos_y": 303,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "warranty_paid_by_seller",
+      "type": "checkbox",
+      "page": 9,
+      "pos_x": 513,
+      "pos_y": 289,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "warranty_paid_by_buyer",
+      "type": "checkbox",
+      "page": 9,
+      "pos_x": 564,
+      "pos_y": 289,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "is_condo",
+      "type": "checkbox",
+      "page": 8,
+      "pos_x": 283,
+      "pos_y": 252,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "is_not_condo",
+      "type": "checkbox",
+      "page": 8,
+      "pos_x": 308,
+      "pos_y": 253,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "paint_attached_yes",
+      "type": "checkbox",
+      "page": 8,
+      "pos_x": 171,
+      "pos_y": 427,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "paint_attached_no",
+      "type": "checkbox",
+      "page": 8,
+      "pos_x": 210,
+      "pos_y": 427,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "survey_is",
+      "type": "checkbox",
+      "page": 8,
+      "pos_x": 293,
+      "pos_y": 678,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "survey_is_not",
+      "type": "checkbox",
+      "page": 8,
+      "pos_x": 317,
+      "pos_y": 678,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "is_sewer",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 401,
+      "pos_y": 190,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "seller_has_paid",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 132,
+      "pos_y": 177,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "seller_has_not_paid",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 164,
+      "pos_y": 178,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "is_septic",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 116,
+      "pos_y": 163,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "is_not_septic",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 138,
+      "pos_y": 163,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_requires_sewer/septic",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 421,
+      "pos_y": 163,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_not_require_sewer/septic",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 444,
+      "pos_y": 163,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "termite_is",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 378,
+      "pos_y": 348,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "termite_is_not",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 403,
+      "pos_y": 347,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "termite_buyer_expense",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 314,
+      "pos_y": 296,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "termite_buyer_expense",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 520,
+      "pos_y": 269,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "termite_seller_expense",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 371,
+      "pos_y": 297,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "termite_seller_expense",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 40,
+      "pos_y": 255,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "wir_is",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 502,
+      "pos_y": 469,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "wir_is_not",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 526,
+      "pos_y": 469,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "wir_buyer",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 554,
+      "pos_y": 441,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "wir_seller",
+      "type": "checkbox",
+      "page": 7,
+      "pos_x": 70,
+      "pos_y": 427,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "contingent_upon_inspection_and_repairs",
+      "type": "checkbox",
+      "page": 6,
+      "pos_x": 30,
+      "pos_y": 593,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "contingent_upon_inspection_no_repair",
+      "type": "checkbox",
+      "page": 5,
+      "pos_x": 31,
+      "pos_y": 216,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "not_contingent_upon_inspection",
+      "type": "checkbox",
+      "page": 5,
+      "pos_x": 30,
+      "pos_y": 380,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "joint_tenancy",
+      "type": "checkbox",
+      "page": 4,
+      "pos_x": 61,
+      "pos_y": 426,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "not_joint_tenancy",
+      "type": "checkbox",
+      "page": 4,
+      "pos_x": 97,
+      "pos_y": 427,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_joint_tenancy",
+      "type": "checkbox",
+      "page": 4,
+      "pos_x": 52,
+      "pos_y": 567,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "is_homestead",
+      "type": "checkbox",
+      "page": 4,
+      "pos_x": 286,
+      "pos_y": 669,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "is_not_homestead",
+      "type": "checkbox",
+      "page": 4,
+      "pos_x": 309,
+      "pos_y": 669,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "buyer_title_expense",
+      "type": "checkbox",
+      "page": 3,
+      "pos_x": 110,
+      "pos_y": 133,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "seller_title_expense",
+      "type": "checkbox",
+      "page": 3,
+      "pos_x": 162,
+      "pos_y": 134,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "BuyerAgent",
+      "label": "title_split",
+      "type": "checkbox",
+      "page": 3,
+      "pos_x": 247,
+      "pos_y": 134,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "role": "Seller1",
+      "label": "seller_name",
+      "type": "text",
+      "page": 1,
+      "pos_x": 271,
+      "pos_y": 684,
+      "width": 237,
+      "height": 19
+    }
+  ]
+}
