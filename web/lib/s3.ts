@@ -6,6 +6,7 @@ import {
   S3Client,
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -102,6 +103,16 @@ export async function getObjectBytes(key: string): Promise<Uint8Array> {
   }
   // v3 SDK exposes a stream helper that collects the whole body for us.
   return result.Body.transformToByteArray();
+}
+
+/**
+ * Object size in bytes via HeadObject (cheap metadata — no body download). Used
+ * to reject an oversized upload BEFORE buffering/parsing it.
+ */
+export async function getObjectSize(key: string): Promise<number> {
+  const { client, bucket } = getClient();
+  const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+  return head.ContentLength ?? 0;
 }
 
 /**
