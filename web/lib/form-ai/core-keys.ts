@@ -16,6 +16,8 @@ const DESCRIPTIONS: Record<string, string> = {
   buyer_name: "Full name(s) of the buyer(s) on the deal.",
   agent_name: "Full name of the real estate agent on the deal.",
   brokerage_name: "Name of the agent's brokerage / firm.",
+  consumer_name: "Printed name of the first consumer (buyer or seller) on a statewide consumer notice — e.g. the wire-fraud notice.",
+  consumer_name_2: "Printed name of the second consumer on a statewide consumer notice (optional).",
   // FACT_FIELDS — core contract facts entered once per deal.
   legal_description: "Legal description of the property (lot / block / subdivision).",
   parcel_or_ppin: "Parcel ID or PPIN (the property tax identifier).",
