@@ -1,0 +1,185 @@
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { mockClient } from "aws-sdk-client-mock";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  DeleteObjectCommand,
+  type GetObjectCommandOutput,
+} from "@aws-sdk/client-s3";
+import { PDFDocument } from "pdf-lib";
+import { POST as createForm } from "@/app/api/me/forms/route";
+import { setVerifyOptionsForTesting } from "@/lib/auth";
+import { setS3ClientForTesting } from "@/lib/s3";
+import { setVisionDetectorForTesting, type VisionFieldDetector } from "@/lib/form-ai/vision";
+import { seedFormTypes, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
+import { runFormDetectJob } from "@/lib/form-detect";
+import { getBoss, stopBossForTesting, processFormDetectJobs } from "@/lib/queue";
+import { prisma } from "@/lib/db";
+import { authHeader, getTestSigner } from "../helpers/jwt";
+import { truncateAll } from "../helpers/db";
+import { createUser } from "../helpers/factories";
+
+const s3Mock = mockClient(S3Client);
+let FLAT2: Uint8Array;
+
+// Canned "located" fields — real detector replaced; labels MUST exist in the type
+// field set. detectGuided returns the fields for the page it's asked about.
+const CANNED = [
+  { label: "buyer_name", type: "text", page: 1, rect: { x: 72, y: 700, width: 200, height: 18 } },
+  { label: "purchase_price", type: "text", page: 1, rect: { x: 400, y: 600, width: 80, height: 18 } },
+  { label: "buyer1_signature", type: "signature", page: 2, rect: { x: 72, y: 120, width: 200, height: 24 } },
+];
+const fakeDetector: VisionFieldDetector = {
+  detect: async () => [],
+  detectGuided: async ({ expected }) => {
+    const page = expected[0]?.page ?? 1;
+    return CANNED.filter((c) => c.page === page).map((c) => ({
+      name: c.label,
+      type: c.type as "text" | "signature",
+      page: c.page,
+      rect: c.rect,
+      nearbyText: c.label,
+    }));
+  },
+};
+
+function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
+  return { transformToByteArray: async () => bytes } as unknown as GetObjectCommandOutput["Body"];
+}
+
+beforeAll(async () => {
+  const { verifyOpts } = await getTestSigner();
+  setVerifyOptionsForTesting(verifyOpts);
+  setS3ClientForTesting(
+    new S3Client({ region: "us-east-1", credentials: { accessKeyId: "t", secretAccessKey: "t" } }),
+    "test-bucket"
+  );
+  const doc = await PDFDocument.create();
+  doc.addPage([612, 792]);
+  doc.addPage([612, 792]);
+  FLAT2 = await doc.save();
+  await getBoss(); // ensure the form-detect queue exists before enqueue
+});
+
+afterAll(async () => {
+  await stopBossForTesting();
+});
+
+beforeEach(async () => {
+  await truncateAll();
+  s3Mock.reset();
+  s3Mock.on(PutObjectCommand).resolves({});
+  s3Mock.on(DeleteObjectCommand).resolves({});
+  s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 4096 });
+  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT2) });
+  setVisionDetectorForTesting(fakeDetector);
+  await seedFormTypes();
+});
+
+afterEach(() => {
+  setVisionDetectorForTesting(undefined);
+});
+
+async function uploadFlat(agentId: string, withType = true) {
+  return createForm(
+    new Request("http://localhost/api/me/forms", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: await authHeader("auth0|a", ["agent"]) },
+      body: JSON.stringify({
+        label: "RE/MAX PA",
+        side: "buy",
+        file_name: "remax-pa.pdf",
+        s3_key: `agent-forms/${agentId}/1/remax-pa.pdf`,
+        mime_type: "application/pdf",
+        attestation: true,
+        ...(withType ? { form_type: PURCHASE_AGREEMENT_KEY } : {}),
+      }),
+    })
+  );
+}
+
+describe("guided-vision detect job (Phase 3, pt 2b)", () => {
+  it("flat + typed + unrecognized upload → 'detecting' (no fields yet)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const res = await uploadFlat(agent.id);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; status: string; field_count: number };
+    expect(body.status).toBe("detecting");
+    expect(body.field_count).toBe(0);
+
+    const form = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id: body.id } });
+    expect(form.detection_source).toBe("vision");
+    expect(form.form_type_id).not.toBeNull();
+    expect(await prisma.uploaded_form_fields.count({ where: { form_id: body.id } })).toBe(0);
+  });
+
+  it("the background job locates fields, maps them from the type, and flips to pending_review", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const { id } = (await (await uploadFlat(agent.id)).json()) as { id: string };
+
+    // (>=1: the pgboss queue persists across tests, so a prior test's orphan job
+    // — whose form was truncated — may be drained alongside this one. This form's
+    // own outcome is the real assertion.)
+    const result = await processFormDetectJobs({ limit: 5 });
+    expect(result.processed).toBeGreaterThanOrEqual(1);
+
+    const form = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id } });
+    expect(form.status).toBe("pending_review");
+    expect(form.detection_source).toBe("vision"); // still gated by the overlay
+
+    const fields = await prisma.uploaded_form_fields.findMany({ where: { form_id: id }, orderBy: { page_number: "asc" } });
+    expect(fields).toHaveLength(3);
+
+    const buyer = fields.find((f) => f.detected_name === "buyer_name")!;
+    expect(buyer.ai_core_key).toBe("buyer_name"); // mapping from the TYPE, not a guess
+    expect(buyer.decision).toBe("accepted");
+    expect(buyer.needs_review).toBe(false); // mapping resolved; only PLACEMENT gates
+    expect(Number(buyer.pos_x)).toBe(72);
+    expect(Number(buyer.pos_y)).toBe(700);
+    // a field with no core key (signature) is still placed for review
+    const sig = fields.find((f) => f.detected_name === "buyer1_signature")!;
+    expect(sig.page_number).toBe(2);
+  });
+
+  it("is idempotent — re-processing a finished form writes nothing new", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const { id } = (await (await uploadFlat(agent.id)).json()) as { id: string };
+    await processFormDetectJobs({ limit: 5 });
+    // a stray re-run of the job is a no-op (status is no longer 'detecting')
+    await runFormDetectJob(id);
+    expect(await prisma.uploaded_form_fields.count({ where: { form_id: id } })).toBe(3);
+  });
+
+  it("a 'detecting' form with no type doesn't strand — flips to pending_review empty", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const form = await prisma.uploaded_forms.create({
+      data: {
+        agent_id: agent.id,
+        label: "x",
+        side: "buy",
+        source_s3_key: `agent-forms/${agent.id}/1/x.pdf`,
+        source_file_name: "x.pdf",
+        attested_by: agent.id,
+        attestation_statement: "a",
+        file_sha256: "x",
+        status: "detecting",
+        detection_source: "vision",
+        form_type_id: null,
+      },
+      select: { id: true },
+    });
+    await runFormDetectJob(form.id);
+    const after = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id: form.id } });
+    expect(after.status).toBe("pending_review");
+    expect(await prisma.uploaded_form_fields.count({ where: { form_id: form.id } })).toBe(0);
+  });
+
+  it("rejects a flat upload with NO declared type (can't guide vision)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const res = await uploadFlat(agent.id, false);
+    expect(res.status).toBe(422);
+    expect(await prisma.uploaded_forms.count()).toBe(0);
+  });
+});

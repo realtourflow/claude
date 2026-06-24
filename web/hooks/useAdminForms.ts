@@ -20,6 +20,11 @@ export type AdminFormField = {
   detected_name: string;
   detected_type: string;
   page_number: number;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  tier: string; // "core" | "common" — overlay color coding
   ai_core_key: string | null;
   ai_role: string | null;
   ai_confidence: number | null;
@@ -47,7 +52,10 @@ export type AdminFormDetail = {
   reviewed_at: string | null;
   created_at: string;
   docusign_template_id: string | null;
+  detection_source: string; // "acroform" | "recognized" | "vision"
+  placement_confirmed_at: string | null;
   preview_url: string;
+  pages: Array<{ page: number; width: number; height: number }>;
   core_keys: CoreKey[];
   derived_signers: {
     roleMapping: Record<string, string>;
@@ -62,6 +70,10 @@ export type FieldPatch = Partial<{
   final_role: string | null;
   final_type: string;
   decision: string;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
 }>;
 
 export function useAdminFormsList(status = "pending_review") {
@@ -81,6 +93,31 @@ export function useAdminForm(id: string | null) {
 
   async function patchField(fieldId: string, patch: FieldPatch): Promise<void> {
     await api.patch<AdminFormField>(`/admin/forms/${id}/fields/${fieldId}`, patch);
+    await query.refetch();
+  }
+
+  // Overlay drag-END: persist a box's new position. The overlay keeps its own live
+  // box state, so the refetch (which syncs the now-cleared placement_confirmed_at →
+  // re-arming the approve gate) doesn't disturb the drag, and returns the same
+  // coords the overlay already shows.
+  async function saveFieldPosition(
+    fieldId: string,
+    pos: { pos_x: number; pos_y: number; width: number; height: number }
+  ): Promise<void> {
+    await api.patch<AdminFormField>(`/admin/forms/${id}/fields/${fieldId}`, pos);
+    await query.refetch();
+  }
+
+  // Shift every box on one page up (dy>0) or down by dy points, in one save —
+  // the fast fix for vision's per-page vertical offset. Clears confirmation.
+  async function nudgePage(page: number, dy: number): Promise<void> {
+    await api.post(`/admin/forms/${id}/nudge-page`, { page, dy });
+    await query.refetch();
+  }
+
+  // The human "boxes are right" sign-off that satisfies the mandatory placement gate.
+  async function confirmPlacement(): Promise<void> {
+    await api.post(`/admin/forms/${id}/confirm-placement`, {});
     await query.refetch();
   }
 
@@ -107,7 +144,11 @@ export function useAdminForm(id: string | null) {
     detail: query.data,
     loading: query.isLoading,
     patchField,
+    saveFieldPosition,
+    nudgePage,
+    confirmPlacement,
     approve,
     reject,
+    refetch: () => query.refetch(),
   };
 }

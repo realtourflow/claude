@@ -286,8 +286,9 @@ describe("GET/POST /api/jobs/process (cron sweep route)", () => {
       processReq({ headers: { authorization: `Bearer ${TEST_CRON_SECRET}` } })
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toEqual({ processed: expect.any(Number), failed: expect.any(Number) });
+    const body = (await res.json()) as { calendar: Record<string, unknown> };
+    // The sweep now runs the calendar AND form-detect queues (Phase 3).
+    expect(body.calendar).toEqual({ processed: expect.any(Number), failed: expect.any(Number) });
   });
 
   it("POST with the right bearer drains a queued job", async () => {
@@ -302,7 +303,7 @@ describe("GET/POST /api/jobs/process (cron sweep route)", () => {
       })
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ processed: 1, failed: 0 });
+    expect((await res.json()).calendar).toEqual({ processed: 1, failed: 0 });
 
     const map = await prisma.calendar_event_map.findFirst({
       where: { user_id: agent.id, internal_uid: `close-${deal.id}` },

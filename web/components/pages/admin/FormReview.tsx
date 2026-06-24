@@ -9,6 +9,7 @@ import {
   type CoreKey,
   type FieldPatch,
 } from "@/hooks/useAdminForms";
+import { FieldPlacementOverlay } from "./FieldPlacementOverlay";
 
 const STATUS_TABS = [
   { id: "pending_review", label: "Pending" },
@@ -109,10 +110,12 @@ export function FormReview() {
 }
 
 function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) {
-  const { detail, loading, patchField, approve, reject } = useAdminForm(id);
+  const { detail, loading, patchField, saveFieldPosition, nudgePage, confirmPlacement, approve, reject } =
+    useAdminForm(id);
   const [rejecting, setRejecting] = useState(false);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<"placement" | "fields">("placement");
   // Edited signer map; null until the admin changes it, then it overrides the
   // server-derived default. Reset per form via the `key` on FormDetail.
   const [roleMapEdit, setRoleMapEdit] = useState<Record<string, string> | null>(null);
@@ -122,6 +125,10 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
   const unresolved = detail.fields.filter((f) => f.needs_review).length;
   const editable = detail.status === "pending_review";
   const roleMap = roleMapEdit ?? detail.derived_signers.roleMapping;
+  // A vision form can't be approved until its placement is confirmed in the overlay
+  // (the server enforces this too — this just guides the admin to the gate).
+  const placementBlocked =
+    detail.detection_source === "vision" && !detail.placement_confirmed_at;
 
   return (
     <div className="space-y-4">
@@ -147,38 +154,72 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
         {detail.attested_at ? ` on ${detail.attested_at.slice(0, 10)}` : ""}
       </p>
 
-      {detail.preview_url && (
-        <object
-          data={detail.preview_url}
-          type="application/pdf"
-          className="h-80 w-full rounded-lg border border-gray-100"
-          aria-label="Form preview"
-        />
-      )}
-
-      <div className="overflow-x-auto rounded-lg border border-gray-100">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-left text-xs text-gray-400">
-            <tr>
-              <th className="px-3 py-2 font-semibold">Detected field</th>
-              <th className="px-3 py-2 font-semibold">AI proposal</th>
-              <th className="px-3 py-2 font-semibold">Mapping</th>
-              <th className="px-3 py-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {detail.fields.map((f) => (
-              <FieldRow
-                key={f.id}
-                field={f}
-                coreKeys={detail.core_keys}
-                editable={editable}
-                onPatch={patchField}
-              />
-            ))}
-          </tbody>
-        </table>
+      {/* Placement (visual overlay) vs Fields (mapping table). */}
+      <div className="flex gap-1 border-b border-gray-100">
+        {(["placement", "fields"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setView(v)}
+            className={`rounded-t-lg px-3 py-1.5 text-sm font-semibold capitalize transition-colors ${
+              view === v
+                ? "border-b-2 border-brand-navy text-brand-navy"
+                : "text-gray-400 hover:text-gray-600"
+            }`}
+          >
+            {v}
+            {v === "placement" && placementBlocked ? " ⚠" : ""}
+          </button>
+        ))}
       </div>
+
+      {view === "placement" ? (
+        <FieldPlacementOverlay
+          formId={detail.id}
+          fields={detail.fields}
+          pages={detail.pages}
+          confirmed={!!detail.placement_confirmed_at}
+          onSave={saveFieldPosition}
+          onConfirm={async () => {
+            await confirmPlacement();
+          }}
+          onNudgePage={nudgePage}
+        />
+      ) : (
+        <>
+          {detail.preview_url && (
+            <object
+              data={detail.preview_url}
+              type="application/pdf"
+              className="h-80 w-full rounded-lg border border-gray-100"
+              aria-label="Form preview"
+            />
+          )}
+          <div className="overflow-x-auto rounded-lg border border-gray-100">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-left text-xs text-gray-400">
+                <tr>
+                  <th className="px-3 py-2 font-semibold">Detected field</th>
+                  <th className="px-3 py-2 font-semibold">AI proposal</th>
+                  <th className="px-3 py-2 font-semibold">Mapping</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {detail.fields.map((f) => (
+                  <FieldRow
+                    key={f.id}
+                    field={f}
+                    coreKeys={detail.core_keys}
+                    editable={editable}
+                    onPatch={patchField}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
 
       {editable && Object.keys(roleMap).length > 0 && (
         <div className="rounded-lg border border-gray-100 p-3">
@@ -214,7 +255,7 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            disabled={unresolved > 0 || busy}
+            disabled={unresolved > 0 || placementBlocked || busy}
             onClick={async () => {
               setBusy(true);
               try {
@@ -231,7 +272,11 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
             className="inline-flex items-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Check size={15} />
-            {unresolved > 0 ? `Approve (${unresolved} unresolved)` : "Approve"}
+            {placementBlocked
+              ? "Confirm placement first"
+              : unresolved > 0
+                ? `Approve (${unresolved} unresolved)`
+                : "Approve"}
           </button>
           <button
             type="button"
