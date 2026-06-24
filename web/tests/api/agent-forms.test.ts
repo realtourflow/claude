@@ -70,10 +70,12 @@ describe("agent-forms resolver", () => {
     // Shape parity: exactly the committed-config keys, nothing extra.
     expect(Object.keys(cfg!).sort()).toEqual([
       "board",
+      "consumerRoles",
       "fieldMap",
       "label",
       "purpose",
       "roleMapping",
+      "routing",
       "templateId",
     ]);
   });
