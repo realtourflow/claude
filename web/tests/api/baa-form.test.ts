@@ -170,7 +170,7 @@ describe("BAA auto-fill + prefilled send", () => {
       authedJson(
         "PUT",
         `http://localhost/api/deals/${deal.id}/contracts/buyer_agency_agreement/terms`,
-        { terms: { baa_comp_percent: "3", baa_tail_days: "90", baa_property_location: "Gulf Shores" } },
+        { terms: { baa_comp_percent: "3", baa_tail_days: "90", baa_property_desc: "Gulf Shores" } },
         auth
       ),
       formCtx(deal.id, "buyer_agency_agreement")
@@ -204,7 +204,7 @@ describe("BAA auto-fill + prefilled send", () => {
         { tabLabel: "brokerage_name", value: "Baldwin Coastal Realty" },
         { tabLabel: "baa_comp_percent", value: "3" },
         { tabLabel: "baa_tail_days", value: "90" },
-        { tabLabel: "baa_property_location", value: "Gulf Shores" },
+        { tabLabel: "baa_property_desc", value: "Gulf Shores" },
       ])
     );
 
@@ -231,7 +231,7 @@ describe("BAA auto-fill + prefilled send", () => {
     expect(keys).not.toContain("brokerage_name");
     // Agent-entered terms DO show.
     expect(keys).toContain("baa_comp_percent");
-    expect(keys).toContain("baa_property_location");
+    expect(keys).toContain("baa_property_desc");
   });
 
   it("rejects an auto-sourced key submitted as a term", async () => {
