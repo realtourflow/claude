@@ -387,45 +387,48 @@ model user_settings {
 }
 
 model users {
-  id                                            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  auth0_id                                      String                @unique
-  email                                         String                @unique
-  name                                          String
-  role                                          user_role
-  phone                                         String?
-  created_at                                    DateTime              @default(now()) @db.Timestamptz(6)
-  updated_at                                    DateTime              @default(now()) @db.Timestamptz(6)
-  tc_user_id                                    String?               @db.Uuid
-  tc_contact                                    Json?
-  deactivated_at                                DateTime?             @db.Timestamptz(6)
-  calendar_token                                String?
-  mls_key                                       String?
-  mls_secret                                    String?
-  onboarding_complete                           Boolean               @default(false)
-  market                                        String                @default("")
-  brokerage                                     String                @default("")
-  agent_doc_templates                           agent_doc_templates[]
-  agent_invites_agent_invites_claimed_byTousers agent_invites[]       @relation("agent_invites_claimed_byTousers")
-  agent_invites_agent_invites_invited_byTousers agent_invites[]       @relation("agent_invites_invited_byTousers")
-  audit_log                                     audit_log[]
-  calendar_event_map                            calendar_event_map[]
-  deal_invites_deal_invites_claimed_byTousers   deal_invites[]        @relation("deal_invites_claimed_byTousers")
-  deal_invites_deal_invites_invited_byTousers   deal_invites[]        @relation("deal_invites_invited_byTousers")
-  deal_participants                             deal_participants[]
-  deal_stage_history                            deal_stage_history[]
-  deals                                         deals[]
-  documents                                     documents[]
-  docusign_recipients                           docusign_recipients[]
-  messages                                      messages[]
-  notifications                                 notifications[]
-  oauth_tokens                                  oauth_tokens[]
-  preferred_vendors                             preferred_vendors[]
-  promo_codes                                   promo_codes[]
-  system_config                                 system_config[]
-  tasks                                         tasks[]
-  user_settings                                 user_settings?
-  users                                         users?                @relation("usersTousers", fields: [tc_user_id], references: [id], onUpdate: NoAction)
-  other_users                                   users[]               @relation("usersTousers")
+  id                                               String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  auth0_id                                         String                @unique
+  email                                            String                @unique
+  name                                             String
+  role                                             user_role
+  phone                                            String?
+  created_at                                       DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at                                       DateTime              @default(now()) @db.Timestamptz(6)
+  tc_user_id                                       String?               @db.Uuid
+  tc_contact                                       Json?
+  deactivated_at                                   DateTime?             @db.Timestamptz(6)
+  calendar_token                                   String?
+  mls_key                                          String?
+  mls_secret                                       String?
+  onboarding_complete                              Boolean               @default(false)
+  market                                           String                @default("")
+  brokerage                                        String                @default("")
+  agent_doc_templates                              agent_doc_templates[]
+  agent_invites_agent_invites_claimed_byTousers    agent_invites[]       @relation("agent_invites_claimed_byTousers")
+  agent_invites_agent_invites_invited_byTousers    agent_invites[]       @relation("agent_invites_invited_byTousers")
+  audit_log                                        audit_log[]
+  calendar_event_map                               calendar_event_map[]
+  deal_invites_deal_invites_claimed_byTousers      deal_invites[]        @relation("deal_invites_claimed_byTousers")
+  deal_invites_deal_invites_invited_byTousers      deal_invites[]        @relation("deal_invites_invited_byTousers")
+  deal_participants                                deal_participants[]
+  deal_stage_history                               deal_stage_history[]
+  deals                                            deals[]
+  documents                                        documents[]
+  docusign_recipients                              docusign_recipients[]
+  messages                                         messages[]
+  notifications                                    notifications[]
+  oauth_tokens                                     oauth_tokens[]
+  preferred_vendors                                preferred_vendors[]
+  promo_codes                                      promo_codes[]
+  system_config                                    system_config[]
+  tasks                                            tasks[]
+  uploaded_forms_uploaded_forms_agent_idTousers    uploaded_forms[]      @relation("uploaded_forms_agent_idTousers")
+  uploaded_forms_uploaded_forms_attested_byTousers uploaded_forms[]      @relation("uploaded_forms_attested_byTousers")
+  uploaded_forms_uploaded_forms_reviewed_byTousers uploaded_forms[]      @relation("uploaded_forms_reviewed_byTousers")
+  user_settings                                    user_settings?
+  users                                            users?                @relation("usersTousers", fields: [tc_user_id], references: [id], onUpdate: NoAction)
+  other_users                                      users[]               @relation("usersTousers")
 }
 
 model docusign_recipients {
@@ -483,6 +486,71 @@ model deal_contract_terms {
   deals      deals    @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([deal_id, form_key])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model uploaded_form_fields {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  form_id        String         @db.Uuid
+  detected_name  String
+  detected_type  String         @default("text")
+  page_number    Int            @default(1)
+  pos_x          Decimal        @default(0) @db.Decimal
+  pos_y          Decimal        @default(0) @db.Decimal
+  width          Decimal        @default(0) @db.Decimal
+  height         Decimal        @default(0) @db.Decimal
+  nearby_text    String         @default("")
+  ai_core_key    String?
+  ai_role        String?
+  ai_confidence  Decimal?       @db.Decimal
+  ai_rationale   String         @default("")
+  needs_review   Boolean        @default(true)
+  final_core_key String?
+  final_role     String?
+  final_type     String?
+  decision       String         @default("pending")
+  created_at     DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime       @default(now()) @db.Timestamptz(6)
+  uploaded_forms uploaded_forms @relation(fields: [form_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([form_id], map: "idx_uploaded_form_fields_form_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model uploaded_forms {
+  id                                      String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_id                                String                 @db.Uuid
+  label                                   String
+  side                                    String                 @default("both")
+  status                                  String                 @default("pending_review")
+  source_s3_key                           String
+  source_file_name                        String
+  mime_type                               String                 @default("application/pdf")
+  file_size                               BigInt                 @default(0)
+  file_sha256                             String                 @default("")
+  attested_by                             String                 @db.Uuid
+  attested_at                             DateTime               @default(now()) @db.Timestamptz(6)
+  attestation_statement                   String                 @default("")
+  docusign_template_id                    String?
+  role_mapping                            Json                   @default("{}")
+  routing                                 String                 @default("by-role")
+  consumer_roles                          Json                   @default("[]")
+  field_map                               Json                   @default("{}")
+  purpose                                 String                 @default("")
+  promoted                                Boolean                @default(false)
+  reviewed_by                             String?                @db.Uuid
+  reviewed_at                             DateTime?              @db.Timestamptz(6)
+  review_notes                            String?
+  created_at                              DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                              DateTime               @default(now()) @db.Timestamptz(6)
+  uploaded_form_fields                    uploaded_form_fields[]
+  users_uploaded_forms_agent_idTousers    users                  @relation("uploaded_forms_agent_idTousers", fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_uploaded_forms_attested_byTousers users                  @relation("uploaded_forms_attested_byTousers", fields: [attested_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_uploaded_forms_reviewed_byTousers users?                 @relation("uploaded_forms_reviewed_byTousers", fields: [reviewed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([agent_id], map: "idx_uploaded_forms_agent_id")
+  @@index([status], map: "idx_uploaded_forms_status")
+  @@index([status, promoted, agent_id], map: "idx_uploaded_forms_visibility")
 }
 
 enum checklist_assignee {
