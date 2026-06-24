@@ -578,11 +578,29 @@ model known_forms {
   created_at                                                               DateTime         @default(now()) @db.Timestamptz(6)
   updated_at                                                               DateTime         @default(now()) @db.Timestamptz(6)
   text_minhash                                                             Json?
+  type_id                                                                  String?          @db.Uuid
   users                                                                    users?           @relation(fields: [created_by], references: [id], onUpdate: NoAction)
   uploaded_forms_known_forms_source_form_idTouploaded_forms                uploaded_forms?  @relation("known_forms_source_form_idTouploaded_forms", fields: [source_form_id], references: [id], onUpdate: NoAction)
+  form_types                                                               form_types?      @relation(fields: [type_id], references: [id], onUpdate: NoAction)
   uploaded_forms_uploaded_forms_recognized_from_known_form_idToknown_forms uploaded_forms[] @relation("uploaded_forms_recognized_from_known_form_idToknown_forms")
 
   @@unique([fingerprint, board], map: "idx_known_forms_fingerprint_board")
+  @@index([type_id], map: "idx_known_forms_type_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model form_types {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String        @unique
+  label       String
+  description String        @default("")
+  side        String        @default("both")
+  field_set   Json          @default("[]")
+  field_count Int           @default(0)
+  active      Boolean       @default(true)
+  created_at  DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime      @default(now()) @db.Timestamptz(6)
+  known_forms known_forms[]
 }
 
 enum checklist_assignee {
