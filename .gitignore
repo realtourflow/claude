@@ -18,3 +18,11 @@ Thumbs.db
 * 2
 * 3.*
 * 3
+
+# Secrets / keys — never commit private keys or certificate material.
+# The app reads DOCUSIGN_PRIVATE_KEY from env, not from a file in the tree.
+*.pem
+ds-private.pem
+
+# One-off DocuSign debug scripts (local scratch; not part of the app).
+/web/ds-*.mjs
