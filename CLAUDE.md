@@ -49,7 +49,7 @@ and integrates with ARIVE (loan milestone sync) for Mountain Mortgage / Fast Pas
 |---|---|
 | App | Next.js 16 (App Router) — serves UI **and** API in one project |
 | ORM / DB access | Prisma 7 (driver-adapter, introspection-only) |
-| Database | PostgreSQL 16 (AWS RDS) |
+| Database | Neon serverless Postgres (`neondb`) |
 | File storage | AWS S3 (documents) via pre-signed URLs |
 | Auth | Auth0 (JWT RS256, JWKS validation) |
 | UI | React (Server + Client Components), Tailwind 4 |
@@ -70,7 +70,7 @@ The legacy Go + chi backend and React + Vite frontend have been removed.
 | Resource | Value |
 |---|---|
 | App hosting | Vercel — production domain `app.realtourflow.com` |
-| Database | PostgreSQL 16 on AWS RDS (account 508859666048, us-east-1) |
+| Database | Neon serverless Postgres — DB `neondb`, endpoint `ep-winter-fire-apcnrqsw` (us-east-1); injected via the Vercel Production `DATABASE_URL` (a **Sensitive** var — not readable through the CLI) |
 | Document storage | AWS S3 bucket `realtourflow-documents` (CORS allows `https://app.realtourflow.com`) |
 | Auth0 Tenant | dev-30md8ukv8qd3u27c.us.auth0.com |
 | Auth0 Audience | https://api.realtourflow.com |
@@ -82,8 +82,11 @@ The legacy Go + chi backend and React + Vite frontend have been removed.
 `/ecs/realtourflow-api` CloudWatch log group, the `realtourflow/*` Secrets Manager
 secrets, and the `api.realtourflow.com` DNS record still exist and the old Go API still
 answers, but CI no longer redeploys it (the `deploy.yml` workflow was deleted). Draining
-and deleting that infra is an open ops task that needs AWS credentials. **Keep RDS and the
-S3 bucket** — `web/` uses them.
+and deleting that infra is an open ops task that needs AWS credentials. **Keep the S3
+bucket** — `web/` uses it for documents. ⚠️ The production **database is Neon, not RDS**
+(verified 2026-06-24 by a runtime probe — `current_database()` returned `neondb`). The AWS
+RDS in account 508859666048 is **not used by the live app** and is itself a decommission
+candidate (verify before deleting).
 
 ---
 
@@ -127,11 +130,14 @@ in the Vercel project env.
 
 > ⚠️ **Production application is a known gap.** The retired ECS server used to auto-run
 > `migrate.Up()` on startup; with ECS no longer deployed to (`deploy.yml` deleted), **new**
-> migrations no longer reach prod RDS automatically. Until a replacement exists (a CI /
+> migrations no longer reach prod Neon automatically. Until a replacement exists (a CI /
 > Vercel deploy step, or the deferred switch to `prisma migrate deploy`), apply new
 > migrations to prod manually:
-> `migrate -path migrations -database "$PROD_DATABASE_URL" up`. (No migrations are pending
-> as of this writing — relocating the files did not change the applied schema.)
+> `migrate -path migrations -database "$PROD_DATABASE_URL" up` — where `$PROD_DATABASE_URL`
+> is the Neon `neondb` connection string (pull it from the Neon console; the Vercel var is
+> Sensitive and can't be read via the CLI). **As of 2026-06-24, prod Neon is at version 45**
+> — migrations 000034–000045 were applied manually that day (prod had drifted behind to 33,
+> so 34–37, which back already-shipped launch features, were applied alongside 38–45).
 
 ---
 
@@ -244,7 +250,7 @@ fast-follow milestone, now live:
 2. **PR → CI** (`web-ci.yml`): typecheck → lint → Vitest → production build, plus the
    Playwright E2E job. Merge on green.
 3. **Vercel** builds + deploys `web/` on merge to `main`.
-4. **Migrations:** apply to prod RDS per the Database Migrations note (not automatic).
+4. **Migrations:** apply to prod Neon per the Database Migrations note (not automatic).
 5. **Smoke test** on `app.realtourflow.com`: log in (Auth0 → `/api/users/sync` 200), create
    a deal, advance a stage, reload to confirm persistence.
 6. **Update this file** when architecture, migrations, or the feature surface change.
