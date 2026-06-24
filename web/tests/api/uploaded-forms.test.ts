@@ -23,6 +23,8 @@ import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
+import { readFileSync } from "node:fs";
+import { seedForm300 } from "@/lib/form-300-seed";
 
 const s3Mock = mockClient(S3Client);
 
@@ -312,6 +314,58 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
     expect(field.ai_core_key).toBe("buyer_name");
     expect(field.decision).toBe("accepted");
   });
+
+  it("recognizes a RE-SAVED FORM 300 (text-layout) through the route → 88 fields, exact positions", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await prisma.users.update({ where: { id: agent.id }, data: { market: "BIRMINGHAM_AAR" } });
+    await seedForm300();
+
+    // A re-saved copy of the real blank: DIFFERENT bytes (the content hash
+    // misses), SAME text (the text-layout fingerprint matches). pdfjs extracts
+    // the text in the route — the same extractor the seed fingerprint used.
+    const real = readFileSync(new URL("../fixtures/form-300-blank.pdf", import.meta.url));
+    const reSaved = await (
+      await PDFDocument.load(new Uint8Array(real), { ignoreEncryption: true })
+    ).save();
+    s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(reSaved) });
+    // Recognition must skip the AI mapper entirely.
+    setFieldMapperForTesting({
+      proposeMappings: async () => {
+        throw new Error("mapper must not run for a recognized FORM 300");
+      },
+    });
+
+    const req = new Request("http://localhost/api/me/forms", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: await authHeader("auth0|a", ["agent"]) },
+      body: JSON.stringify({
+        label: "FORM 300",
+        side: "buy",
+        file_name: "form300.pdf",
+        s3_key: `agent-forms/${agent.id}/9/form300.pdf`,
+        mime_type: "application/pdf",
+        attestation: true,
+      }),
+    });
+    const res = await createForm(req);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; field_count: number };
+    expect(body.field_count).toBe(88);
+
+    const row = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id: body.id } });
+    expect(row.recognized_from_known_form_id).toBeTruthy();
+    // Matched by TEXT, not bytes: the stored content hash is the RE-SAVED copy's,
+    // NOT the seed's canonical-blank hash.
+    expect(row.structure_sha256).not.toBe(
+      "flat:c76e29aedfb99b99793a0d5cc9b9e06d94d1e7755c408cced2b5ab5bcb66833e"
+    );
+
+    const fields = await prisma.uploaded_form_fields.findMany({ where: { form_id: body.id } });
+    expect(fields).toHaveLength(88);
+    const buyer = fields.find((f) => f.detected_name === "buyer_name")!;
+    expect(Number(buyer.pos_x)).toBe(185); // exact catalog placement
+    expect(Number(buyer.pos_y)).toBe(707);
+  }, 60_000); // pdfjs parses a 13-page PDF
 
   it("400 when the s3_key is outside the caller's namespace", async () => {
     await createUser({ role: "agent", auth0_id: "auth0|a" });

@@ -7,9 +7,13 @@ import { PDFDocument } from "pdf-lib";
 import {
   matchKnownForm,
   matchFlatKnownForm,
+  matchTextLayoutKnownForm,
+  TEXT_LAYOUT_MATCH_THRESHOLD,
   copyKnownFields,
   type KnownFormRow,
 } from "@/lib/known-forms";
+import { extractPdfText } from "@/lib/pdf-text";
+import { computeTextFingerprint } from "@/lib/text-layout";
 import {
   FORM_SIDES,
   type FormSide,
@@ -128,11 +132,12 @@ export async function POST(req: Request): Promise<Response> {
       const agentMarket = agentUser?.market ?? "";
 
       // Recognition (Layer 1): consult the known-forms catalog FIRST. FILLABLE
-      // PDFs match by AcroForm structure; FLAT PDFs (no fields) match by exact
-      // CONTENT HASH (e.g. the seeded FORM 300) — a flat upload is no longer
-      // rejected on sight. A hit pre-fills the verified field map + exact
-      // positions and skips the AI mapper. Best-effort: errors fall through and
-      // never 500. Never auto-approves — the form still goes through the gate.
+      // PDFs match by AcroForm structure. FLAT PDFs (no fields) match by exact
+      // CONTENT HASH and then, if that misses, by TEXT-LAYOUT similarity — so a
+      // re-saved / re-exported same-layout copy (different bytes) still matches a
+      // known form (e.g. the seeded FORM 300) and gets its exact placement, no
+      // vision. A hit pre-fills the verified field map and skips the AI mapper.
+      // Best-effort: errors fall through and never 500. Never auto-approves.
       let fingerprint = "";
       let known: KnownFormRow | null = null;
       try {
@@ -140,6 +145,16 @@ export async function POST(req: Request): Promise<Response> {
           const r = await matchFlatKnownForm({ bytes, market: agentMarket });
           fingerprint = r.fingerprint;
           known = r.known;
+          if (!known) {
+            // Content hash missed → text similarity. pdfjs runs on Vercel (no poppler).
+            const tf = computeTextFingerprint(await extractPdfText(bytes));
+            const t = await matchTextLayoutKnownForm({
+              fingerprint: tf,
+              market: agentMarket,
+              threshold: TEXT_LAYOUT_MATCH_THRESHOLD,
+            });
+            known = t.best;
+          }
         } else {
           const pageCount = (
             await PDFDocument.load(bytes, { ignoreEncryption: true })
