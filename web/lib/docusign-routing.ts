@@ -80,6 +80,37 @@ export function assignTemplateRoles(opts: {
   });
 }
 
+// "consumers" routing: the deal's client-side people (buyers on a buy deal,
+// sellers on a sell deal — never the agent) fill the ordered consumerRoles.
+// Consumer1 (index 0) is required; later roles are optional and skipped when
+// there's no matching person. Used by statewide UNIFORM notices that both
+// sides sign. Consumers are portal users → embedded signing (clientUserId).
+export function assignConsumerRoles(
+  people: DealPerson[],
+  consumerRoles: string[]
+): TemplateRole[] {
+  if (consumerRoles.length === 0) {
+    throw new RoutingError("consumers form has no consumer roles configured");
+  }
+  // Deterministic order (matches consumer_name / consumer_name_2 prefill).
+  const consumers = people
+    .filter((p) => p.role === "buyer" || p.role === "seller")
+    .slice()
+    .sort((a, b) => a.userId.localeCompare(b.userId));
+
+  if (consumers.length === 0) {
+    throw new RoutingError("this form needs at least one buyer or seller to sign");
+  }
+
+  return consumers.slice(0, consumerRoles.length).map((p, i) => ({
+    roleName: consumerRoles[i],
+    name: p.name,
+    email: p.email,
+    userId: p.userId,
+    clientUserId: p.userId,
+  }));
+}
+
 export function deriveFallbackSigners(
   people: DealPerson[],
   selectedUserIds: string[]

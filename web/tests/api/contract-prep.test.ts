@@ -50,6 +50,22 @@ const TEMPLATES = {
       flood_zone: { label: "FloodZone", type: "checkbox", role: "Agent" },
     },
   },
+  // Exercises CONTRACT_FIELD_ALIASES: form-specific labels that should inherit
+  // canonical deal values (facts, deal.address, agent name, seller participant).
+  alias_probe: {
+    templateId: "tpl-alias",
+    label: "Alias Probe",
+    board: "BIRMINGHAM_AAR",
+    roleMapping: { buyer: "Buyer", seller: "Seller", agent: "Agent" },
+    fieldMap: {
+      property_address: { label: "property_address", type: "text", role: "Agent" },
+      property_city: { label: "property_city", type: "text", role: "Agent" },
+      ppin: { label: "ppin", type: "text", role: "Agent" },
+      effective_date: { label: "effective_date", type: "text", role: "Agent" },
+      buyer_agent: { label: "buyer_agent", type: "text", role: "Agent" },
+      seller_name: { label: "seller_name", type: "text", role: "Seller" },
+    },
+  },
 };
 
 type FakeDocusign = DocusignClient & {
@@ -395,6 +411,80 @@ describe("prefilled send (Stage 1)", () => {
       fakeDocusign.lastTemplateCreate?.roles.find((r) => r.roleName === "Buyer")
         ?.tabs?.textTabs
     ).toEqual([{ tabLabel: "Purchase_Price_GC", value: "425000" }]);
+  });
+});
+
+describe("deal-data alias auto-fill", () => {
+  it("fills a form's own labels from facts, deal.address, agent, and seller", async () => {
+    const { agent, deal } = await seedBhamDeal();
+    const auth = await authHeader("auth0|agent", ["agent"]);
+    await prisma.users.update({ where: { id: agent.id }, data: { name: "Dana Agent" } });
+    await prisma.deals.update({ where: { id: deal.id }, data: { address: "123 Main St" } });
+    const seller = await createUser({
+      role: "seller",
+      auth0_id: "auth0|seller",
+      name: "Sam Seller",
+      email: "sam@example.com",
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: seller.id, role: "seller" },
+    });
+    await putFactsRoute(
+      authedJson(
+        "PUT",
+        `http://localhost/api/deals/${deal.id}/contract-facts`,
+        { city: "Hoover", parcel_or_ppin: "PPIN-9", acceptance_binding_date: "2026-07-01" },
+        auth
+      ),
+      ctx(deal.id)
+    );
+
+    const res = await prepRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contracts/alias_probe/prep`, {
+        headers: { authorization: auth },
+      }),
+      formCtx(deal.id, "alias_probe")
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { board_fields: { key: string; value: unknown }[] };
+    const val = (k: string) => body.board_fields.find((f) => f.key === k)?.value;
+    expect(val("property_address")).toBe("123 Main St"); // deals.address
+    expect(val("property_city")).toBe("Hoover"); // fact city
+    expect(val("ppin")).toBe("PPIN-9"); // fact parcel_or_ppin
+    expect(val("effective_date")).toBe("2026-07-01"); // fact acceptance_binding_date
+    expect(val("buyer_agent")).toBe("Dana Agent"); // deal agent name
+    expect(val("seller_name")).toBe("Sam Seller"); // seller participant
+  });
+
+  it("a saved term overrides the alias", async () => {
+    const { deal } = await seedBhamDeal();
+    const auth = await authHeader("auth0|agent", ["agent"]);
+    await putFactsRoute(
+      authedJson(
+        "PUT",
+        `http://localhost/api/deals/${deal.id}/contract-facts`,
+        { city: "Hoover" },
+        auth
+      ),
+      ctx(deal.id)
+    );
+    await putTermsRoute(
+      authedJson(
+        "PUT",
+        `http://localhost/api/deals/${deal.id}/contracts/alias_probe/terms`,
+        { terms: { property_city: "Vestavia" } },
+        auth
+      ),
+      formCtx(deal.id, "alias_probe")
+    );
+    const res = await prepRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contracts/alias_probe/prep`, {
+        headers: { authorization: auth },
+      }),
+      formCtx(deal.id, "alias_probe")
+    );
+    const body = (await res.json()) as { board_fields: { key: string; value: unknown }[] };
+    expect(body.board_fields.find((f) => f.key === "property_city")?.value).toBe("Vestavia");
   });
 });
 

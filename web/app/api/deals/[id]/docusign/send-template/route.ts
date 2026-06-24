@@ -11,6 +11,7 @@ import {
 import { getAgentFormConfig } from "@/lib/agent-forms";
 import {
   assignTemplateRoles,
+  assignConsumerRoles,
   RoutingError,
   type RoleOverride,
 } from "@/lib/docusign-routing";
@@ -92,11 +93,14 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const people = await loadDealPeople(dealId);
     let roles;
     try {
-      roles = assignTemplateRoles({
-        roleMapping: template.roleMapping,
-        people,
-        overrides: body.assignments,
-      });
+      roles =
+        template.routing === "consumers"
+          ? assignConsumerRoles(people, template.consumerRoles)
+          : assignTemplateRoles({
+              roleMapping: template.roleMapping,
+              people,
+              overrides: body.assignments,
+            });
     } catch (err) {
       if (err instanceof RoutingError) return error(err.message, 400);
       throw err;
@@ -108,7 +112,8 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const tabsByRole = buildPrefillTabs({
       fieldMap: template.fieldMap,
       values,
-      defaultRole: Object.values(template.roleMapping)[0] ?? "",
+      // fieldMap entries carry explicit roles; this only catches unroled ones.
+      defaultRole: roles[0]?.roleName ?? "",
     });
     roles = roles.map((r) =>
       tabsByRole[r.roleName] ? { ...r, tabs: tabsByRole[r.roleName] } : r
