@@ -67,8 +67,35 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+// Authenticated fetch for BINARY responses (e.g. the admin page-image PNG that backs
+// the placement overlay). A plain <img src> can't send the Bearer header, so the
+// caller fetches the blob here and renders it via an object URL.
+async function requestBlob(path: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (tokenGetter) {
+    const token = await Promise.race<string>([
+      tokenGetter(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Auth token request timed out')), 10_000)
+      ),
+    ]);
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  // Page rendering is server-side pdfjs+canvas — allow more headroom than JSON calls.
+  const res = await fetch(`${BASE_URL}${path}`, { headers, signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) {
+    let bodyText: string | undefined;
+    try { bodyText = await res.text(); } catch { /* ignore */ }
+    let body: unknown = null;
+    if (bodyText) { try { body = JSON.parse(bodyText); } catch { /* keep text */ } }
+    throw new ApiError(res.status, res.statusText, body, bodyText);
+  }
+  return res.blob();
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  getBlob: (path: string) => requestBlob(path),
   post: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
   patch: <T>(path: string, body: unknown) =>

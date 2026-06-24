@@ -38,6 +38,30 @@ export type AdminFormField = {
 
 export type CoreKey = { key: string; kind: string; description: string };
 
+// One entry in the document type's master field list — the source for the overlay's
+// "add a field vision missed" picker.
+export type TypeFieldOption = {
+  label: string;
+  type: string;
+  role: string;
+  tier: string; // "core" | "common"
+  core_key: string | null;
+  required: boolean;
+};
+
+// Body for adding a field the admin places during review.
+export type NewField = {
+  detected_name: string;
+  detected_type: string;
+  page_number: number;
+  pos_x: number;
+  pos_y: number;
+  width: number;
+  height: number;
+  final_core_key?: string | null;
+  final_role?: string | null;
+};
+
 export type AdminFormDetail = {
   id: string;
   label: string;
@@ -57,6 +81,7 @@ export type AdminFormDetail = {
   preview_url: string;
   pages: Array<{ page: number; width: number; height: number }>;
   core_keys: CoreKey[];
+  type_fields: TypeFieldOption[];
   derived_signers: {
     roleMapping: Record<string, string>;
     routing: string;
@@ -115,6 +140,24 @@ export function useAdminForm(id: string | null) {
     await query.refetch();
   }
 
+  // Add a field vision missed (from the type's master list or custom), pre-placed
+  // at a default spot the admin then drags onto its blank. Clears confirmation.
+  // Returns the new field's id + page so the overlay can scroll to + flash it.
+  async function addField(field: NewField): Promise<{ id: string; page_number: number }> {
+    const created = await api.post<{ id: string; page_number: number }>(
+      `/admin/forms/${id}/fields`,
+      field
+    );
+    await query.refetch();
+    return created;
+  }
+
+  // Remove a box vision put on the wrong thing. Clears confirmation.
+  async function deleteField(fieldId: string): Promise<void> {
+    await api.delete(`/admin/forms/${id}/fields/${fieldId}`);
+    await query.refetch();
+  }
+
   // The human "boxes are right" sign-off that satisfies the mandatory placement gate.
   async function confirmPlacement(): Promise<void> {
     await api.post(`/admin/forms/${id}/confirm-placement`, {});
@@ -146,6 +189,8 @@ export function useAdminForm(id: string | null) {
     patchField,
     saveFieldPosition,
     nudgePage,
+    addField,
+    deleteField,
     confirmPlacement,
     approve,
     reject,

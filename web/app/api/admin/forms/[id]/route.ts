@@ -13,6 +13,8 @@ import {
   type SignersConfig,
 } from "@/lib/uploaded-forms";
 import { CORE_KEYS } from "@/lib/form-ai/core-keys";
+import { rememberApprovedForm } from "@/lib/remember-form";
+import { KnownFormConflictError } from "@/lib/known-forms";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -54,9 +56,19 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       orderBy: [{ page_number: "asc" }, { created_at: "asc" }],
     });
 
-    // Per-field tier (core/common) from the declared type's field set — drives the
-    // overlay's color coding (core vs common). Best-effort.
+    // The declared type's field set = the master list of placeable fields for this
+    // document type. Drives the overlay's tier colors (core/common) AND the "add a
+    // field vision missed" picker (label/type/role/tier/core_key). Best-effort.
     const tierByLabel = new Map<string, string>();
+    type TypeFieldOption = {
+      label: string;
+      type: string;
+      role: string;
+      tier: string;
+      core_key: string | null;
+      required: boolean;
+    };
+    let typeFields: TypeFieldOption[] = [];
     if (form.form_type_id) {
       const type = await prisma.form_types.findUnique({
         where: { id: form.form_type_id },
@@ -64,9 +76,23 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       });
       const set = (Array.isArray(type?.field_set) ? type!.field_set : []) as Array<{
         label?: string;
+        type?: string;
+        role?: string;
         tier?: string;
+        core_key?: string | null;
+        required?: boolean;
       }>;
-      for (const f of set) if (f.label) tierByLabel.set(f.label, f.tier ?? "common");
+      typeFields = set
+        .filter((f): f is typeof f & { label: string } => !!f.label)
+        .map((f) => ({
+          label: f.label,
+          type: f.type ?? "text",
+          role: f.role ?? "",
+          tier: f.tier ?? "common",
+          core_key: f.core_key ?? null,
+          required: !!f.required,
+        }));
+      for (const f of typeFields) tierByLabel.set(f.label, f.tier);
     }
 
     let previewUrl = "";
@@ -113,6 +139,9 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       preview_url: previewUrl,
       pages,
       core_keys: CORE_KEYS,
+      // Master list of placeable fields for this document type — feeds the overlay's
+      // "add a missing field" picker.
+      type_fields: typeFields,
       // Derived signers (admin confirms/edits, then passes back on approve).
       derived_signers: deriveSigners(fields, form.side as FormSide),
       fields: fields.map((f) => ({
@@ -199,11 +228,21 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       );
     }
 
-    // MANDATORY placement gate: a vision-detected form's positions are AI guesses,
-    // so a human MUST verify them in the visual overlay before the form can become
-    // sendable. This is the unskippable chokepoint — approve is the only path to
-    // status='ready' (see lib/agent-forms.visibilityWhere). No bypass.
-    if (form.detection_source === "vision" && !form.placement_confirmed_at) {
+    // MANDATORY placement gate (max-safety). A form whose positions are not exact
+    // native field rects must have its placement confirmed in the overlay by THIS
+    // reviewer before it can become sendable:
+    //   - 'vision'      — AI-guessed positions.
+    //   - 'recognized'  — inherited from a remembered layout (a PRIOR reviewer's
+    //                     placement, applied to this agent's copy). We re-confirm so
+    //                     a first-review mistake can't propagate silently onto a
+    //                     legal contract.
+    // 'acroform' is exempt (the PDF itself defines the field positions). This is the
+    // unskippable chokepoint — approve is the only path to status='ready' (see
+    // lib/agent-forms.visibilityWhere). No bypass.
+    if (
+      (form.detection_source === "vision" || form.detection_source === "recognized") &&
+      !form.placement_confirmed_at
+    ) {
       return error(
         "confirm field placement in the overlay review before approving this form",
         422
@@ -271,6 +310,21 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         docusign_template_id: templateId,
       },
     });
+
+    // Phase 4: a reviewed VISION form is now remembered as a known layout, so the
+    // next agent who uploads the same form is recognized (no vision) and inherits
+    // this reviewed placement. Best-effort — a failure, or "already remembered",
+    // must never undo the approval that already succeeded above.
+    if (form.detection_source === "vision") {
+      try {
+        await rememberApprovedForm(id, adminId);
+      } catch (err) {
+        if (!(err instanceof KnownFormConflictError)) {
+          console.error("remember-as-known failed; form stays approved", err);
+        }
+      }
+    }
+
     return json({
       id,
       status: "ready",

@@ -226,6 +226,29 @@ function toDetectedField(
   };
 }
 
+// Pages are independent vision calls, but a long contract has many of them — run
+// them concurrently (bounded) so a 10+ page form finishes well inside the function's
+// 300s budget instead of serializing ~30s/page into a timeout. Order is preserved.
+const VISION_PAGE_CONCURRENCY = 5;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    for (let i = next++; i < items.length; i = next++) {
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker())
+  );
+  return results;
+}
+
 export class ClaudeVisionDetector implements VisionFieldDetector {
   constructor(
     private readonly render: PageRenderer,
@@ -242,13 +265,12 @@ export class ClaudeVisionDetector implements VisionFieldDetector {
   async detect(input: { pdfBytes: Uint8Array }): Promise<DetectedField[]> {
     const pages = await this.render(input.pdfBytes);
     const create = this.create ?? this.realCreate();
-    const out: DetectedField[] = [];
-    // Pages are independent — one vision call each (a 13-page contract = 13 calls).
-    for (const page of pages) {
-      const fields = await this.detectPage(create, page);
-      out.push(...fields);
-    }
-    return out;
+    // Pages are independent — one vision call each (a 13-page contract = 13 calls),
+    // run with bounded concurrency so they don't serialize into a timeout.
+    const perPage = await mapWithConcurrency(pages, VISION_PAGE_CONCURRENCY, (page) =>
+      this.detectPage(create, page)
+    );
+    return perPage.flat();
   }
 
   private async detectPage(
@@ -308,13 +330,18 @@ export class ClaudeVisionDetector implements VisionFieldDetector {
   }): Promise<DetectedField[]> {
     const pages = await this.render(input.pdfBytes);
     const create = this.create ?? this.realCreate();
-    const out: DetectedField[] = [];
-    for (const page of pages) {
-      const wanted = input.expected.filter((e) => e.page === page.pageNumber);
-      if (!wanted.length) continue;
-      out.push(...(await this.locatePage(create, page, wanted)));
-    }
-    return out;
+    // Only pages that carry expected fields need a call; run those concurrently
+    // (bounded) so a long form's guided pass fits the 300s function budget.
+    const targets = pages
+      .map((page) => ({
+        page,
+        wanted: input.expected.filter((e) => e.page === page.pageNumber),
+      }))
+      .filter((t) => t.wanted.length > 0);
+    const perPage = await mapWithConcurrency(targets, VISION_PAGE_CONCURRENCY, (t) =>
+      this.locatePage(create, t.page, t.wanted)
+    );
+    return perPage.flat();
   }
 
   private async locatePage(

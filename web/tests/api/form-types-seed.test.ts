@@ -17,9 +17,10 @@ type TypeField = {
   core_key: string | null;
 };
 
-// Election keys legitimately repeat across their checkboxes (the deal's scalar
-// value picks the box); every other registry key must own at most one field.
-const ELECTION_KEYS = new Set(["financing_type", "agency_role"]);
+// Keys that legitimately back MULTIPLE fields: enumerated elections (one checkbox per
+// option — the deal's scalar picks the box) and $/%-alternative pairs (only one is
+// filled). Every other registry key must own at most one field.
+const ELECTION_KEYS = new Set(["financing_type", "agency_role", "loan_amount_or_pct"]);
 
 async function purchaseAgreementFields(): Promise<TypeField[]> {
   const row = await prisma.form_types.findUniqueOrThrow({
@@ -35,7 +36,10 @@ beforeEach(async () => {
 describe("form_types — purchase_agreement seed", () => {
   it("seeds the position-free purchase_agreement type", async () => {
     const res = await seedFormTypes();
-    expect(res).toEqual([{ key: "purchase_agreement", field_count: 79 }]);
+    expect(res.find((r) => r.key === "purchase_agreement")).toEqual({
+      key: "purchase_agreement",
+      field_count: 100,
+    });
 
     const row = await prisma.form_types.findUniqueOrThrow({
       where: { key: PURCHASE_AGREEMENT_KEY },
@@ -43,10 +47,10 @@ describe("form_types — purchase_agreement seed", () => {
     expect(row.label).toBe("Purchase Agreement");
     expect(row.side).toBe("both");
     expect(row.active).toBe(true);
-    expect(row.field_count).toBe(79);
+    expect(row.field_count).toBe(100);
 
     const fields = row.field_set as unknown as TypeField[];
-    expect(fields).toHaveLength(79);
+    expect(fields).toHaveLength(100);
     // No coordinates on a TYPE — positions are layout-specific.
     for (const f of fields) {
       expect(f).not.toHaveProperty("pos_x");
@@ -106,7 +110,7 @@ describe("form_types — purchase_agreement seed", () => {
     await seedFormTypes();
     const second = await resolveFormTypeId(PURCHASE_AGREEMENT_KEY);
     expect(second).toBe(first);
-    expect(await prisma.form_types.count()).toBe(1);
+    expect(await prisma.form_types.count()).toBe(10);
   });
 
   it("links FORM 300 to the type as one known layout (type_id set)", async () => {
@@ -124,5 +128,55 @@ describe("form_types — purchase_agreement seed", () => {
     const { id } = await seedForm300();
     const known = await prisma.known_forms.findUniqueOrThrow({ where: { id } });
     expect(known.type_id).toBeNull();
+  });
+});
+
+describe("form_types — full master catalog (10 types)", () => {
+  const EXPECTED = {
+    purchase_agreement: 100,
+    wire_fraud: 7,
+    brokerage_services_disclosure: 6,
+    documentation_fee: 4,
+    inspection_addendum: 17,
+    lead_based_paint: 22,
+    buyer_agency: 26,
+    addendum_contingent_sale: 20,
+    listing_agreement: 58,
+    addendum: 14,
+  } as const;
+
+  it("seeds all 10 document types with the right field counts (274 total)", async () => {
+    const res = await seedFormTypes();
+    expect(res).toHaveLength(10);
+    const counts = Object.fromEntries(res.map((r) => [r.key, r.field_count]));
+    expect(counts).toEqual(EXPECTED);
+    expect(res.reduce((n, r) => n + r.field_count, 0)).toBe(274);
+    expect(await prisma.form_types.count()).toBe(10);
+  });
+
+  it("every field across every type has a valid type/tier and a registry-or-null core_key", async () => {
+    await seedFormTypes();
+    const types = await prisma.form_types.findMany();
+    const FIELD_TYPES = new Set(["text", "checkbox", "signature", "initial", "date"]);
+    for (const t of types) {
+      for (const f of t.field_set as unknown as TypeField[]) {
+        expect(FIELD_TYPES.has(f.type), `${t.key}/${f.label} type ${f.type}`).toBe(true);
+        expect(["core", "common"]).toContain(f.tier);
+        if (f.core_key !== null) expect(isCoreKey(f.core_key)).toBe(true);
+      }
+    }
+  });
+
+  it("carries the new document types + roles the master list introduced", async () => {
+    await seedFormTypes();
+    const listing = await prisma.form_types.findUniqueOrThrow({ where: { key: "listing_agreement" } });
+    expect(listing.side).toBe("sell");
+    const listingRoles = new Set((listing.field_set as unknown as TypeField[]).map((f) => f.role));
+    // Invented roles are carried straight through as field roles.
+    for (const r of ["SellerAgent", "Seller3", "Seller4"]) expect(listingRoles.has(r)).toBe(true);
+
+    const inspection = await prisma.form_types.findUniqueOrThrow({ where: { key: "inspection_addendum" } });
+    const witness = (inspection.field_set as unknown as TypeField[]).some((f) => f.role === "Witness");
+    expect(witness).toBe(true);
   });
 });

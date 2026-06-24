@@ -100,7 +100,7 @@ describe("form types — pick-the-type upload (Phase 2)", () => {
     const pa = types.find((t) => t.key === PURCHASE_AGREEMENT_KEY)!;
     expect(pa).toBeTruthy();
     expect(pa.label).toBe("Purchase Agreement");
-    expect(pa.field_count).toBe(79);
+    expect(pa.field_count).toBe(100);
     expect(pa).not.toHaveProperty("field_set"); // only the pickable label, not the answer key
   });
 

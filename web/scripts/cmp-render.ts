@@ -19,7 +19,11 @@ import {
   type ExpectedField,
 } from "../lib/form-ai/vision";
 import type { DetectedFieldType, DetectedField } from "../lib/form-ai/types";
-import typeDef from "../lib/form-ai/purchase-agreement-type.json";
+import formTypes from "../lib/form-ai/form-types.json";
+
+const typeDef = (formTypes as Array<{ key: string; fields: Array<{ label: string; type: string }> }>).find(
+  (t) => t.key === "purchase_agreement"
+)!;
 
 const TARGETS = [
   { key: "baldwin", path: "/Users/paulleara/Downloads/New Purchase Agreement - Residential Property (BR)  (3).pdf", pages: [1, 2] },

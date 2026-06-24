@@ -5,13 +5,13 @@
  * from the deal. Unlike a known_form (a specific reviewed LAYOUT, with
  * coordinates), a type carries NO positions.
  *
- * The first type is "purchase_agreement": FORM 300's 88 fields curated down to the
- * universal core/common set and cross-checked against real alternate purchase
- * agreements — see lib/form-ai/purchase-agreement-type.json for the field set and
- * its provenance. FORM 300 then becomes ONE known layout of this type
- * (known_forms.type_id, linked in lib/form-300-seed).
+ * The catalog (10 document types, 274 fields) is generated from the human-edited
+ * master list lib/form-ai/master-field-list.csv into lib/form-ai/form-types.json by
+ * scripts/gen_form_types.py — regenerate after editing the CSV. "purchase_agreement"
+ * is the lead type; FORM 300 is ONE known layout of it (known_forms.type_id, linked
+ * in lib/form-300-seed).
  */
-import purchaseAgreement from "./form-ai/purchase-agreement-type.json";
+import formTypes from "./form-ai/form-types.json";
 import { prisma } from "./db";
 import { isCoreKey } from "./form-ai/core-keys";
 
@@ -42,17 +42,26 @@ export type FormTypeSeed = {
   fields: TypeField[];
 };
 
-const TYPES: FormTypeSeed[] = [
-  {
-    key: purchaseAgreement.key,
-    label: purchaseAgreement.label,
-    description: purchaseAgreement.description,
-    side: purchaseAgreement.side,
-    fields: purchaseAgreement.fields as unknown as TypeField[],
-  },
-];
+const TYPES: FormTypeSeed[] = (
+  formTypes as Array<{
+    key: string;
+    label: string;
+    description: string;
+    side: string;
+    fields: unknown[];
+  }>
+).map((t) => ({
+  key: t.key,
+  label: t.label,
+  description: t.description,
+  side: t.side,
+  fields: t.fields as unknown as TypeField[],
+}));
 
-/** All seedable document types (currently just purchase_agreement). */
+/** Every document type's key, in catalog order. */
+export const FORM_TYPE_KEYS = TYPES.map((t) => t.key);
+
+/** All seedable document types (the full 10-type master catalog). */
 export function formTypeSeeds(): FormTypeSeed[] {
   return TYPES;
 }
