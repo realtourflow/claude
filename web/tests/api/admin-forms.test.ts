@@ -18,6 +18,7 @@ import { PDFDocument } from "pdf-lib";
 import { GET as listForms } from "@/app/api/admin/forms/route";
 import { GET as detail, POST as action } from "@/app/api/admin/forms/[id]/route";
 import { PATCH as patchField } from "@/app/api/admin/forms/[id]/fields/[fieldId]/route";
+import { POST as saveKnown } from "@/app/api/admin/forms/[id]/known/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setS3ClientForTesting } from "@/lib/s3";
 import { setDocusignForTesting, type DocusignClient } from "@/lib/docusign";
@@ -346,5 +347,110 @@ describe("admin form review — correction + approve/reject", () => {
       params: Promise.resolve({ id }),
     });
     expect(res.status).toBe(409);
+  });
+});
+
+describe("admin save-as-known — promote into the recognition catalog", () => {
+  async function knownReq(id: string, hdr: string) {
+    return new Request(`http://localhost/api/admin/forms/${id}/known`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: hdr },
+      body: "{}",
+    });
+  }
+
+  it("promotes an approved form and links it back to the source", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [
+      {
+        detected_name: "buyer_name",
+        detected_type: "text",
+        ai_core_key: "buyer_name",
+        ai_role: "Buyer",
+        needs_review: false,
+      },
+    ]);
+    await action(await actionReq(id, { action: "approve" }), {
+      params: Promise.resolve({ id }),
+    });
+
+    const res = await saveKnown(await knownReq(id, await adminHdr()), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      known_form_id: string;
+      fingerprint: string;
+    };
+    expect(body.fingerprint).toMatch(/^v1:[0-9a-f]{64}$/);
+
+    const kf = await prisma.known_forms.findUnique({
+      where: { id: body.known_form_id },
+    });
+    expect(kf?.source_form_id).toBe(id);
+    expect(kf?.fingerprint).toBe(body.fingerprint);
+  });
+
+  it("snapshots the admin's corrected field TYPE into the catalog (not the raw type)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Field comes off the extractor as plain text; admin reclassifies it to date.
+    const id = await seedForm(agent.id, [
+      { detected_name: "close", detected_type: "text", needs_review: true },
+    ]);
+    const field = await prisma.uploaded_form_fields.findFirstOrThrow({
+      where: { form_id: id },
+    });
+    await patchField(
+      await patchReq(id, field.id, {
+        final_core_key: "closing_date",
+        final_type: "date",
+        final_role: "Buyer",
+        decision: "corrected",
+      }),
+      { params: Promise.resolve({ id, fieldId: field.id }) }
+    );
+    await action(await actionReq(id, { action: "approve" }), {
+      params: Promise.resolve({ id }),
+    });
+
+    const res = await saveKnown(await knownReq(id, await adminHdr()), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { known_form_id: string };
+    const kf = await prisma.known_forms.findUniqueOrThrow({
+      where: { id: body.known_form_id },
+    });
+    const catalog = kf.fields as Array<{
+      detected_name: string;
+      detected_type: string;
+      effective_type: string;
+    }>;
+    const close = catalog.find((f) => f.detected_name === "close")!;
+    expect(close.detected_type).toBe("text"); // raw extractor type preserved
+    expect(close.effective_type).toBe("date"); // admin's correction captured
+  });
+
+  it("409 when the form is not approved (still pending)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [{ needs_review: true }]);
+    const res = await saveKnown(await knownReq(id, await adminHdr()), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("403 for a non-admin", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const agent2 = await createUser({ role: "agent", auth0_id: "auth0|b" });
+    const id = await seedForm(agent2.id, [], "ready");
+    const res = await saveKnown(
+      await knownReq(id, await authHeader("auth0|a", ["agent"])),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(res.status).toBe(403);
   });
 });

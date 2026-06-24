@@ -15,6 +15,8 @@ import { GET as attestation } from "@/app/api/me/forms/attestation/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setS3ClientForTesting } from "@/lib/s3";
 import { setFieldMapperForTesting } from "@/lib/form-ai/mapper";
+import { extractAcroFields } from "@/lib/form-ai/extract";
+import { computeStructureFingerprint } from "@/lib/form-ai/fingerprint";
 import type { FieldMapper } from "@/lib/form-ai/types";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -167,6 +169,67 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
     const agree = fields.find((f) => f.detected_name === "agree")!;
     expect(agree.ai_core_key).toBeNull();
     expect(agree.needs_review).toBe(true);
+  });
+
+  it("recognizes a known form and copies the verified mapping (no AI mapper call)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Seed the catalog with the fillable fixture's structure.
+    const detected = await extractAcroFields(FILLABLE);
+    const fp = computeStructureFingerprint(detected, 1);
+    await prisma.known_forms.create({
+      data: {
+        label: "Known Listing",
+        side: "sell",
+        board: "",
+        purpose: "",
+        fingerprint: fp.fingerprint,
+        field_count: fp.fieldCount,
+        page_count: 1,
+        fields: [
+          { detected_name: "buyer_name", detected_type: "text", effective_type: "text", page_number: 1, pos_x: 72, pos_y: 700, width: 200, height: 18, core_key: "buyer_name", role: "Buyer", needs_review: false },
+          // Admin reclassified this field's type (raw text → date) on the
+          // original; the catalog must replay the EFFECTIVE type, not the raw one.
+          { detected_name: "close_date", detected_type: "text", effective_type: "date", page_number: 1, pos_x: 72, pos_y: 630, width: 120, height: 18, core_key: "closing_date", role: "Buyer", needs_review: false },
+          { detected_name: "agree_terms", detected_type: "checkbox", effective_type: "checkbox", page_number: 1, pos_x: 72, pos_y: 660, width: 12, height: 12, core_key: null, role: null, needs_review: true },
+        ],
+        role_mapping: { buyer: "Buyer" },
+      },
+    });
+    // Recognition must take the copy path, NOT the AI mapper.
+    setFieldMapperForTesting({
+      proposeMappings: async () => {
+        throw new Error("mapper must not run for a recognized form");
+      },
+    });
+
+    const res = await createForm(await postForm(agent.id, "auth0|a"));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      id: string;
+      field_count: number;
+      needs_review_count: number;
+    };
+    expect(body.field_count).toBe(3);
+    expect(body.needs_review_count).toBe(1);
+
+    const row = await prisma.uploaded_forms.findUnique({ where: { id: body.id } });
+    expect(row?.recognized_from_known_form_id).toBeTruthy();
+    expect(row?.structure_sha256).toBe(fp.fingerprint);
+
+    const fields = await prisma.uploaded_form_fields.findMany({
+      where: { form_id: body.id },
+    });
+    const buyer = fields.find((f) => f.detected_name === "buyer_name")!;
+    expect(buyer.ai_core_key).toBe("buyer_name");
+    expect(buyer.decision).toBe("accepted");
+    expect(buyer.needs_review).toBe(false);
+
+    // The admin's type correction is replayed: final_type is the EFFECTIVE
+    // type (date), while detected_type keeps the raw extractor type (text).
+    const date = fields.find((f) => f.detected_name === "close_date")!;
+    expect(date.detected_type).toBe("text");
+    expect(date.final_type).toBe("date");
+    expect(date.decision).toBe("accepted");
   });
 
   it("captures board = the agent's market at upload", async () => {
