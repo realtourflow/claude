@@ -20,6 +20,8 @@ const USER_DATA_TABLES = [
   "net_sheets",
   "tracked_properties",
   "agent_doc_templates",
+  "uploaded_form_fields",
+  "uploaded_forms",
   "tasks",
   "deals",
   "agent_invites",

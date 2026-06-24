@@ -5,11 +5,12 @@ import Image from "next/image";
 import {
   User, Store, Bell, Plug, Star, Pencil, Trash2,
   ChevronUp, ChevronDown, Plus, X, Check, ExternalLink,
-  Phone, Mail, Users, UserCheck, FileText, Upload,
+  Phone, Mail, Users, UserCheck, FileText, Upload, FileSignature,
 } from 'lucide-react';
 import { useAuthStore } from "@/lib/store/authStore";
 import { useTC, useMyAgents } from "@/hooks/useTC";
 import { useAgentDocs, DocType, DOC_TYPE_LABELS, AgentDocTemplate } from "@/hooks/useAgentDocs";
+import { MyFormsSection } from "@/components/pages/settings/MyFormsSection";
 import {
   VendorCategory,
   VENDOR_CATEGORY_LABELS,
@@ -25,7 +26,7 @@ import { MARKETS } from "@/lib/markets";
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'profile' | 'tc' | 'vendors' | 'my_agents' | 'notifications' | 'integrations' | 'documents';
+type Tab = 'profile' | 'tc' | 'vendors' | 'my_agents' | 'notifications' | 'integrations' | 'documents' | 'forms';
 
 // Tabs vary by role — built dynamically in the main component
 
@@ -1597,6 +1598,7 @@ export default function SettingsPage() {
     ...(isAgent ? [{ id: 'tc' as Tab,        label: 'Transaction Coordinator', icon: <UserCheck size={15} /> }] : []),
     ...(isAgent ? [{ id: 'vendors' as Tab,   label: 'My Vendors',             icon: <Store size={15} /> }] : []),
     ...(isAgent ? [{ id: 'documents' as Tab, label: 'Documents',              icon: <FileText size={15} /> }] : []),
+    ...(isAgent ? [{ id: 'forms' as Tab,     label: 'My Forms',               icon: <FileSignature size={15} /> }] : []),
     ...(isTC    ? [{ id: 'my_agents' as Tab, label: 'My Agents',              icon: <Users size={15} /> }] : []),
     { id: 'notifications', label: 'Notifications', icon: <Bell size={15} /> },
     { id: 'integrations',  label: 'Integrations',  icon: <Plug size={15} /> },
@@ -1641,6 +1643,7 @@ export default function SettingsPage() {
       {tab === 'tc'             && <TransactionCoordinatorSection agentId={agentId} />}
       {tab === 'vendors'        && <VendorsSection agentId={agentId} />}
       {tab === 'documents'      && <DocumentsSection agentId={agentId} />}
+      {tab === 'forms'          && <MyFormsSection />}
       {tab === 'my_agents'      && <MyAgentsSection tcUserId={activeUser?.id ?? 'tc-taylor'} />}
       {tab === 'notifications'  && <NotificationsSection />}
       {tab === 'integrations'   && <IntegrationsSection />}
