@@ -1,0 +1,275 @@
+document_type,label,type,role,tier,core_key,required,source,note
+purchase_agreement,buyer_name,text,Buyer1,core,buyer_name,TRUE,form_300,FORM 300 buyer_name (Buyer1).
+purchase_agreement,seller_name,text,Seller1,core,,TRUE,form_300,FORM 300 seller_name (Seller1).
+purchase_agreement,effective_date,text,BuyerAgent,core,offer_date,TRUE,form_300,FORM 300 effective_date = offer/effective date of agreement.
+purchase_agreement,property_address,text,BuyerAgent,core,,TRUE,form_300,FORM 300 property_address.
+purchase_agreement,property_city,text,BuyerAgent,core,city,TRUE,form_300,FORM 300 property_city.
+purchase_agreement,property_county,text,BuyerAgent,common,,FALSE,form_300,FORM 300 property_county.
+purchase_agreement,property_zip,text,BuyerAgent,core,zip,TRUE,form_300,FORM 300 property_zip.
+purchase_agreement,legal_description,text,BuyerAgent,core,legal_description,TRUE,form_300,FORM 300 legal_description.
+purchase_agreement,ppin,text,BuyerAgent,core,parcel_or_ppin,TRUE,form_300,FORM 300 ppin = parcel/PPIN.
+purchase_agreement,mls_id,text,BuyerAgent,common,,FALSE,form_300,FORM 300 mls_id.
+purchase_agreement,purchase_price,text,BuyerAgent,core,purchase_price,TRUE,form_300,FORM 300 purchase_price.
+purchase_agreement,listing_agent,text,BuyerAgent,core,,TRUE,form_300,"FORM 300 listing_agent name. core_key nulled: listing agent is the counterparty, not the RTF user (no scalar collision with buyer_agent)."
+purchase_agreement,buyer_agent,text,BuyerAgent,core,agent_name,TRUE,form_300,FORM 300 buyer_agent name.
+purchase_agreement,earnest_money_amount,text,BuyerAgent,core,earnest_money_amount,TRUE,form_300,FORM 300 earnest_money_amount.
+purchase_agreement,loan_amount,text,BuyerAgent,common,loan_amount_or_pct,FALSE,form_300,FORM 300 loan_amount.
+purchase_agreement,other_financing_description,text,BuyerAgent,common,,FALSE,form_300,FORM 300 other_financing_description.
+purchase_agreement,finance_contingency_date,text,BuyerAgent,common,,FALSE,form_300,FORM 300 finance_contingency_date.
+purchase_agreement,seller_concession_amount,text,BuyerAgent,common,,FALSE,form_300,FORM 300 seller_concession_amount.
+purchase_agreement,buyer_broker_comp_percentage,text,BuyerAgent,common,buyer_broker_comp,FALSE,form_300,FORM 300 buyer_broker_comp_percentage.
+purchase_agreement,closing_date,text,BuyerAgent,core,closing_date,TRUE,form_300,FORM 300 closing_date.
+purchase_agreement,possession_date,text,BuyerAgent,core,possession,TRUE,form_300,FORM 300 possession_date.
+purchase_agreement,warranty_max_amount,text,BuyerAgent,common,,FALSE,form_300,FORM 300 warranty_max_amount (home warranty cost cap).
+purchase_agreement,inspection_completion_date,text,BuyerAgent,common,,FALSE,form_300,FORM 300 inspection_completion_date.
+purchase_agreement,warranty_deed_type,text,BuyerAgent,common,,FALSE,form_300,FORM 300 warranty_deed_type.
+purchase_agreement,listing_agent_of_seller,checkbox,BuyerAgent,core,agency_role,TRUE,form_300,FORM 300 agency role: listing agent represents seller.
+purchase_agreement,listing_transaction_facilitator,checkbox,BuyerAgent,core,agency_role,TRUE,form_300,FORM 300 agency role: listing transaction facilitator.
+purchase_agreement,listing_dual_agent,checkbox,BuyerAgent,core,agency_role,TRUE,form_300,FORM 300 agency role: listing dual agent.
+purchase_agreement,buyer_agent_of_buyer,checkbox,BuyerAgent,core,agency_role,TRUE,form_300,FORM 300 agency role: buyer agent represents buyer.
+purchase_agreement,buyer_transaction_facilitator,checkbox,BuyerAgent,core,agency_role,TRUE,form_300,FORM 300 agency role: buyer transaction facilitator.
+purchase_agreement,buyer_dual_agent,checkbox,BuyerAgent,core,agency_role,TRUE,form_300,FORM 300 agency role: buyer dual agent.
+purchase_agreement,cash_buyer,checkbox,BuyerAgent,core,financing_type,TRUE,form_300,FORM 300 financing type: cash.
+purchase_agreement,financing_buyer,checkbox,BuyerAgent,core,financing_type,TRUE,form_300,FORM 300 financing type: financing/new mortgage.
+purchase_agreement,conventional,checkbox,BuyerAgent,core,financing_type,TRUE,form_300,FORM 300 loan type: conventional.
+purchase_agreement,FHA,checkbox,BuyerAgent,core,financing_type,TRUE,form_300,FORM 300 loan type: FHA.
+purchase_agreement,VA,checkbox,BuyerAgent,core,financing_type,TRUE,form_300,FORM 300 loan type: VA.
+purchase_agreement,other_financing,checkbox,BuyerAgent,core,financing_type,TRUE,form_300,FORM 300 loan type: other financing.
+purchase_agreement,appraisal_contingency_is,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 appraisal contingency IS.
+purchase_agreement,appraisal_contingency_not,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 appraisal contingency IS NOT.
+purchase_agreement,seller_concession_yes,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 seller concession elected.
+purchase_agreement,Buyer_broker_comp_checkbox,checkbox,BuyerAgent,common,,FALSE,form_300,"FORM 300 buyer broker comp election checkbox. core_key nulled: election checkbox, not the comp value (buyer_broker_comp_percentage carries it)."
+purchase_agreement,buyer_sale_contingency_is,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 buyer sale-of-property contingency IS.
+purchase_agreement,buyer_sale_contingency_not,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 buyer sale-of-property contingency IS NOT.
+purchase_agreement,warranty_does,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 home warranty: does furnish.
+purchase_agreement,warranty_does_not,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 home warranty: does not furnish.
+purchase_agreement,warranty_paid_by_seller,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 home warranty paid by seller.
+purchase_agreement,warranty_paid_by_buyer,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 home warranty paid by buyer.
+purchase_agreement,paint_attached_yes,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 lead-based paint disclosure attached: yes.
+purchase_agreement,paint_attached_no,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 lead-based paint disclosure attached: no.
+purchase_agreement,survey_is,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 survey contingency IS.
+purchase_agreement,survey_is_not,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 survey contingency IS NOT.
+purchase_agreement,contingent_upon_inspection_and_repairs,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 inspection: contingent upon inspection and repairs.
+purchase_agreement,contingent_upon_inspection_no_repair,checkbox,BuyerAgent,common,,FALSE,form_300,"FORM 300 inspection: contingent upon inspection, no repair."
+purchase_agreement,not_contingent_upon_inspection,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 inspection: not contingent (as-is).
+purchase_agreement,buyer_title_expense,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 title expense paid by buyer.
+purchase_agreement,seller_title_expense,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 title expense paid by seller.
+purchase_agreement,title_split,checkbox,BuyerAgent,common,,FALSE,form_300,FORM 300 title expense split.
+purchase_agreement,property_state,text,BuyerAgent,core,state,TRUE,alternate,Universal PA concept missing from FORM 300; from Baldwin REALTORS (property_state) + ValleyMLS (property_state). FORM 300 captures city/county/zip but not state.
+purchase_agreement,acceptance_binding_date,date,BuyerAgent,core,acceptance_binding_date,TRUE,alternate,Universal binding/acceptance date distinct from offer date; from Baldwin REALTORS (acceptance_date). FORM 300 has only effective_date.
+purchase_agreement,earnest_money_holder,text,BuyerAgent,common,earnest_money_holder,FALSE,alternate,Universal earnest-money escrow holder; from ValleyMLS (earnest_money_holder) + Baldwin REALTORS (holder elections). FORM 300 captures amount only.
+purchase_agreement,loan_type_usda,checkbox,BuyerAgent,core,financing_type,TRUE,alternate,Universal loan-type option; from Baldwin REALTORS (loan_type_usda). FORM 300 lacks a USDA checkbox.
+purchase_agreement,included_fixtures,text,BuyerAgent,common,included_fixtures,FALSE,alternate,Universal personal-property / fixtures-conveying field; from Baldwin REALTORS (personal_property_conveying / itemized_fixtures). FORM 300 has no free-text fixtures field.
+purchase_agreement,additional_provisions,text,BuyerAgent,common,additional_provisions,FALSE,alternate,Universal additional-provisions / special-stipulations text; from ValleyMLS (additional_provisions). FORM 300 has no general provisions field in the kept set.
+purchase_agreement,title_vesting_names,text,BuyerAgent,core,,TRUE,alternate,Universal manner-of-taking-title / vesting names; from Baldwin REALTORS (title_vesting_names). FORM 300 kept set has no vesting-names field.
+purchase_agreement,time_to_respond_date,date,BuyerAgent,core,,TRUE,alternate,Universal offer-expiration / time-to-respond deadline date; from Baldwin REALTORS (time_to_respond_date). FORM 300 kept set lacks it.
+purchase_agreement,time_to_respond_time,text,BuyerAgent,common,,FALSE,alternate,Universal offer-expiration time of day; from Baldwin REALTORS (time_to_respond_time).
+purchase_agreement,buyer1_signature,signature,Buyer1,core,,TRUE,alternate,Universal buyer signature; from Baldwin REALTORS (buyer1_signature) + ValleyMLS (purchaser_signature_1). FORM 300 kept set has no signature fields.
+purchase_agreement,buyer1_signature_date,date,Buyer1,core,,TRUE,alternate,Universal buyer signature date; from Baldwin REALTORS (buyer1_signature_date) + ValleyMLS (purchaser_date_1).
+purchase_agreement,buyer1_print_name,text,Buyer1,core,,TRUE,alternate,Universal buyer printed name at signature; from Baldwin REALTORS (buyer1_print_name).
+purchase_agreement,buyer2_signature,signature,Buyer2,common,,FALSE,alternate,Universal second-buyer signature; from Baldwin REALTORS (buyer2_signature) + ValleyMLS (purchaser_signature_2).
+purchase_agreement,buyer2_signature_date,date,Buyer2,common,,FALSE,alternate,Universal second-buyer signature date; from Baldwin REALTORS (buyer2_signature_date).
+purchase_agreement,buyer2_print_name,text,Buyer2,common,,FALSE,alternate,Universal second-buyer printed name; from Baldwin REALTORS (buyer2_print_name).
+purchase_agreement,seller1_signature,signature,Seller1,core,,TRUE,alternate,Universal seller signature; from Baldwin REALTORS (seller1_signature) + ValleyMLS (seller_signature_1).
+purchase_agreement,seller1_signature_date,date,Seller1,core,,TRUE,alternate,Universal seller signature date; from Baldwin REALTORS (seller1_signature_date) + ValleyMLS (seller_date_1).
+purchase_agreement,seller1_print_name,text,Seller1,core,,TRUE,alternate,Universal seller printed name; from Baldwin REALTORS (seller1_print_name).
+purchase_agreement,seller2_signature,signature,Seller2,common,,FALSE,alternate,Universal second-seller signature; from Baldwin REALTORS (seller2_signature) + ValleyMLS (seller_signature_2).
+purchase_agreement,seller2_signature_date,date,Seller2,common,,FALSE,alternate,Universal second-seller signature date; from Baldwin REALTORS (seller2_signature_date).
+purchase_agreement,seller2_print_name,text,Seller2,common,,FALSE,alternate,Universal second-seller printed name; from Baldwin REALTORS (seller2_print_name).
+purchase_agreement,buyer_brokerage_name,text,BuyerAgent,core,brokerage_name,TRUE,critic,Buyer-side brokerage = the RTF agent's firm (buy-side); auto-fills from the deal. Added by completeness critic.
+purchase_agreement,listing_brokerage_name,text,BuyerAgent,common,,FALSE,critic,Listing-side (counterparty) brokerage; manual. Added by completeness critic.
+purchase_agreement,down_payment_amount,text,BuyerAgent,common,,FALSE,added,"ValleyMLS has explicit down payment / balance-due-at-closing distinct from loan_amount and price. FORM 300 lacks it."
+purchase_agreement,loan_percent,text,BuyerAgent,common,loan_amount_or_pct,FALSE,added,"FORM 300 lets financing be expressed as a % of purchase price as an alternative to loan_amount. Same core_key (loan_amount_or_pct)."
+purchase_agreement,finance_application_days,text,BuyerAgent,common,,FALSE,added,"FORM 300 'within ___ days' to apply for financing. Mid-sentence numeric blank."
+purchase_agreement,inspection_period_days,text,BuyerAgent,common,,FALSE,added,"FORM 300 inspection contingency 'within ___ calendar days' period. Mid-sentence numeric blank."
+purchase_agreement,seller_repair_response_days,text,BuyerAgent,common,,FALSE,added,"FORM 300 days for seller to respond to repair requests."
+purchase_agreement,buyer_repair_response_days,text,BuyerAgent,common,,FALSE,added,"FORM 300 days for buyer to respond after seller repair response."
+purchase_agreement,agent_email,text,BuyerAgent,common,,FALSE,added,"Buyer agent email on FORM 300 agent block. Filled at signing, not auto-filled."
+purchase_agreement,agent_phone,text,BuyerAgent,common,,FALSE,added,"Buyer agent phone on FORM 300 agent block."
+purchase_agreement,agent_license,text,BuyerAgent,common,,FALSE,added,"Buyer agent license number on FORM 300 agent block."
+purchase_agreement,company_license,text,BuyerAgent,common,,FALSE,added,"Buyer brokerage/company license number on FORM 300 agent block."
+purchase_agreement,office_address,text,BuyerAgent,common,,FALSE,added,"Buyer brokerage office address on FORM 300 agent block."
+purchase_agreement,listing_agent_email,text,BuyerAgent,common,,FALSE,added,"Listing (counterparty) agent email; agent fills if known. Manual."
+purchase_agreement,listing_agent_phone,text,BuyerAgent,common,,FALSE,added,"Listing (counterparty) agent phone; agent fills if known. Manual."
+purchase_agreement,lot,text,BuyerAgent,common,,FALSE,added,"ValleyMLS breaks legal description into Lot/Block/Subdivision/Addition. Lot sub-field."
+purchase_agreement,block,text,BuyerAgent,common,,FALSE,added,"ValleyMLS legal-description Block sub-field."
+purchase_agreement,subdivision,text,BuyerAgent,common,,FALSE,added,"ValleyMLS legal-description Subdivision sub-field."
+purchase_agreement,addition,text,BuyerAgent,common,,FALSE,added,"ValleyMLS legal-description Addition sub-field."
+purchase_agreement,witness1_signature,signature,Witness,common,,FALSE,added,"ValleyMLS + Inspection Addendum use witness signature lines. FORM 300 does not. New Witness role."
+purchase_agreement,witness1_print_name,text,Witness,common,,FALSE,added,"Witness printed name (ValleyMLS)."
+purchase_agreement,witness2_signature,signature,Witness,common,,FALSE,added,"Second witness signature line (ValleyMLS)."
+purchase_agreement,witness2_print_name,text,Witness,common,,FALSE,added,"Second witness printed name (ValleyMLS)."
+wire_fraud,brokerage_name,text,Consumer1,core,brokerage_name,TRUE,wire_fraud_notice,"Top brokerage name line. Auto-fills."
+wire_fraud,consumer_name,text,Consumer1,core,buyer_name,TRUE,wire_fraud_notice,"First buyer/seller printed name. core_key buyer_name when buyer-side; agent picks side."
+wire_fraud,consumer1_signature,signature,Consumer1,core,,TRUE,wire_fraud_notice,"First consumer signature."
+wire_fraud,consumer1_date,date,Consumer1,core,,TRUE,wire_fraud_notice,"First consumer date."
+wire_fraud,consumer_name_2,text,Consumer2,common,,FALSE,wire_fraud_notice,"Second buyer/seller printed name (optional)."
+wire_fraud,consumer2_signature,signature,Consumer2,common,,FALSE,wire_fraud_notice,"Second consumer signature (optional)."
+wire_fraud,consumer2_date,date,Consumer2,common,,FALSE,wire_fraud_notice,"Second consumer date (optional)."
+brokerage_services_disclosure,agent_name,text,Agent,core,agent_name,TRUE,arec_brokerage_disclosure,"Name of Licensee. Auto-fills."
+brokerage_services_disclosure,agent_signature,signature,Agent,core,,TRUE,arec_brokerage_disclosure,"Licensee signature."
+brokerage_services_disclosure,agent_date,date,Agent,core,,TRUE,arec_brokerage_disclosure,"Licensee date."
+brokerage_services_disclosure,consumer_name,text,Consumer,core,buyer_name,TRUE,arec_brokerage_disclosure,"Name of Consumer. Side picked by agent."
+brokerage_services_disclosure,consumer_signature,signature,Consumer,core,,TRUE,arec_brokerage_disclosure,"Consumer signature (acknowledgement of receipt only)."
+brokerage_services_disclosure,consumer_date,date,Consumer,core,,TRUE,arec_brokerage_disclosure,"Consumer date."
+documentation_fee,property_address,text,Signer,core,,TRUE,remax_doc_fee,"Property address at top. core_key not set (brokerage form, not standard PA address field)."
+documentation_fee,signer_initials,initial,Signer,core,,TRUE,remax_doc_fee,"Initials at bottom."
+documentation_fee,client_signature_1,signature,Signer,core,,TRUE,remax_doc_fee,"First client signature."
+documentation_fee,client_signature_2,signature,Signer2,common,,FALSE,remax_doc_fee,"Second client signature (optional)."
+inspection_addendum,buyer_name,text,BuyerAgent,core,buyer_name,TRUE,valleymls_inspection_addendum,"Purchaser(s) name line. Auto-fills."
+inspection_addendum,seller_name,text,BuyerAgent,core,,TRUE,valleymls_inspection_addendum,"Seller(s) name line."
+inspection_addendum,property_address,text,BuyerAgent,core,,TRUE,valleymls_inspection_addendum,"Property commonly known as / address."
+inspection_addendum,property_city,text,BuyerAgent,common,city,FALSE,valleymls_inspection_addendum,"City."
+inspection_addendum,property_county,text,BuyerAgent,common,,FALSE,valleymls_inspection_addendum,"County."
+inspection_addendum,property_state,text,BuyerAgent,common,state,FALSE,valleymls_inspection_addendum,"State."
+inspection_addendum,property_zip,text,BuyerAgent,common,zip,FALSE,valleymls_inspection_addendum,"Zip."
+inspection_addendum,inspection_notice_days,text,BuyerAgent,common,,TRUE,valleymls_inspection_addendum,"'within ___ working days' blank. Mid-sentence numeric."
+inspection_addendum,inspection_additional_provisions,text,BuyerAgent,common,additional_provisions,FALSE,valleymls_inspection_addendum,"Additional Provisions multiline block."
+inspection_addendum,addendum_date,text,BuyerAgent,common,,FALSE,valleymls_inspection_addendum,"'Dated this ___ day of ___'."
+inspection_addendum,buyer1_signature,signature,Buyer1,core,,TRUE,valleymls_inspection_addendum,"Purchaser signature 1."
+inspection_addendum,buyer1_date,date,Buyer1,core,,TRUE,valleymls_inspection_addendum,"Purchaser date 1."
+inspection_addendum,buyer2_signature,signature,Buyer2,common,,FALSE,valleymls_inspection_addendum,"Purchaser signature 2 (optional)."
+inspection_addendum,seller1_signature,signature,Seller1,core,,TRUE,valleymls_inspection_addendum,"Seller signature 1."
+inspection_addendum,seller1_date,date,Seller1,core,,TRUE,valleymls_inspection_addendum,"Seller date 1."
+inspection_addendum,seller2_signature,signature,Seller2,common,,FALSE,valleymls_inspection_addendum,"Seller signature 2 (optional)."
+inspection_addendum,witness1,text,Witness,common,,FALSE,valleymls_inspection_addendum,"Witness line (plain text, no signing role)."
+lead_based_paint,property_address,text,Agent,core,,TRUE,lead_paint_disclosure,"Property address top of page 1."
+lead_based_paint,lead_paint_known_present,checkbox,Seller1,common,,FALSE,lead_paint_disclosure,"(a) Known lead paint present."
+lead_based_paint,lead_paint_no_knowledge,checkbox,Seller1,common,,FALSE,lead_paint_disclosure,"(a) Seller has no knowledge."
+lead_based_paint,lead_paint_explanation,text,Seller1,common,,FALSE,lead_paint_disclosure,"Explanation line if known."
+lead_based_paint,lead_paint_records_provided,checkbox,Seller1,common,,FALSE,lead_paint_disclosure,"(b) Records provided."
+lead_based_paint,lead_paint_no_records,checkbox,Seller1,common,,FALSE,lead_paint_disclosure,"(b) No records."
+lead_based_paint,lead_paint_records_list,text,Seller1,common,,FALSE,lead_paint_disclosure,"Records list line."
+lead_based_paint,lead_paint_inspection_opportunity,checkbox,Buyer1,common,,FALSE,lead_paint_disclosure,"(e) 10-day opportunity."
+lead_based_paint,lead_paint_inspection_waived,checkbox,Buyer1,common,,FALSE,lead_paint_disclosure,"(e) Waived."
+lead_based_paint,seller_initials_a,initial,Seller1,common,,FALSE,lead_paint_disclosure,"(a) seller initials."
+lead_based_paint,seller_initials_b,initial,Seller1,common,,FALSE,lead_paint_disclosure,"(b) seller initials."
+lead_based_paint,buyer_initials_c,initial,Buyer1,common,,FALSE,lead_paint_disclosure,"(c) buyer initials."
+lead_based_paint,buyer_initials_d,initial,Buyer1,common,,FALSE,lead_paint_disclosure,"(d) buyer initials."
+lead_based_paint,buyer_initials_e,initial,Buyer1,common,,FALSE,lead_paint_disclosure,"(e) buyer initials."
+lead_based_paint,buyer1_signature,signature,Buyer1,core,,TRUE,lead_paint_disclosure,"Page 2 purchaser signature 1."
+lead_based_paint,buyer1_date,date,Buyer1,core,,TRUE,lead_paint_disclosure,"Page 2 purchaser date 1."
+lead_based_paint,buyer2_signature,signature,Buyer2,common,,FALSE,lead_paint_disclosure,"Page 2 purchaser signature 2 (optional)."
+lead_based_paint,seller1_signature,signature,Seller1,core,,TRUE,lead_paint_disclosure,"Page 2 seller signature 1."
+lead_based_paint,seller1_date,date,Seller1,core,,TRUE,lead_paint_disclosure,"Page 2 seller date 1."
+lead_based_paint,seller2_signature,signature,Seller2,common,,FALSE,lead_paint_disclosure,"Page 2 seller signature 2 (optional)."
+lead_based_paint,agent_signature,signature,Agent,core,,TRUE,lead_paint_disclosure,"Salesperson signature."
+lead_based_paint,agent_date,date,Agent,core,,TRUE,lead_paint_disclosure,"Salesperson date."
+buyer_agency,buyer_name,text,Buyer1,core,buyer_name,TRUE,baldwin_buyer_agency,"Buyer(s) name. Auto-fills."
+buyer_agency,agent_name,text,Agent,core,agent_name,TRUE,baldwin_buyer_agency,"Buyer's broker or agent. Auto-fills."
+buyer_agency,qualifying_broker,text,Agent,common,,FALSE,baldwin_buyer_agency,"Qualifying broker name."
+buyer_agency,brokerage_name,text,Agent,core,brokerage_name,TRUE,baldwin_buyer_agency,"Company. Auto-fills."
+buyer_agency,agreement_start_date,date,Buyer1,core,,TRUE,baldwin_buyer_agency,"Term begin date."
+buyer_agency,agreement_end_date,date,Buyer1,core,,TRUE,baldwin_buyer_agency,"Term end date."
+buyer_agency,comp_flat,text,Buyer1,common,,FALSE,baldwin_buyer_agency,"Compensation flat $ election."
+buyer_agency,comp_percent,text,Buyer1,common,buyer_broker_comp,FALSE,baldwin_buyer_agency,"Compensation % of gross sales price."
+buyer_agency,comp_other,text,Buyer1,common,,FALSE,baldwin_buyer_agency,"Compensation 'Other' election."
+buyer_agency,baa_tail_days,text,Buyer1,common,,FALSE,baldwin_buyer_agency,"3.c.ii 'within ___ days' tail period."
+buyer_agency,referral_fee_applies,checkbox,Buyer1,common,,FALSE,baldwin_buyer_agency,"3.f does/does not referral fee."
+buyer_agency,referral_fee_percent,text,Buyer1,common,,FALSE,baldwin_buyer_agency,"3.f referral fee ___%."
+buyer_agency,disclose_identity,checkbox,Buyer1,common,,FALSE,baldwin_buyer_agency,"Para 10 does/does not disclose buyer identity."
+buyer_agency,property_preferences,text,Buyer1,common,,FALSE,baldwin_buyer_agency,"Para 4 property preferences line."
+buyer_agency,buyer_initials,initial,Buyer1,common,,FALSE,baldwin_buyer_agency,"Buyer initials (pg 1 + para 5)."
+buyer_agency,buyer_mailing_address,text,Buyer1,common,,FALSE,baldwin_buyer_agency,"Buyer mailing address (pg 3 contact block)."
+buyer_agency,buyer_phone,text,Buyer1,common,,FALSE,baldwin_buyer_agency,"Buyer phone."
+buyer_agency,buyer_email,text,Buyer1,common,,FALSE,baldwin_buyer_agency,"Buyer email."
+buyer_agency,agent_mailing_address,text,Agent,common,,FALSE,baldwin_buyer_agency,"Agent mailing address."
+buyer_agency,agent_phone,text,Agent,common,,FALSE,baldwin_buyer_agency,"Agent phone."
+buyer_agency,agent_email,text,Agent,common,,FALSE,baldwin_buyer_agency,"Agent email."
+buyer_agency,agent_signature,signature,Agent,core,,TRUE,baldwin_buyer_agency,"Broker or agent signature."
+buyer_agency,agent_date,date,Agent,core,,TRUE,baldwin_buyer_agency,"Broker or agent date."
+buyer_agency,buyer1_signature,signature,Buyer1,core,,TRUE,baldwin_buyer_agency,"Buyer signature 1."
+buyer_agency,buyer1_date,date,Buyer1,core,,TRUE,baldwin_buyer_agency,"Buyer date 1."
+buyer_agency,buyer2_signature,signature,Buyer2,common,,FALSE,baldwin_buyer_agency,"Buyer signature 2 (optional)."
+addendum_contingent_sale,addendum_number,text,BuyerAgent,common,,FALSE,baldwin_addendum_contingent,"ADDENDUM # at top."
+addendum_contingent_sale,effective_date,date,BuyerAgent,core,,TRUE,baldwin_addendum_contingent,"Agreement dated."
+addendum_contingent_sale,property_address,text,BuyerAgent,core,,TRUE,baldwin_addendum_contingent,"Property at."
+addendum_contingent_sale,seller_name,text,BuyerAgent,core,,TRUE,baldwin_addendum_contingent,"Seller(s)."
+addendum_contingent_sale,buyer_name,text,BuyerAgent,core,buyer_name,TRUE,baldwin_addendum_contingent,"Buyer(s). Auto-fills."
+addendum_contingent_sale,buyer_property_address,text,BuyerAgent,common,,FALSE,baldwin_addendum_contingent,"Buyer's property to be sold, located at."
+addendum_contingent_sale,buyer_property_for_sale,checkbox,BuyerAgent,common,,FALSE,baldwin_addendum_contingent,"is/is not for sale."
+addendum_contingent_sale,listing_broker_name,text,BuyerAgent,common,,FALSE,baldwin_addendum_contingent,"Listing broker name/license for buyer's property."
+addendum_contingent_sale,buyer_property_under_contract,checkbox,BuyerAgent,common,,FALSE,baldwin_addendum_contingent,"has/has not entered purchase agreement."
+addendum_contingent_sale,backup_response_hours,text,BuyerAgent,common,,FALSE,baldwin_addendum_contingent,"period of ___ hours to respond."
+addendum_contingent_sale,buyer_property_close_by_date,date,BuyerAgent,common,,FALSE,baldwin_addendum_contingent,"close on or before date."
+addendum_contingent_sale,addendum_additional_terms,text,BuyerAgent,common,additional_provisions,FALSE,baldwin_addendum_contingent,"Additional terms block."
+addendum_contingent_sale,buyer1_print_name,text,Buyer1,core,,TRUE,baldwin_addendum_contingent,"Buyer print name 1."
+addendum_contingent_sale,buyer1_signature,signature,Buyer1,core,,TRUE,baldwin_addendum_contingent,"Buyer signature 1."
+addendum_contingent_sale,buyer1_date,date,Buyer1,core,,TRUE,baldwin_addendum_contingent,"Buyer date 1."
+addendum_contingent_sale,buyer2_signature,signature,Buyer2,common,,FALSE,baldwin_addendum_contingent,"Buyer signature 2 (optional)."
+addendum_contingent_sale,seller1_print_name,text,Seller1,core,,TRUE,baldwin_addendum_contingent,"Seller print name 1."
+addendum_contingent_sale,seller1_signature,signature,Seller1,core,,TRUE,baldwin_addendum_contingent,"Seller signature 1."
+addendum_contingent_sale,seller1_date,date,Seller1,core,,TRUE,baldwin_addendum_contingent,"Seller date 1."
+addendum_contingent_sale,seller2_signature,signature,Seller2,common,,FALSE,baldwin_addendum_contingent,"Seller signature 2 (optional)."
+listing_agreement,seller_name,text,SellerAgent,core,,TRUE,baldwin_listing_residential,"Owner(s)/Seller(s) - 'made by and between ___'. Auto-fills seller name."
+listing_agreement,brokerage_name,text,SellerAgent,core,brokerage_name,TRUE,baldwin_listing_residential,"Listing Broker name. Auto-fills."
+listing_agreement,property_address,text,SellerAgent,core,,TRUE,baldwin_listing_residential,"Street Address."
+listing_agreement,property_city,text,SellerAgent,core,city,TRUE,baldwin_listing_residential,"City."
+listing_agreement,property_county,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"County."
+listing_agreement,property_state,text,SellerAgent,common,state,FALSE,baldwin_listing_residential,"State."
+listing_agreement,property_zip,text,SellerAgent,core,zip,TRUE,baldwin_listing_residential,"Zip."
+listing_agreement,legal_description,text,SellerAgent,core,legal_description,TRUE,baldwin_listing_residential,"Legal Description."
+listing_agreement,ppin,text,SellerAgent,core,parcel_or_ppin,FALSE,baldwin_listing_residential,"PPIN#."
+listing_agreement,dual_agency_authorized,checkbox,SellerAgent,common,,TRUE,baldwin_listing_residential,"AGENCY: Seller does/does not authorize Listing Broker as Dual Agent."
+listing_agreement,agreement_start_date,date,SellerAgent,core,,TRUE,baldwin_listing_residential,"Para 1 period beginning on ___."
+listing_agreement,agreement_end_date,date,SellerAgent,core,,TRUE,baldwin_listing_residential,"Para 1 period ending on ___."
+listing_agreement,mls_input_date,date,SellerAgent,common,,FALSE,baldwin_listing_residential,"Para 1 'place listing into MLS on ___' date."
+listing_agreement,listing_price,text,SellerAgent,core,purchase_price,TRUE,baldwin_listing_residential,"2.A Listing Price $___. Maps to purchase_price core key (listing context)."
+listing_agreement,listing_terms,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"2.B Terms/Financing: Cash/Mortgage/FHA/VA/USDA/Vendors Lien/Other group."
+listing_agreement,listing_terms_other,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"2.B Other Mortgage Provisions text."
+listing_agreement,comp_percent,text,SellerAgent,core,buyer_broker_comp,FALSE,baldwin_listing_residential,"3 percentage ___% of gross sale."
+listing_agreement,comp_flat,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"3 flat rate fee $___."
+listing_agreement,protection_period_days,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"3 'within ___ days after expiration' protection period."
+listing_agreement,systems_exceptions,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"4 Systems/Fixtures EXCEPTIONS text."
+listing_agreement,home_warranty,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"5 Seller shall/shall not furnish Home Warranty."
+listing_agreement,excluded_items,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"6 Purchase Price DOES NOT include ___ (exclusions)."
+listing_agreement,furnishings,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"7 furnished/partially furnished/not furnished group."
+listing_agreement,termite_prior_infestation,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"8 Seller is/is not aware of previous infestation."
+listing_agreement,termite_under_contract,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"8 Property is/is not covered by repair/re-treatment contract."
+listing_agreement,termite_company,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"8 wood infestation contract company name."
+listing_agreement,termite_contract_expires,date,SellerAgent,common,,FALSE,baldwin_listing_residential,"8 contract expires on ___."
+listing_agreement,has_survey,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"9 Seller does/does not have a Survey."
+listing_agreement,has_elevation_cert,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"9 Seller does/does not have Elevation Certificate."
+listing_agreement,lead_paint_required,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"10 check if Lead Paint disclosure must be provided (pre-1978)."
+listing_agreement,mortgages_liens,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"11 a/b/c Mortgages/Liens/Judgments text."
+listing_agreement,lockbox_authorized,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"13 Seller DOES/DOES NOT authorize lock-box."
+listing_agreement,locks_linens_convey,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"14 locks/linens are/are not seller property and will/will not convey."
+listing_agreement,title_type,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"15 Deeded / Fairhope Single Tax Corporation group."
+listing_agreement,has_poa,checkbox,SellerAgent,common,,FALSE,baldwin_listing_residential,"16 Property is/is not part of a Property Owners Association."
+listing_agreement,poa_contact,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"16 POA management company/manager name."
+listing_agreement,poa_phone,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"16 POA management phone."
+listing_agreement,poa_assessments,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"16 known/pending assessments text."
+listing_agreement,additional_provisions,text,SellerAgent,common,additional_provisions,FALSE,baldwin_listing_residential,"26 Additional Provisions block."
+listing_agreement,seller_mailing_address,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"Seller's Mailing Address."
+listing_agreement,seller_phone,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"Seller's Phone."
+listing_agreement,seller_work_phone,text,SellerAgent,common,,FALSE,baldwin_listing_residential,"Seller's Work Phone."
+listing_agreement,seller1_signature,signature,Seller1,core,,TRUE,baldwin_listing_residential,"Seller signature 1."
+listing_agreement,seller1_print_name,text,Seller1,core,,TRUE,baldwin_listing_residential,"Seller 1 print name as title is held."
+listing_agreement,seller1_date,date,Seller1,core,,TRUE,baldwin_listing_residential,"Seller date 1."
+listing_agreement,seller2_signature,signature,Seller2,common,,FALSE,baldwin_listing_residential,"Seller signature 2 (optional)."
+listing_agreement,seller2_print_name,text,Seller2,common,,FALSE,baldwin_listing_residential,"Seller 2 print name (optional)."
+listing_agreement,seller2_date,date,Seller2,common,,FALSE,baldwin_listing_residential,"Seller date 2 (optional)."
+listing_agreement,seller3_signature,signature,Seller3,common,,FALSE,baldwin_listing_residential,"Seller signature 3 (optional)."
+listing_agreement,seller3_print_name,text,Seller3,common,,FALSE,baldwin_listing_residential,"Seller 3 print name (optional)."
+listing_agreement,seller3_date,date,Seller3,common,,FALSE,baldwin_listing_residential,"Seller date 3 (optional)."
+listing_agreement,seller4_signature,signature,Seller4,common,,FALSE,baldwin_listing_residential,"Seller signature 4 (optional)."
+listing_agreement,seller4_print_name,text,Seller4,common,,FALSE,baldwin_listing_residential,"Seller 4 print name (optional)."
+listing_agreement,seller4_date,date,Seller4,common,,FALSE,baldwin_listing_residential,"Seller date 4 (optional)."
+listing_agreement,listing_agent_signature,signature,SellerAgent,core,,TRUE,baldwin_listing_residential,"Listing Agent signature."
+listing_agreement,listing_agent_print_name,text,SellerAgent,core,agent_name,TRUE,baldwin_listing_residential,"Listing Agent print name. Auto-fills agent name."
+listing_agreement,listing_agent_date,date,SellerAgent,core,,TRUE,baldwin_listing_residential,"Listing Agent date."
+listing_agreement,seller_initials_per_page,initial,Seller1,common,,FALSE,baldwin_listing_residential,"FORM-SPECIFIC: 'Seller's Initials' block appears on EVERY page (~13 pages). Place one per page. Tiered common but keep as repeated per-page placement, not vision-hunt clutter."
+addendum,addendum_number,text,BuyerAgent,common,,FALSE,generic_addendum,"ADDENDUM # / reference number."
+addendum,effective_date,date,BuyerAgent,core,,TRUE,generic_addendum,"Date the addendum / underlying agreement is dated."
+addendum,property_address,text,BuyerAgent,core,,TRUE,generic_addendum,"Property address this addendum pertains to."
+addendum,buyer_name,text,BuyerAgent,core,buyer_name,TRUE,generic_addendum,"Buyer(s). Auto-fills."
+addendum,seller_name,text,BuyerAgent,core,,TRUE,generic_addendum,"Seller(s)."
+addendum,addendum_text,text,BuyerAgent,core,additional_provisions,TRUE,generic_addendum,"Main addendum body / additional terms block (multiline). The core of a generic addendum."
+addendum,buyer1_signature,signature,Buyer1,core,,TRUE,generic_addendum,"Buyer signature 1."
+addendum,buyer1_date,date,Buyer1,core,,TRUE,generic_addendum,"Buyer date 1."
+addendum,buyer2_signature,signature,Buyer2,common,,FALSE,generic_addendum,"Buyer signature 2 (optional)."
+addendum,buyer2_date,date,Buyer2,common,,FALSE,generic_addendum,"Buyer date 2 (optional)."
+addendum,seller1_signature,signature,Seller1,core,,TRUE,generic_addendum,"Seller signature 1."
+addendum,seller1_date,date,Seller1,core,,TRUE,generic_addendum,"Seller date 1."
+addendum,seller2_signature,signature,Seller2,common,,FALSE,generic_addendum,"Seller signature 2 (optional)."
+addendum,seller2_date,date,Seller2,common,,FALSE,generic_addendum,"Seller date 2 (optional)."

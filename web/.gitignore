@@ -48,3 +48,6 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+
+# Local render/eval scratch output (scripts/cmp-render.ts)
+/eval-out
