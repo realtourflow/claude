@@ -6,6 +6,14 @@ import { api } from "@/lib/api-client";
 export type FormSide = "buy" | "sell" | "both";
 export type FormStatus = "pending_review" | "ready" | "rejected" | "archived";
 
+export type FormType = {
+  key: string;
+  label: string;
+  description: string;
+  side: string;
+  field_count: number;
+};
+
 export type UploadedForm = {
   id: string;
   label: string;
@@ -53,13 +61,21 @@ export function useAgentForms() {
     },
   });
 
+  // The document types the agent can declare on upload (selects the field set).
+  const typesQuery = useQuery({
+    queryKey: ["me-form-types"],
+    queryFn: () => api.get<FormType[]>("/me/form-types"),
+  });
+
   // Upload a blank form: presign → PUT to S3 → confirm (runs the AI pipeline).
   // `attested` MUST be true — the server rejects the confirm otherwise.
+  // `formType` is the agent's declared document type (key in form_types).
   async function uploadForm(
     file: File,
     label: string,
     side: FormSide,
-    attested: boolean
+    attested: boolean,
+    formType: string
   ): Promise<UploadedForm> {
     const mimeType = file.type || "application/pdf";
 
@@ -84,6 +100,7 @@ export function useAgentForms() {
       s3_key,
       mime_type: mimeType,
       attestation: attested,
+      form_type: formType,
     });
 
     const form = fromApi(raw);
@@ -104,6 +121,7 @@ export function useAgentForms() {
   return {
     forms: query.data ?? [],
     loading: query.isLoading,
+    formTypes: typesQuery.data ?? [],
     refresh: () => {
       void query.refetch();
     },

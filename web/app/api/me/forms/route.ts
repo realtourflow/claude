@@ -83,6 +83,9 @@ type CreateBody = {
   s3_key?: string;
   mime_type?: string;
   attestation?: boolean;
+  // The document type the agent declared ("this is my purchase agreement"). Its
+  // key in form_types; selects the field set guided vision will locate (Phase 3).
+  form_type?: string;
 };
 
 // POST /api/me/forms — confirm an uploaded blank form. Requires the licensing
@@ -118,6 +121,19 @@ export async function POST(req: Request): Promise<Response> {
           "you must attest you are licensed and permitted to use and host this form",
           400
         );
+      }
+
+      // The agent's declared document type (optional today; required by the UI).
+      // Resolve its id and reject an unknown/inactive key — this selects the field
+      // set guided vision will locate on the agent's layout (Phase 3).
+      let formTypeId: string | null = null;
+      if (body.form_type) {
+        const t = await prisma.form_types.findUnique({
+          where: { key: body.form_type },
+          select: { id: true, active: true },
+        });
+        if (!t || !t.active) return error("unknown form type", 400);
+        formTypeId = t.id;
       }
 
       // Reject an oversized object FIRST (cheap HeadObject), before buffering or
@@ -217,6 +233,7 @@ export async function POST(req: Request): Promise<Response> {
           file_sha256: sha256Hex(bytes),
           structure_sha256: fingerprint,
           recognized_from_known_form_id: known?.id ?? null,
+          form_type_id: formTypeId,
           attested_by: userId,
           attestation_statement: statement,
           ...(known?.role_mapping
