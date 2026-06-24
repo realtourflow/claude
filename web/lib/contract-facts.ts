@@ -19,6 +19,10 @@ export const AUTO_VALUE_KEYS = [
   "buyer_name",
   "agent_name",
   "brokerage_name",
+  // The deal's client signers (buyer or seller side), 1st and 2nd — used by
+  // statewide consumer notices (e.g. the wire-fraud notice).
+  "consumer_name",
+  "consumer_name_2",
 ] as const;
 const AUTO_KEY_SET = new Set<string>(AUTO_VALUE_KEYS);
 
@@ -48,6 +52,26 @@ export const FACT_FIELDS = {
 
 export type FactKey = keyof typeof FACT_FIELDS;
 export type FactKind = (typeof FACT_FIELDS)[FactKey];
+
+// Auto-fill bridge: a form-specific Data Label → the canonical deal value that
+// should pre-fill it. The source is a key already present in the merged value
+// set — a FACT_FIELDS column, an auto-sourced identity (agent_name), the deal's
+// street address, or seller_name. This lets each form keep its own label (e.g.
+// `property_city`) yet still inherit the deal's `city`, WITHOUT renaming the
+// template tag. The agent always wins: a saved term overrides the alias. A
+// source with no value just leaves the field blank for the agent to fill in.
+export const CONTRACT_FIELD_ALIASES: Record<string, string> = {
+  property_address: "address", // deals.address
+  property_city: "city",
+  property_state: "state",
+  property_zip: "zip",
+  ppin: "parcel_or_ppin",
+  loan_amount: "loan_amount_or_pct",
+  effective_date: "acceptance_binding_date",
+  possession_date: "possession",
+  buyer_broker_comp_percentage: "buyer_broker_comp",
+  buyer_agent: "agent_name", // the buyer's agent IS the deal agent
+};
 
 function coerce(key: string, kind: FactKind, value: unknown): unknown {
   if (value === null || value === undefined || value === "") return null;
@@ -174,18 +198,26 @@ export async function getMergedContractValues(
   dealId: string,
   formKey: string
 ): Promise<Record<string, unknown>> {
-  const [facts, deal, termsRow, buyers] = await Promise.all([
+  const [facts, deal, termsRow, clients, sellers] = await Promise.all([
     prisma.deal_contract_facts.findUnique({ where: { deal_id: dealId } }),
     prisma.deals.findUnique({
       where: { id: dealId },
-      select: { price: true, users: { select: { name: true, brokerage: true } } },
+      select: {
+        price: true,
+        address: true,
+        users: { select: { name: true, brokerage: true } },
+      },
     }),
     prisma.deal_contract_terms.findFirst({
       where: { deal_id: dealId, form_key: formKey },
       select: { terms: true },
     }),
     prisma.deal_participants.findMany({
-      where: { deal_id: dealId, role: "buyer" },
+      where: { deal_id: dealId, role: { in: ["buyer", "seller"] } },
+      select: { role: true, user_id: true, users: { select: { name: true } } },
+    }),
+    prisma.deal_participants.findMany({
+      where: { deal_id: dealId, role: "seller" },
       select: { users: { select: { name: true } } },
       orderBy: { user_id: "asc" },
     }),
@@ -195,10 +227,24 @@ export async function getMergedContractValues(
 
   // Auto-sourced party/agent identity (see AUTO_VALUE_KEYS). Only set when
   // present so a missing value leaves the template tab blank for the signer.
-  const buyerNames = buyers
-    .map((b) => b.users?.name?.trim())
+  // Sort by user_id to match assignConsumerRoles' Consumer1/Consumer2 order
+  // exactly, so consumer_name prefill lands on the right signer.
+  const orderedClients = clients
+    .slice()
+    .sort((a, b) => a.user_id.localeCompare(b.user_id));
+  const clientNames = orderedClients
+    .map((c) => c.users?.name?.trim())
     .filter((n): n is string => !!n);
+  const buyerNames = orderedClients
+    .filter((c) => c.role === "buyer")
+    .map((c) => c.users?.name?.trim())
+    .filter((n): n is string => !!n);
+
   if (buyerNames.length > 0) values.buyer_name = buyerNames.join(" & ");
+  // consumer_name / consumer_name_2 = 1st / 2nd client signer (buyer or seller
+  // side), in the same userId order assignConsumerRoles uses.
+  if (clientNames[0]) values.consumer_name = clientNames[0];
+  if (clientNames[1]) values.consumer_name_2 = clientNames[1];
   if (deal?.users?.name) values.agent_name = deal.users.name;
   if (deal?.users?.brokerage) values.brokerage_name = deal.users.brokerage;
   if (facts) {
@@ -214,6 +260,23 @@ export async function getMergedContractValues(
   if (values.purchase_price === undefined && deal?.price != null) {
     values.purchase_price = String(deal.price);
   }
+
+  // Seller names (soft auto-source — blank when the deal has no seller
+  // participant; agent can still type it as a term, unlike buyer_name).
+  const sellerNames = sellers
+    .map((s) => s.users?.name?.trim())
+    .filter((n): n is string => !!n);
+  if (sellerNames.length > 0) values.seller_name = sellerNames.join(" & ");
+  if (deal?.address) values.address = deal.address;
+
+  // Auto-fill aliases: a form's own label inherits the canonical deal value.
+  // The agent's saved term (applied below) still wins.
+  for (const [alias, source] of Object.entries(CONTRACT_FIELD_ALIASES)) {
+    if (values[alias] !== undefined) continue;
+    const v = values[source];
+    if (v !== undefined && v !== null && v !== "") values[alias] = v;
+  }
+
   const terms = (termsRow?.terms ?? {}) as Record<string, unknown>;
   for (const [key, v] of Object.entries(terms)) {
     if (v === null || v === undefined || v === "") continue;

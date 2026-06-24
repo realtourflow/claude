@@ -16,15 +16,17 @@ import type {
   FieldMapEntry,
 } from "./docusign-templates";
 
-// We return exactly main's TemplateConfig shape (6 fields). `routing` /
-// `consumerRoles` are NOT part of TemplateConfig on this base — they live on the
-// paused wire-fraud branch. uploaded_forms stores them for when that merges, but
-// the resolver doesn't surface them, keeping the shape identical to committed forms.
+// We return main's TemplateConfig shape. The wire-fraud notice (#127) has merged,
+// so TemplateConfig now carries `routing` / `consumerRoles`; uploaded_forms already
+// stores both, so the resolver surfaces them here — keeping the shape identical to
+// committed forms.
 type Row = {
   id: string;
   label: string;
   board: string;
   purpose: string;
+  routing: string;
+  consumer_roles: unknown;
   role_mapping: unknown;
   field_map: unknown;
   docusign_template_id: string | null;
@@ -37,6 +39,8 @@ function toConfig(r: Row): TemplateConfig {
     roleMapping: (r.role_mapping ?? {}) as Record<string, string>,
     purpose: (r.purpose ?? "") as TemplateConfig["purpose"],
     board: r.board ?? "",
+    routing: (r.routing ?? "by-role") as TemplateConfig["routing"],
+    consumerRoles: (r.consumer_roles ?? []) as string[],
     fieldMap: (r.field_map ?? {}) as Record<string, FieldMapEntry>,
   };
 }
@@ -46,6 +50,8 @@ const SELECT = {
   label: true,
   board: true,
   purpose: true,
+  routing: true,
+  consumer_roles: true,
   role_mapping: true,
   field_map: true,
   docusign_template_id: true,
