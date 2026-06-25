@@ -26,3 +26,4 @@ ds-private.pem
 
 # One-off DocuSign debug scripts (local scratch; not part of the app).
 /web/ds-*.mjs
+.vercel
