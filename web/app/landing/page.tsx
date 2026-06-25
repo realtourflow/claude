@@ -70,7 +70,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Do I have to use a specific lender?",
-    a: "No. RealTourFlow works for every deal, regardless of lender. If your buyer uses Mountain Mortgage, you get an extra perk — automatic loan status updates and special lender credits — but it's never required. We built this for agents, for agents to use freely.",
+    a: "No. RealTourFlow works for every deal, regardless of lender. If your buyer uses Mountain Mortgage, you get an extra perk — automatic loan status updates and special lender credits (up to $1,787) — but it's never required. We built this for agents, for agents to use freely.",
   },
   {
     q: "Is my data safe?",
