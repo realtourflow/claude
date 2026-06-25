@@ -116,33 +116,46 @@ export default function LandingPage() {
           style={{
             maxWidth: 1100,
             margin: "0 auto",
+            position: "relative",
             display: "flex",
             alignItems: "center",
-            justifyContent: "space-between",
-            height: 56,
+            justifyContent: "center",
+            height: 72,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
             <div
               style={{
-                width: 28,
-                height: 28,
-                borderRadius: 7,
+                width: 38,
+                height: 38,
+                borderRadius: 9,
                 background: S.navy,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                flexShrink: 0,
               }}
             >
-              <LayoutDashboard size={16} color={S.gold} />
+              <LayoutDashboard size={22} color={S.gold} />
             </div>
-            <span style={{ fontSize: 15, fontWeight: 600, color: S.navy, letterSpacing: "-0.01em" }}>
+            <span
+              style={{
+                fontSize: "clamp(22px, 5vw, 28px)",
+                fontWeight: 700,
+                color: S.navy,
+                letterSpacing: "-0.02em",
+              }}
+            >
               RealTourFlow
             </span>
           </div>
           <a
             href="/agent"
             style={{
+              position: "absolute",
+              right: 0,
+              top: "50%",
+              transform: "translateY(-50%)",
               fontSize: 14,
               fontWeight: 500,
               color: S.textSecondary,
