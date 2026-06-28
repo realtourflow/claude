@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 const MARKETING_HOSTS = new Set(["realtourflow.com", "www.realtourflow.com"]);
 
+// Marketing pages that live on the root domain (not the app). Served on the
+// marketing host; kept canonical there (redirected off the app host).
+function isBlogPath(pathname: string): boolean {
+  return pathname === "/blog" || pathname.startsWith("/blog/");
+}
+
 export function middleware(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
   const { pathname } = req.nextUrl;
@@ -15,6 +21,10 @@ export function middleware(req: NextRequest) {
     if (pathname === "/") {
       return NextResponse.rewrite(new URL("/landing", req.url));
     }
+    // The blog lives on the marketing domain — serve it directly.
+    if (isBlogPath(pathname)) {
+      return NextResponse.next();
+    }
     // Any other path on the marketing domain (e.g. /agent, /buyer) → send
     // to the real app so deep links still work.
     return NextResponse.redirect(
@@ -26,13 +36,23 @@ export function middleware(req: NextRequest) {
     );
   }
 
-  // On the explicit app domain, /landing is internal — block direct access.
-  // localhost passes through so the landing page can be previewed locally.
-  if (
-    host === "app.realtourflow.com" &&
-    (pathname === "/landing" || pathname.startsWith("/landing/"))
-  ) {
-    return NextResponse.redirect(new URL("/", req.url));
+  // On the explicit app domain, keep marketing-only pages canonical on the root
+  // domain. localhost passes through so both can be previewed locally.
+  if (host === "app.realtourflow.com") {
+    // /landing is internal — block direct access.
+    if (pathname === "/landing" || pathname.startsWith("/landing/")) {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
+    // The blog belongs on realtourflow.com — redirect it there.
+    if (isBlogPath(pathname)) {
+      return NextResponse.redirect(
+        new URL(
+          `https://realtourflow.com${pathname}${req.nextUrl.search}`,
+          req.url
+        ),
+        301
+      );
+    }
   }
 
   return NextResponse.next();
