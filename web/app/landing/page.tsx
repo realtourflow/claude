@@ -61,8 +61,12 @@ const FAQ_ITEMS = [
     a: "We're onboarding agents in waves now and opening up more broadly through 2026. Get on the list and we'll bring you in as soon as there's room.",
   },
   {
+    q: "How much does it cost?",
+    a: "$75 per closing. No subscription and no monthly fee — you only pay when a deal closes and you've been paid.",
+  },
+  {
     q: "What do founding agents get?",
-    a: "$3,000–$5,000 in credits on every deal, early-access pricing, and direct input on the roadmap.",
+    a: "First access before we open to the public, and a direct say in what we build next — founding agents help shape the roadmap.",
   },
   {
     q: "Who is this for?",
@@ -70,7 +74,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Do I have to use a specific lender?",
-    a: "No. RealTourFlow works for every deal, regardless of lender. If your buyer uses Mountain Mortgage, you get an extra perk — automatic loan status updates and special lender credits (up to $1,787) — but it's never required. We built this for agents, for agents to use freely.",
+    a: "No. RealTourFlow works for every deal, regardless of lender. If your buyer chooses Mountain Mortgage, they get automatic loan-status updates inside the deal and a $3,000 lender credit toward closing — but it's never required. We built this for agents, to use freely.",
   },
   {
     q: "Is my data safe?",
@@ -280,7 +284,7 @@ export default function LandingPage() {
           >
             <BadgeDollarSign size={20} color={S.successText} />
             <span style={{ fontSize: 15, fontWeight: 600, color: S.successText }}>
-              Founding agents get $3,000–$5,000 in credits on every deal.
+              $75 per closing. You only pay when you close.
             </span>
           </div>
         </section>
@@ -435,8 +439,7 @@ export default function LandingPage() {
               </h2>
             </div>
             <p style={{ fontSize: 15, color: S.textSecondary, lineHeight: 1.7, margin: "10px 0 24px" }}>
-              We&rsquo;re onboarding agents in waves before launch — and our first founding members
-              get{" "}
+              We&rsquo;re onboarding agents in waves before launch. It&rsquo;s just{" "}
               <span
                 style={{
                   background: S.successBg,
@@ -446,9 +449,9 @@ export default function LandingPage() {
                   fontWeight: 600,
                 }}
               >
-                $3,000–$5,000 in credits
+                $75 per closing
               </span>{" "}
-              on every deal, plus a real say in what we build next.
+              — you only pay when you close — and founding agents get first access plus a real say in what we build next.
             </p>
             <WaitlistForm />
           </div>
@@ -647,10 +650,10 @@ export default function LandingPage() {
                 margin: "0 0 10px",
               }}
             >
-              Founding agents get $3,000–$5,000 in credits on every deal.
+              Your buyer can get a $3,000 lender credit.
             </p>
             <p style={{ fontSize: 15, color: S.successText, margin: 0 }}>
-              Limited spots per onboarding wave.
+              When they finance with Mountain Mortgage. Optional — works with any lender.
             </p>
           </div>
         </section>
@@ -740,7 +743,7 @@ export default function LandingPage() {
                 margin: "0 0 32px",
               }}
             >
-              Founding agents lock in credits and help shape the product. Spots in each wave are
+              Founding agents get in first and help shape the product. Spots in each wave are
               limited.
             </p>
             <div
