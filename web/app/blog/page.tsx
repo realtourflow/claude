@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: "Blog — RealTourFlow",
   description:
     "Guides, comparisons, and tips for real estate agents who want to run cleaner transactions. From the team building RealTourFlow.",
-  alternates: { canonical: "https://realtourflow.com/blog" },
+  alternates: { canonical: "https://www.realtourflow.com/blog" },
 };
 
 const S = {

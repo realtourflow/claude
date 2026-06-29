@@ -18,7 +18,7 @@ export async function generateMetadata({
   return {
     title: `${post.meta.title} — RealTourFlow`,
     description: post.meta.excerpt || undefined,
-    alternates: { canonical: `https://realtourflow.com/blog/${slug}` },
+    alternates: { canonical: `https://www.realtourflow.com/blog/${slug}` },
     openGraph: {
       title: post.meta.title,
       description: post.meta.excerpt || undefined,
