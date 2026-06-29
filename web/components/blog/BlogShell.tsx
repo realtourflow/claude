@@ -39,6 +39,21 @@ export default function BlogShell({ children }: { children: React.ReactNode }) {
             height: 72,
           }}
         >
+          <Link
+            href="/blog"
+            style={{
+              position: "absolute",
+              left: 0,
+              top: "50%",
+              transform: "translateY(-50%)",
+              fontSize: 14,
+              fontWeight: 500,
+              color: S.textSecondary,
+              textDecoration: "none",
+            }}
+          >
+            Blog
+          </Link>
           <Link href="/" style={{ display: "flex", alignItems: "center", gap: 11, textDecoration: "none" }}>
             <div
               style={{
@@ -105,9 +120,17 @@ export default function BlogShell({ children }: { children: React.ReactNode }) {
           </div>
           <span style={{ fontSize: 14, fontWeight: 600, color: S.navy }}>RealTourFlow</span>
         </div>
-        <p style={{ fontSize: 14, color: S.textMuted, margin: "0 0 4px" }}>
+        <p style={{ fontSize: 14, color: S.textMuted, margin: "0 0 12px" }}>
           The deal command center for real estate agents.
         </p>
+        <div style={{ display: "flex", justifyContent: "center", gap: 18, marginBottom: 12 }}>
+          <Link href="/blog" style={{ fontSize: 14, fontWeight: 500, color: S.textSecondary, textDecoration: "none" }}>
+            Blog
+          </Link>
+          <Link href="/" style={{ fontSize: 14, fontWeight: 500, color: S.textSecondary, textDecoration: "none" }}>
+            Home
+          </Link>
+        </div>
         <p style={{ fontSize: 13, color: S.textMuted, margin: 0 }}>© 2026 RealTourFlow</p>
       </footer>
     </div>

@@ -21,8 +21,8 @@ export function middleware(req: NextRequest) {
     if (pathname === "/") {
       return NextResponse.rewrite(new URL("/landing", req.url));
     }
-    // The blog lives on the marketing domain — serve it directly.
-    if (isBlogPath(pathname)) {
+    // The blog + SEO files live on the marketing domain — serve them directly.
+    if (isBlogPath(pathname) || pathname === "/sitemap.xml" || pathname === "/robots.txt") {
       return NextResponse.next();
     }
     // Any other path on the marketing domain (e.g. /agent, /buyer) → send
