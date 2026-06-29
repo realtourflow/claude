@@ -111,6 +111,13 @@ const shape = z.object({
   // human review. The model is swappable; defaults to the latest Opus.
   ANTHROPIC_API_KEY: z.string().default(""),
   FORM_AI_MODEL: z.string().default("claude-opus-4-8"),
+
+  // Notion-powered marketing blog (lib/notion.ts → /blog on realtourflow.com).
+  // NOTION_TOKEN is an internal-integration secret that has been shared with the
+  // "Blog Posts" database; NOTION_BLOG_DATABASE_ID is that database's id. Both
+  // empty = blog feature disabled (the /blog routes render an empty state).
+  NOTION_TOKEN: z.string().default(""),
+  NOTION_BLOG_DATABASE_ID: z.string().default(""),
 });
 
 const schema = shape
