@@ -31,7 +31,6 @@ type EmailLike = {
   // so they can be emailed via Broadcasts. Optional so test stubs needn't define it.
   contacts?: {
     create: (payload: {
-      audienceId: string;
       email: string;
       firstName?: string;
       lastName?: string;
@@ -226,20 +225,17 @@ export type WaitlistContact = {
 };
 
 /**
- * Adds a waitlist signup to the configured Resend Audience so they can be
- * reached via Broadcasts. No-op when RESEND_AUDIENCE_ID is unset (the list still
- * lives in the DB) or the client lacks the contacts API (test stubs). Callers
- * invoke this best-effort — a failure must never block the signup response. Like
- * the email helpers, an API-level `error` is turned into a throw so the caller's
- * try/catch logs it uniformly.
+ * Adds a waitlist signup to Resend Contacts (the global list shown under
+ * Audience → Contacts) so they can be reached via Broadcasts. Resend contacts
+ * are global now — no audience id is required. No-op when RESEND_API_KEY is
+ * unset or the client lacks the contacts API (test stubs). Callers invoke this
+ * best-effort — a failure must never block the signup response.
  */
 export async function addToWaitlistAudience(contact: WaitlistContact): Promise<void> {
-  const audienceId = env().RESEND_AUDIENCE_ID;
-  if (!audienceId) return;
+  if (!env().RESEND_API_KEY) return;
   const c = client();
   if (!c.contacts) return;
   const { error } = await c.contacts.create({
-    audienceId,
     email: contact.email,
     firstName: contact.firstName,
     lastName: contact.lastName,

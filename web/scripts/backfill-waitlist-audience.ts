@@ -5,15 +5,15 @@
  * the people who signed up before the audience sync existed. Idempotent-ish:
  * Resend rejects duplicates, which are logged and skipped.
  *
- * Run with prod env vars (DATABASE_URL, RESEND_API_KEY, RESEND_AUDIENCE_ID):
+ * Run with prod env vars (DATABASE_URL, RESEND_API_KEY):
  *   npx tsx --env-file=<prod-env-file> scripts/backfill-waitlist-audience.ts
  */
 import { prisma } from "@/lib/db";
 import { addToWaitlistAudience } from "@/lib/email";
 
 async function main(): Promise<void> {
-  if (!process.env.RESEND_AUDIENCE_ID) {
-    console.error("RESEND_AUDIENCE_ID is not set — set it (and RESEND_API_KEY) before backfilling.");
+  if (!process.env.RESEND_API_KEY) {
+    console.error("RESEND_API_KEY is not set — set it before backfilling.");
     process.exit(1);
   }
 
