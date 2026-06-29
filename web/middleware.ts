@@ -8,6 +8,19 @@ function isBlogPath(pathname: string): boolean {
   return pathname === "/blog" || pathname.startsWith("/blog/");
 }
 
+// IndexNow ownership key — must be publicly reachable at this path so Bing/Yandex
+// can verify URL submissions (web/public/<key>.txt).
+const INDEXNOW_KEY_FILE = "/9f2c7a14e0b84d3596af1c6e8b2705d3.txt";
+
+// SEO/verification files that must be served (not redirected) on the marketing host.
+function isSeoFile(pathname: string): boolean {
+  return (
+    pathname === "/sitemap.xml" ||
+    pathname === "/robots.txt" ||
+    pathname === INDEXNOW_KEY_FILE
+  );
+}
+
 export function middleware(req: NextRequest) {
   const host = req.headers.get("host") ?? "";
   const { pathname } = req.nextUrl;
@@ -21,8 +34,8 @@ export function middleware(req: NextRequest) {
     if (pathname === "/") {
       return NextResponse.rewrite(new URL("/landing", req.url));
     }
-    // The blog + SEO files live on the marketing domain — serve them directly.
-    if (isBlogPath(pathname) || pathname === "/sitemap.xml" || pathname === "/robots.txt") {
+    // The blog + SEO/verification files live on the marketing domain — serve them.
+    if (isBlogPath(pathname) || isSeoFile(pathname)) {
       return NextResponse.next();
     }
     // Any other path on the marketing domain (e.g. /agent, /buyer) → send
