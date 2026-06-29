@@ -43,16 +43,6 @@ export type RichText = {
   annotations: NotionAnnotations;
 };
 
-/** A Notion block plus any recursively-fetched children (tables, callouts, …). */
-export type NotionBlock = {
-  id: string;
-  type: string;
-  has_children: boolean;
-  children?: NotionBlock[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [key: string]: any;
-};
-
 let stub: Client | null | undefined;
 
 /** Inject a fake client for tests, or `null` to simulate an unconfigured blog. */
@@ -121,11 +111,11 @@ export async function getPublishedPosts(site: string): Promise<BlogPostMeta[]> {
   return res.results.map(metaFromPage).filter((p) => p.slug);
 }
 
-/** One published post (metadata + rendered block tree), or null if not found. */
+/** One published post (metadata + its stored HTML body), or null if not found. */
 export async function getPostBySlug(
   site: string,
   slug: string
-): Promise<{ meta: BlogPostMeta; blocks: NotionBlock[] } | null> {
+): Promise<{ meta: BlogPostMeta; html: string } | null> {
   const notion = client();
   const databaseId = env().NOTION_BLOG_DATABASE_ID;
   if (!notion || !databaseId) return null;
@@ -140,29 +130,38 @@ export async function getPostBySlug(
   const page = res.results[0];
   if (!page) return null;
 
-  const meta = metaFromPage(page);
-  const blocks = await fetchBlocks(notion, page.id);
-  return { meta, blocks };
+  return { meta: metaFromPage(page), html: await getHtmlFromPage(notion, page.id) };
 }
 
-/** Recursively fetch a block's children so tables / callouts / lists render whole. */
-async function fetchBlocks(notion: Client, blockId: string): Promise<NotionBlock[]> {
-  const out: NotionBlock[] = [];
+/**
+ * The post body is a single fenced code block (language "html") in the Notion
+ * page — the full standalone document for the post. Returns its text. Falls back
+ * to the first code block of any language if none is explicitly tagged "html".
+ */
+async function getHtmlFromPage(notion: Client, pageId: string): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let firstCode: any = null;
   let cursor: string | undefined;
   do {
     const res = await notion.blocks.children.list({
-      block_id: blockId,
+      block_id: pageId,
       start_cursor: cursor,
       page_size: 100,
     });
     for (const raw of res.results) {
-      const block = raw as NotionBlock;
-      if (block.has_children) {
-        block.children = await fetchBlocks(notion, block.id);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const block = raw as any;
+      if (block.type === "code") {
+        if (block.code?.language === "html") return codeText(block);
+        if (!firstCode) firstCode = block;
       }
-      out.push(block);
     }
     cursor = res.has_more ? (res.next_cursor ?? undefined) : undefined;
   } while (cursor);
-  return out;
+  return firstCode ? codeText(firstCode) : "";
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function codeText(block: any): string {
+  return (block.code?.rich_text ?? []).map((t: RichText) => t.plain_text).join("");
 }
