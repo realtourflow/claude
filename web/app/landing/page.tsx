@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   description:
     "Track every buyer and seller transaction in one place. Auto-tasks, client portals, document e-sign, and live loan milestones. Join the founding-agent list.",
   alternates: {
-    canonical: "https://realtourflow.com/",
+    canonical: "https://www.realtourflow.com/",
   },
 };
 

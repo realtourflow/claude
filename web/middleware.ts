@@ -43,11 +43,11 @@ export function middleware(req: NextRequest) {
     if (pathname === "/landing" || pathname.startsWith("/landing/")) {
       return NextResponse.redirect(new URL("/", req.url));
     }
-    // The blog belongs on realtourflow.com — redirect it there.
+    // The blog belongs on the marketing site — redirect it there.
     if (isBlogPath(pathname)) {
       return NextResponse.redirect(
         new URL(
-          `https://realtourflow.com${pathname}${req.nextUrl.search}`,
+          `https://www.realtourflow.com${pathname}${req.nextUrl.search}`,
           req.url
         ),
         301

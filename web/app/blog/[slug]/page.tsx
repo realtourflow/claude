@@ -18,7 +18,7 @@ export async function generateMetadata({
   return {
     title: `${post.meta.title} — RealTourFlow`,
     description: post.meta.excerpt || undefined,
-    alternates: { canonical: `https://realtourflow.com/blog/${slug}` },
+    alternates: { canonical: `https://www.realtourflow.com/blog/${slug}` },
     openGraph: {
       title: post.meta.title,
       description: post.meta.excerpt || undefined,
@@ -37,35 +37,35 @@ export default async function BlogPost({
   const post = await getPostBySlug(SITE, slug);
   if (!post) notFound();
 
-  // The post body is a full HTML document stored in Notion. Extract its body +
-  // styles and inject them, with the CSS scoped to `.rtf-post` so it can't
-  // collide with the site's global styles.
-  const { css, bodyHtml } = prepareScopedPost(post.html);
+  // The post body is a full HTML document stored in Notion. Extract its body,
+  // styles, and font links and inject them, with the CSS scoped to `.rtf-post`
+  // so it can't collide with the site's global styles. The post controls its own
+  // width (its internal .wrap/.wide), so the injected container is full-width.
+  const { css, bodyHtml, headLinks } = prepareScopedPost(post.html);
 
   return (
     <BlogShell>
-      <article style={{ maxWidth: 860, margin: "0 auto", padding: "40px 24px 72px" }}>
+      <div style={{ maxWidth: 720, margin: "0 auto", padding: "28px 24px 0" }}>
         <Link
           href="/blog"
           style={{ fontSize: 14, fontWeight: 500, color: "#4b5563", textDecoration: "none" }}
         >
           ← All posts
         </Link>
+      </div>
 
-        {css && <style dangerouslySetInnerHTML={{ __html: css }} />}
+      {headLinks && <div dangerouslySetInnerHTML={{ __html: headLinks }} />}
+      {css && <style dangerouslySetInnerHTML={{ __html: css }} />}
 
-        {bodyHtml ? (
-          <div
-            className={POST_SCOPE}
-            style={{ marginTop: 24 }}
-            dangerouslySetInnerHTML={{ __html: bodyHtml }}
-          />
-        ) : (
-          <p style={{ marginTop: 24, fontSize: 16, color: "#6b7280" }}>
+      {bodyHtml ? (
+        <div className={POST_SCOPE} dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+      ) : (
+        <div style={{ maxWidth: 720, margin: "0 auto", padding: "24px" }}>
+          <p style={{ fontSize: 16, color: "#6b7280" }}>
             This post doesn&rsquo;t have any content yet.
           </p>
-        )}
-      </article>
+        </div>
+      )}
     </BlogShell>
   );
 }

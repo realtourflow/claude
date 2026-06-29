@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { getPublishedPosts } from "@/lib/notion";
 
-const BASE = "https://realtourflow.com";
+const BASE = "https://www.realtourflow.com";
 
 // Re-generate hourly so newly-published posts enter the sitemap without a deploy.
 export const revalidate = 3600;
