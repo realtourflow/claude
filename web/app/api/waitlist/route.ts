@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { json, error } from "@/lib/http";
 import { prisma } from "@/lib/db";
-import { sendNotificationEmail } from "@/lib/email";
+import { sendNotificationEmail, addToWaitlistAudience } from "@/lib/email";
 
 const schema = z.object({
   firstName: z.string().min(1).max(100).trim(),
@@ -34,6 +34,14 @@ export async function POST(req: Request) {
   } catch (e) {
     console.error("[waitlist] insert error:", e);
     return error("Something went wrong. Please try again.", 500);
+  }
+
+  // Add them to the Resend Audience so they can be reached via Broadcasts.
+  // Best-effort — never block the signup on this.
+  try {
+    await addToWaitlistAudience({ email, firstName, lastName });
+  } catch (e) {
+    console.error("[waitlist] audience add error:", e);
   }
 
   try {

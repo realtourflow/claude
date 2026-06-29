@@ -105,6 +105,10 @@ const shape = z.object({
   // sender; set to a verified-domain address (e.g. "RealTourFlow
   // <invites@realtourflow.com>") in production.
   RESEND_FROM: z.string().default("RealTourFlow <onboarding@resend.dev>"),
+  // Resend Audience id (Resend → Audiences) that waitlist signups are added to,
+  // so the list can be reached via Broadcasts. Empty = signups still land in the
+  // DB + notify Paul, but aren't synced to an audience.
+  RESEND_AUDIENCE_ID: z.string().default(""),
 
   // AI field-mapping for the agent form-upload pipeline (lib/form-ai). Empty key
   // disables the mapper — uploaded forms then land with every field flagged for

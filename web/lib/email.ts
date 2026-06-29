@@ -27,6 +27,17 @@ type EmailLike = {
       html: string;
     }) => Promise<EmailResult>;
   };
+  // Contacts/Audiences API — used to add waitlist signups to a Resend Audience
+  // so they can be emailed via Broadcasts. Optional so test stubs needn't define it.
+  contacts?: {
+    create: (payload: {
+      audienceId: string;
+      email: string;
+      firstName?: string;
+      lastName?: string;
+      unsubscribed?: boolean;
+    }) => Promise<EmailResult>;
+  };
 };
 
 let stub: EmailLike | undefined;
@@ -206,4 +217,33 @@ export async function sendNotificationEmail(
     html,
   });
   if (error) throw new Error(`Resend send failed: ${error.message}`);
+}
+
+export type WaitlistContact = {
+  email: string;
+  firstName: string;
+  lastName: string;
+};
+
+/**
+ * Adds a waitlist signup to the configured Resend Audience so they can be
+ * reached via Broadcasts. No-op when RESEND_AUDIENCE_ID is unset (the list still
+ * lives in the DB) or the client lacks the contacts API (test stubs). Callers
+ * invoke this best-effort — a failure must never block the signup response. Like
+ * the email helpers, an API-level `error` is turned into a throw so the caller's
+ * try/catch logs it uniformly.
+ */
+export async function addToWaitlistAudience(contact: WaitlistContact): Promise<void> {
+  const audienceId = env().RESEND_AUDIENCE_ID;
+  if (!audienceId) return;
+  const c = client();
+  if (!c.contacts) return;
+  const { error } = await c.contacts.create({
+    audienceId,
+    email: contact.email,
+    firstName: contact.firstName,
+    lastName: contact.lastName,
+    unsubscribed: false,
+  });
+  if (error) throw new Error(`Resend contacts.create failed: ${error.message}`);
 }
