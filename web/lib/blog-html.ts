@@ -12,16 +12,20 @@
 
 export const POST_SCOPE = "rtf-post";
 
-export type PreparedPost = { css: string; bodyHtml: string };
+export type PreparedPost = { css: string; bodyHtml: string; headLinks: string };
 
 /** Extract + scope a stored HTML document for injection under `.<scope>`. */
 export function prepareScopedPost(htmlDoc: string, scope: string = POST_SCOPE): PreparedPost {
-  const { styles, bodyHtml } = extractStyleAndBody(htmlDoc);
+  const { styles, bodyHtml, links } = extractStyleAndBody(htmlDoc);
   const css = styles.map((s) => scopeCss(s, `.${scope}`)).join("\n");
-  return { css, bodyHtml };
+  return { css, bodyHtml, headLinks: links.join("\n") };
 }
 
-export function extractStyleAndBody(htmlDoc: string): { styles: string[]; bodyHtml: string } {
+export function extractStyleAndBody(htmlDoc: string): {
+  styles: string[];
+  bodyHtml: string;
+  links: string[];
+} {
   let doc = htmlDoc ?? "";
   // Scripts won't execute via innerHTML anyway — strip them from the markup.
   doc = doc.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
@@ -30,6 +34,16 @@ export function extractStyleAndBody(htmlDoc: string): { styles: string[]; bodyHt
   const styleRe = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
   let m: RegExpExecArray | null;
   while ((m = styleRe.exec(doc)) !== null) styles.push(m[1]);
+
+  // Keep font/resource <link>s (e.g. Google Fonts) from the <head> — otherwise
+  // the post falls back to system fonts. Only stylesheet/preconnect/dns-prefetch;
+  // canonical + icon are owned by the page's own metadata.
+  const links: string[] = [];
+  const linkRe = /<link\b[^>]*>/gi;
+  let lm: RegExpExecArray | null;
+  while ((lm = linkRe.exec(doc)) !== null) {
+    if (/rel=["'](?:stylesheet|preconnect|dns-prefetch)["']/i.test(lm[0])) links.push(lm[0]);
+  }
 
   // Prefer <body> inner HTML; otherwise strip the document scaffolding.
   const bodyMatch = doc.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
@@ -42,7 +56,7 @@ export function extractStyleAndBody(htmlDoc: string): { styles: string[]; bodyHt
 
   // The <style> blocks are rendered separately — remove them from the body.
   bodyHtml = bodyHtml.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "").trim();
-  return { styles, bodyHtml };
+  return { styles, bodyHtml, links };
 }
 
 /** Prefix every selector in `css` with `scope` so its rules only apply inside it. */
