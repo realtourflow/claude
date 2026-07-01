@@ -22,6 +22,30 @@ import {
   runFieldPipeline,
   sha256Hex,
 } from "@/lib/uploaded-forms";
+import { sendNotificationEmail } from "@/lib/email";
+
+const ADMIN_NOTIFY_EMAIL = "paul@mountain.mortgage";
+
+// Best-effort: tell the admin an agent uploaded a form that needs Vision
+// field-placement review. A delivery failure must never fail the upload.
+async function notifyAdminOfFormUpload(opts: {
+  origin: string;
+  agentName: string;
+  agentEmail: string;
+  label: string;
+}): Promise<void> {
+  try {
+    await sendNotificationEmail({
+      to: ADMIN_NOTIFY_EMAIL,
+      subject: `New form to review from ${opts.agentName}`,
+      heading: "An agent uploaded a form for review",
+      body: `${opts.agentName} (${opts.agentEmail}) uploaded "${opts.label}" for review. Open Admin → Form Review to place the fields and approve it.`,
+      dealUrl: `${opts.origin}/admin/forms`,
+    });
+  } catch (err) {
+    console.error("failed to send admin form-upload notification", err);
+  }
+}
 
 // Bound the work this route does on untrusted upload bytes (it loads them into
 // pdf-lib AND pdfjs). Cap the function time and reject an oversized object before
@@ -166,9 +190,12 @@ export async function POST(req: Request): Promise<Response> {
       const statement = await getAttestationStatement();
       const agentUser = await prisma.users.findUnique({
         where: { id: userId },
-        select: { market: true },
+        select: { market: true, name: true, email: true },
       });
       const agentMarket = agentUser?.market ?? "";
+      const agentName = agentUser?.name || agentUser?.email || "An agent";
+      const agentEmail = agentUser?.email ?? "";
+      const origin = new URL(req.url).origin;
 
       // Recognition (Layer 1): consult the known-forms catalog FIRST. FILLABLE
       // PDFs match by AcroForm structure. FLAT PDFs (no fields) match by exact
@@ -256,6 +283,7 @@ export async function POST(req: Request): Promise<Response> {
           await deleteObject(body.s3_key);
           return error("couldn't start form detection — please try again", 503);
         }
+        await notifyAdminOfFormUpload({ origin, agentName, agentEmail, label: visionForm.label });
         return json(
           {
             id: visionForm.id,
@@ -320,6 +348,7 @@ export async function POST(req: Request): Promise<Response> {
         counts = await runFieldPipeline({ formId: form.id, side, fields });
       }
 
+      await notifyAdminOfFormUpload({ origin, agentName, agentEmail, label: form.label });
       return json(
         {
           id: form.id,
