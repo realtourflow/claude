@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { setTokenGetter, api } from "@/lib/api-client";
+import { setTokenGetter, api, ApiError } from "@/lib/api-client";
 import { useAuthStore } from "@/lib/store/authStore";
 
 type SyncUserResponse = {
@@ -27,6 +27,8 @@ export default function AuthSetup({ children }: { children: React.ReactNode }) {
 
     const agentInviteToken = localStorage.getItem('pendingAgentInvite');
     const agentInviteEmail = localStorage.getItem('pendingAgentInviteEmail');
+    const clientInviteToken = localStorage.getItem('pendingInvite');
+    const clientInviteEmail = localStorage.getItem('pendingInviteEmail');
 
     const doSync = () =>
       api.post<SyncUserResponse>('/users/sync', {
@@ -34,25 +36,54 @@ export default function AuthSetup({ children }: { children: React.ReactNode }) {
         name: user.name ?? '',
       }).then((dbUser) => {
         setFromAuth0(dbUser.id, dbUser.name, dbUser.email, dbUser.role, dbUser.onboarding_complete, user.picture);
-        const pendingToken = localStorage.getItem('pendingInvite');
-        const pendingEmail = localStorage.getItem('pendingInviteEmail');
-        if (pendingToken && pendingEmail) {
-          localStorage.removeItem('pendingInvite');
-          localStorage.removeItem('pendingInviteEmail');
-          api.post(`/invites/${pendingToken}/claim`, { email: pendingEmail, name: dbUser.name }).catch(() => {});
-        }
       }).catch((err) => {
         console.error('users/sync failed:', err);
-        setSyncError(String(err));
+        // A 403 means "no role assigned yet" — a permissions state, NOT a
+        // backend outage. Flag it distinctly so RootRedirect shows an
+        // actionable message instead of the scary "server down" screen.
+        setSyncError(err instanceof ApiError && err.status === 403 ? 'no-access' : String(err));
       });
 
+    // A claim outcome is TERMINAL (won't succeed on retry) for these statuses;
+    // anything else (network blip, timeout, 5xx) is transient and worth keeping
+    // the pending token around for so a refresh re-attempts the claim.
+    const isTerminal = (err: unknown) =>
+      err instanceof ApiError && [404, 409, 410].includes(err.status);
+
+    // Claim any pending invite FIRST, then sync. A brand-new invited user has
+    // no role until their invite is claimed (the claim upserts them with the
+    // invite's role); if we synced first, /users/sync would 403 and the claim
+    // would never run — the buyer dead-end we just fixed.
+    //
+    // Only clear the pending-invite keys once the claim SUCCEEDS or terminally
+    // fails. Clearing up-front (the old bug) meant a single transient failure
+    // discarded the token and stranded the buyer role-less with no way to retry.
     if (agentInviteToken && agentInviteEmail) {
-      localStorage.removeItem('pendingAgentInvite');
-      localStorage.removeItem('pendingAgentInviteEmail');
       api.post(`/agent-invites/${agentInviteToken}/claim`, {
         email: agentInviteEmail,
         name: user.name ?? '',
-      }).catch(() => {}).finally(doSync);
+      }).then(() => {
+        localStorage.removeItem('pendingAgentInvite');
+        localStorage.removeItem('pendingAgentInviteEmail');
+      }).catch((err) => {
+        if (isTerminal(err)) {
+          localStorage.removeItem('pendingAgentInvite');
+          localStorage.removeItem('pendingAgentInviteEmail');
+        }
+      }).finally(doSync);
+    } else if (clientInviteToken && clientInviteEmail) {
+      api.post(`/invites/${clientInviteToken}/claim`, {
+        email: clientInviteEmail,
+        name: user.name || clientInviteEmail,
+      }).then(() => {
+        localStorage.removeItem('pendingInvite');
+        localStorage.removeItem('pendingInviteEmail');
+      }).catch((err) => {
+        if (isTerminal(err)) {
+          localStorage.removeItem('pendingInvite');
+          localStorage.removeItem('pendingInviteEmail');
+        }
+      }).finally(doSync);
     } else {
       doSync();
     }

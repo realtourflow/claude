@@ -1,6 +1,7 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { upsertUser } from "@/lib/users";
+import { sendNotificationEmail } from "@/lib/email";
 import type { Role } from "@/lib/roles";
 
 type Ctx = { params: Promise<{ token: string }> };
@@ -57,6 +58,33 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       VALUES (${inv.deal_id}::uuid, ${user.id}::uuid, ${inv.role})
       ON CONFLICT DO NOTHING
     `;
+
+    // Best-effort: notify the inviting agent that their client accepted and
+    // created their account. Makes the onboarding "your agent has been
+    // notified" promise real. A delivery failure must never fail the claim.
+    try {
+      const infoRows = await prisma.$queryRaw<
+        { agent_email: string; agent_name: string; title: string }[]
+      >`
+        SELECT u.email AS agent_email, u.name AS agent_name, d.title
+        FROM deals d
+        JOIN users u ON u.id = d.agent_id
+        WHERE d.id = ${inv.deal_id}::uuid
+      `;
+      const info = infoRows[0];
+      if (info?.agent_email) {
+        const origin = new URL(req.url).origin;
+        await sendNotificationEmail({
+          to: info.agent_email,
+          subject: `${body.name} accepted your invite`,
+          heading: `${body.name} joined ${info.title}`,
+          body: `${body.name} (${body.email}) accepted your invite and created their account. They're now on your "${info.title}" deal in RealTourFlow.`,
+          dealUrl: `${origin}/agent/deals/${inv.deal_id}`,
+        });
+      }
+    } catch (err) {
+      console.error("failed to notify agent of invite claim", err);
+    }
 
     return json(user);
   })) as Response;
