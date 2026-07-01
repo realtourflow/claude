@@ -29,9 +29,17 @@ vi.mock("@/lib/store/authStore", () => ({
   useAuthStore: (sel: (s: unknown) => unknown) =>
     sel({ markOnboardingComplete: vi.fn(), activeUser: null }),
 }));
-vi.mock("@/hooks/useAgentDocs", () => ({
-  useAgentDocs: () => ({ docs: [], uploadDoc: vi.fn(), removeDoc: vi.fn() }),
-  DOC_TYPE_LABELS: {},
+// Onboarding now uploads through the Vision pipeline (useAgentForms / FormUploader).
+vi.mock("@/hooks/useAgentForms", () => ({
+  useAgentForms: () => ({
+    forms: [],
+    loading: false,
+    formTypes: [],
+    uploadForm: vi.fn(),
+    getAttestation: vi.fn(() =>
+      Promise.resolve("I attest that I am licensed and permitted to use and host this form.")
+    ),
+  }),
 }));
 vi.mock("@/hooks/useAgentPhoto", () => ({ uploadAgentPhoto: vi.fn() }));
 
