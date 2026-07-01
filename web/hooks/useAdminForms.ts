@@ -78,6 +78,7 @@ export type AdminFormDetail = {
   docusign_template_id: string | null;
   detection_source: string; // "acroform" | "recognized" | "vision"
   placement_confirmed_at: string | null;
+  promoted: boolean;
   preview_url: string;
   pages: Array<{ page: number; width: number; height: number }>;
   core_keys: CoreKey[];
@@ -183,6 +184,13 @@ export function useAdminForm(id: string | null) {
     void queryClient.invalidateQueries({ queryKey: ["admin-forms"] });
   }
 
+  // Toggle market-wide visibility of an APPROVED form (separate from approve).
+  async function promote(on: boolean): Promise<void> {
+    await api.post(`/admin/forms/${id}`, { action: on ? "promote" : "unpromote" });
+    await query.refetch();
+    void queryClient.invalidateQueries({ queryKey: ["admin-forms"] });
+  }
+
   return {
     detail: query.data,
     loading: query.isLoading,
@@ -194,6 +202,7 @@ export function useAdminForm(id: string | null) {
     confirmPlacement,
     approve,
     reject,
+    promote,
     refetch: () => query.refetch(),
   };
 }

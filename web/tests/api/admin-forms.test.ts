@@ -350,6 +350,55 @@ describe("admin form review — correction + approve/reject", () => {
   });
 });
 
+describe("admin form review — promote to market", () => {
+  it("promotes an approved form (promoted=true), then unpromotes", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [], "ready");
+
+    const res = await action(await actionReq(id, { action: "promote" }), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { promoted: boolean };
+    expect(body.promoted).toBe(true);
+    expect((await prisma.uploaded_forms.findUnique({ where: { id } }))?.promoted).toBe(true);
+
+    const res2 = await action(await actionReq(id, { action: "unpromote" }), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res2.status).toBe(200);
+    expect((await prisma.uploaded_forms.findUnique({ where: { id } }))?.promoted).toBe(false);
+  });
+
+  it("409 when promoting a form that is not approved", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [{ needs_review: true }]); // pending_review
+    const res = await action(await actionReq(id, { action: "promote" }), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("detail exposes the promoted flag", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [], "ready");
+    await action(await actionReq(id, { action: "promote" }), {
+      params: Promise.resolve({ id }),
+    });
+    const res = await detail(
+      new Request(`http://localhost/api/admin/forms/${id}`, {
+        headers: { authorization: await adminHdr() },
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+    const body = (await res.json()) as { promoted: boolean };
+    expect(body.promoted).toBe(true);
+  });
+});
+
 describe("admin save-as-known — promote into the recognition catalog", () => {
   async function knownReq(id: string, hdr: string) {
     return new Request(`http://localhost/api/admin/forms/${id}/known`, {

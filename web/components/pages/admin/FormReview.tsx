@@ -121,10 +121,12 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
     confirmPlacement,
     approve,
     reject,
+    promote,
   } = useAdminForm(id);
   const [rejecting, setRejecting] = useState(false);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   const [view, setView] = useState<"placement" | "fields">("placement");
   // Edited signer map; null until the admin changes it, then it overrides the
   // server-derived default. Reset per form via the `key` on FormDetail.
@@ -333,11 +335,41 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
       )}
 
       {detail.status === "ready" && (
-        <p className="flex items-center gap-2 text-xs text-gray-500">
-          <AlertCircle size={14} className="shrink-0" />
-          Approved. It becomes sendable on deals once its DocuSign template is
-          created (a later build step).
-        </p>
+        <div className="space-y-2">
+          <p className="flex items-center gap-2 text-xs text-gray-500">
+            <AlertCircle size={14} className="shrink-0" />
+            Approved — sendable on this agent&apos;s deals.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                setPromoting(true);
+                try {
+                  await promote(!detail.promoted);
+                } finally {
+                  setPromoting(false);
+                }
+              }}
+              disabled={promoting}
+              className={
+                detail.promoted
+                  ? "rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+                  : "rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-navy/90 disabled:opacity-50"
+              }
+            >
+              {promoting
+                ? "…"
+                : detail.promoted
+                ? "Promoted to market — click to unpromote"
+                : "Promote to market"}
+            </button>
+            {detail.promoted && (
+              <span className="text-[11px] text-gray-400">
+                Available to every agent in this market.
+              </span>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

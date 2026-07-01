@@ -43,6 +43,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
         docusign_template_id: true,
         detection_source: true,
         placement_confirmed_at: true,
+        promoted: true,
         form_type_id: true,
         users_uploaded_forms_agent_idTousers: {
           select: { name: true, email: true },
@@ -136,6 +137,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       placement_confirmed_at: form.placement_confirmed_at
         ? form.placement_confirmed_at.toISOString()
         : null,
+      promoted: form.promoted,
       preview_url: previewUrl,
       pages,
       core_keys: CORE_KEYS,
@@ -158,7 +160,7 @@ type SignersOverride = {
   consumer_roles?: string[];
 };
 type ActionBody = {
-  action?: "approve" | "reject";
+  action?: "approve" | "reject" | "promote" | "unpromote";
   review_notes?: string;
   signers?: SignersOverride;
 };
@@ -181,8 +183,27 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     } catch {
       return error("action is required", 400);
     }
+    // Promote / unpromote — make an already-APPROVED form visible to (or hide it
+    // from) every agent in its market/board. A separate admin lever from approve:
+    // approve makes the form usable by its owning agent; promote shares it market-wide.
+    if (body.action === "promote" || body.action === "unpromote") {
+      const target = await prisma.uploaded_forms.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (!target) return error("form not found", 404);
+      if (target.status !== "ready") {
+        return error("only approved forms can be promoted", 409);
+      }
+      await prisma.uploaded_forms.update({
+        where: { id },
+        data: { promoted: body.action === "promote" },
+      });
+      return json({ id, promoted: body.action === "promote" });
+    }
+
     if (body.action !== "approve" && body.action !== "reject") {
-      return error("action must be approve or reject", 400);
+      return error("action must be approve, reject, or promote", 400);
     }
 
     const form = await prisma.uploaded_forms.findUnique({
