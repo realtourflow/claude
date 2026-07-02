@@ -11,9 +11,13 @@ import { MARKETS, MARKET_GROUPS } from "@/lib/markets";
 export default function MarketMultiSelect({
   selected,
   onChange,
+  showPrimary = true,
 }: {
   selected: string[];
   onChange: (markets: string[]) => void;
+  // The "Primary" badge marks selected[0] on PROFILE pickers (the primary market
+  // drives board forms). Turn it off for other uses, e.g. promotion targets.
+  showPrimary?: boolean;
 }) {
   function toggle(code: string) {
     onChange(
@@ -33,7 +37,7 @@ export default function MarketMultiSelect({
           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             {MARKETS.filter((m) => m.group === group).map((m) => {
               const on = selected.includes(m.code);
-              const isPrimary = on && selected[0] === m.code;
+              const isPrimary = showPrimary && on && selected[0] === m.code;
               return (
                 <button
                   key={m.code}

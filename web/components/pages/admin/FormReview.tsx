@@ -12,7 +12,8 @@ import {
   type FieldPatch,
 } from "@/hooks/useAdminForms";
 import { FieldPlacementOverlay } from "./FieldPlacementOverlay";
-import { MARKETS, MARKET_GROUPS, marketLabel } from "@/lib/markets";
+import { MARKETS, marketLabel } from "@/lib/markets";
+import MarketMultiSelect from "@/components/MarketMultiSelect";
 
 const STATUS_TABS = [
   { id: "pending_review", label: "Pending" },
@@ -372,12 +373,12 @@ function PromotionManager({
   onUnpromote,
 }: {
   promotions: { id: string; brokerage: string; market: string }[];
-  onPromote: (brokerage: string, market: string) => Promise<void>;
+  onPromote: (brokerage: string, markets: string[]) => Promise<void>;
   onUnpromote: (brokerage: string, market: string) => Promise<void>;
 }) {
   const [companies, setCompanies] = useState<string[]>([]);
   const [brokerage, setBrokerage] = useState("");
-  const [market, setMarket] = useState("");
+  const [markets, setMarkets] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -385,14 +386,16 @@ function PromotionManager({
     api.get<string[]>("/brokerages").then(setCompanies).catch(() => {});
   }, []);
 
+  const allSelected = markets.length === MARKETS.length;
+
   async function add() {
-    if (!brokerage || !market || busy) return;
+    if (!brokerage || markets.length === 0 || busy) return;
     setBusy(true);
     setErr("");
     try {
-      await onPromote(brokerage, market);
+      await onPromote(brokerage, markets);
       setBrokerage("");
-      setMarket("");
+      setMarkets([]);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Promotion failed.");
     } finally {
@@ -414,14 +417,16 @@ function PromotionManager({
   }
 
   return (
-    <div className="space-y-2 rounded-xl border border-gray-200 p-3">
-      <p className="text-xs font-bold uppercase tracking-wide text-gray-400">
-        Promotions — company + market
-      </p>
-      <p className="text-xs text-gray-400">
-        Every agent whose profile matches a combo below gets this form automatically —
-        including agents who join later.
-      </p>
+    <div className="space-y-3 rounded-xl border border-gray-200 p-3">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wide text-gray-400">
+          Promotions — company + market(s)
+        </p>
+        <p className="mt-0.5 text-xs text-gray-400">
+          Every agent whose profile matches a combo below gets this form automatically —
+          including agents who join later.
+        </p>
+      </div>
 
       {promotions.length > 0 && (
         <ul className="space-y-1.5">
@@ -445,39 +450,44 @@ function PromotionManager({
         </ul>
       )}
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
-        <select
-          value={brokerage}
-          onChange={(e) => setBrokerage(e.target.value)}
-          className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-        >
-          <option value="">Company…</option>
-          {companies.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <select
-          value={market}
-          onChange={(e) => setMarket(e.target.value)}
-          className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-        >
-          <option value="">Market…</option>
-          {MARKET_GROUPS.map((g) => (
-            <optgroup key={g} label={g}>
-              {MARKETS.filter((m) => m.group === g).map((m) => (
-                <option key={m.code} value={m.code}>{m.label}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        <button
-          onClick={add}
-          disabled={!brokerage || !market || busy}
-          className="rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
-        >
-          {busy ? "…" : "Promote"}
-        </button>
+      <select
+        value={brokerage}
+        onChange={(e) => setBrokerage(e.target.value)}
+        className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+      >
+        <option value="">Company…</option>
+        {companies.map((c) => (
+          <option key={c} value={c}>{c}</option>
+        ))}
+      </select>
+
+      <div>
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-xs font-semibold text-gray-500">
+            Markets — pick one, several, or all
+          </span>
+          <button
+            type="button"
+            onClick={() => setMarkets(allSelected ? [] : MARKETS.map((m) => m.code))}
+            className="text-xs font-semibold text-brand-navy hover:underline"
+          >
+            {allSelected ? "Clear all" : "All markets"}
+          </button>
+        </div>
+        <MarketMultiSelect selected={markets} onChange={setMarkets} showPrimary={false} />
       </div>
+
+      <button
+        onClick={add}
+        disabled={!brokerage || markets.length === 0 || busy}
+        className="w-full rounded-lg bg-brand-navy px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+      >
+        {busy
+          ? "…"
+          : markets.length === 0
+          ? "Promote"
+          : `Promote to ${allSelected ? "all" : markets.length} market${markets.length !== 1 ? "s" : ""}`}
+      </button>
       {err && <p className="text-xs text-red-500">{err}</p>}
     </div>
   );

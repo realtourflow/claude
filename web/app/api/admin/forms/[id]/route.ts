@@ -167,10 +167,13 @@ type ActionBody = {
   action?: "approve" | "reject" | "promote" | "unpromote";
   review_notes?: string;
   signers?: SignersOverride;
-  // promote/unpromote: the company + market combo. ALWAYS both together — a
-  // promotion is never company-only or market-only.
+  // promote/unpromote: the company + market combo(s). ALWAYS both together — a
+  // promotion is never company-only or market-only. `markets` promotes the same
+  // company across several markets in one call (each stored as its own combo);
+  // `market` is the single-market form of the same thing.
   brokerage?: string;
   market?: string;
+  markets?: string[];
 };
 
 // POST /api/admin/forms/:id — the review gate. action=approve resolves the
@@ -198,11 +201,22 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     // from approve: approve makes the form usable by its owning agent only.
     if (body.action === "promote" || body.action === "unpromote") {
       const brokerage = (body.brokerage ?? "").trim();
-      const market = (body.market ?? "").trim();
-      if (!brokerage || !market) {
-        return error("a promotion needs both a company and a market", 400);
+      // One market or SEVERAL at once (a form is often good in multiple markets —
+      // the UI can tick many, or all). Each stored promotion row is still one
+      // company + one market combo; visibility matching is unchanged.
+      const markets = [
+        ...new Set(
+          (body.markets ?? (body.market ? [body.market] : []))
+            .filter((m): m is string => typeof m === "string")
+            .map((m) => m.trim())
+            .filter(Boolean)
+        ),
+      ];
+      if (!brokerage || markets.length === 0) {
+        return error("a promotion needs both a company and at least one market", 400);
       }
-      if (!isValidMarket(market)) return error("unknown market", 400);
+      const badMarket = markets.find((m) => !isValidMarket(m));
+      if (badMarket !== undefined) return error(`unknown market: ${badMarket}`, 400);
 
       const target = await prisma.uploaded_forms.findUnique({
         where: { id },
@@ -220,14 +234,19 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
           select: { id: true },
         });
         if (!known) return error("unknown company — add it to the list first", 400);
-        // Idempotent: re-promoting the same combo is a no-op.
+        // Idempotent: re-promoting an existing combo is a no-op.
         await prisma.form_promotions.createMany({
-          data: [{ form_id: id, brokerage, market, created_by: adminId }],
+          data: markets.map((market) => ({
+            form_id: id,
+            brokerage,
+            market,
+            created_by: adminId,
+          })),
           skipDuplicates: true,
         });
       } else {
         await prisma.form_promotions.deleteMany({
-          where: { form_id: id, brokerage, market },
+          where: { form_id: id, brokerage, market: { in: markets } },
         });
       }
 
