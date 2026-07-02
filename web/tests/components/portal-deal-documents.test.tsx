@@ -20,13 +20,6 @@ vi.mock("@/hooks/useDocuments", () => ({
   getDownloadUrl: (...a: unknown[]) => getDownloadUrl(...a),
 }));
 
-const useAgentDocTemplatesForDeal = vi.fn();
-vi.mock("@/hooks/useAgentDocs", () => ({
-  DOC_TYPE_LABELS: {},
-  useAgentDocTemplatesForDeal: (...a: unknown[]) =>
-    useAgentDocTemplatesForDeal(...a),
-}));
-
 const refresh = vi.fn();
 
 function doc(overrides: Record<string, unknown> = {}) {
@@ -49,11 +42,6 @@ function doc(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   window.history.replaceState(null, "", "/buyer/u1");
-  useAgentDocTemplatesForDeal.mockReturnValue({
-    templates: [],
-    loading: false,
-    getDownloadUrl: vi.fn(),
-  });
   useDocuments.mockReturnValue({ docs: [doc()], loading: false, refresh });
   getSigningUrl.mockResolvedValue("https://demo.docusign.net/signing/abc");
 });

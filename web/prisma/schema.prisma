@@ -8,22 +8,6 @@ datasource db {
   provider = "postgresql"
 }
 
-model agent_doc_templates {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  agent_id   String   @db.Uuid
-  name       String
-  doc_type   String
-  file_name  String
-  s3_key     String
-  mime_type  String   @default("application/octet-stream")
-  file_size  BigInt   @default(0)
-  notes      String?
-  created_at DateTime @default(now()) @db.Timestamptz(6)
-  users      users    @relation(fields: [agent_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([agent_id], map: "idx_agent_doc_templates_agent_id")
-}
-
 model agent_invites {
   id                                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email                                 String
@@ -404,7 +388,6 @@ model users {
   onboarding_complete                                         Boolean               @default(false)
   market                                                      String                @default("")
   brokerage                                                   String                @default("")
-  agent_doc_templates                                         agent_doc_templates[]
   agent_invites_agent_invites_claimed_byTousers               agent_invites[]       @relation("agent_invites_claimed_byTousers")
   agent_invites_agent_invites_invited_byTousers               agent_invites[]       @relation("agent_invites_invited_byTousers")
   audit_log                                                   audit_log[]
@@ -611,6 +594,15 @@ model form_types {
   standard_board_form Boolean          @default(false)
   known_forms         known_forms[]
   uploaded_forms      uploaded_forms[]
+}
+
+model waitlist {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  first_name String
+  last_name  String
+  email      String   @unique
+  brokerage  String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
 }
 
 enum checklist_assignee {

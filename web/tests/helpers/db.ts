@@ -19,7 +19,6 @@ const USER_DATA_TABLES = [
   "offers",
   "net_sheets",
   "tracked_properties",
-  "agent_doc_templates",
   "uploaded_form_fields",
   "known_forms",
   "form_types",

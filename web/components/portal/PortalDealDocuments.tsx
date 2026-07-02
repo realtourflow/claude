@@ -15,7 +15,6 @@
  */
 import { useEffect, useState } from "react";
 import { CheckCircle2, ExternalLink, FileText, Loader2, PenLine } from "lucide-react";
-import { useAgentDocTemplatesForDeal, DOC_TYPE_LABELS } from "@/hooks/useAgentDocs";
 import {
   useDocuments,
   getDownloadUrl as getDealDocDownloadUrl,
@@ -43,8 +42,6 @@ function cameFromSigning(): { docId: string } | null {
 }
 
 export default function PortalDealDocuments({ dealId }: { dealId: string }) {
-  const { templates, loading: tLoading, getDownloadUrl: getTemplateUrl } =
-    useAgentDocTemplatesForDeal(dealId);
   const { docs, loading: dLoading, refresh } = useDocuments(dealId);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [signingId, setSigningId] = useState<string | null>(null);
@@ -65,10 +62,10 @@ export default function PortalDealDocuments({ dealId }: { dealId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot on mount
   }, []);
 
-  async function handleDownload(id: string, isTemplate: boolean) {
+  async function handleDownload(id: string) {
     setDownloading(id);
     try {
-      const url = isTemplate ? await getTemplateUrl(id) : await getDealDocDownloadUrl(id);
+      const url = await getDealDocDownloadUrl(id);
       window.open(url, "_blank");
     } catch {
       // ignore
@@ -89,11 +86,11 @@ export default function PortalDealDocuments({ dealId }: { dealId: string }) {
     }
   }
 
-  if (tLoading || dLoading) {
+  if (dLoading) {
     return <div className="py-6 text-center text-sm text-gray-400">Loading documents…</div>;
   }
 
-  if (templates.length === 0 && docs.length === 0 && !signedReturn) {
+  if (docs.length === 0 && !signedReturn) {
     return (
       <div className="rounded-xl bg-white px-4 py-8 text-center text-sm text-gray-400">
         No documents yet — your agent will share forms here.
@@ -112,31 +109,6 @@ export default function PortalDealDocuments({ dealId }: { dealId: string }) {
         </div>
       )}
       {signErr && <p className="text-xs text-red-500">{signErr}</p>}
-
-      {templates.length > 0 && (
-        <section>
-          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">Agent Forms</p>
-          <div className="space-y-2">
-            {templates.map((t) => (
-              <div key={t.id} className="flex items-center gap-3 rounded-xl bg-white border border-gray-100 px-4 py-3">
-                <FileText size={16} className="flex-shrink-0 text-gray-300" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-brand-navy truncate">{t.name}</p>
-                  <p className="text-[11px] text-gray-400">{DOC_TYPE_LABELS[t.docType] ?? t.docType}</p>
-                </div>
-                <button
-                  onClick={() => handleDownload(t.id, true)}
-                  disabled={downloading === t.id}
-                  className="flex items-center gap-1 rounded-lg bg-brand-navy/5 px-2.5 py-1 text-xs font-semibold text-brand-navy hover:bg-brand-navy/10 disabled:opacity-50 transition-colors"
-                >
-                  {downloading === t.id ? <Loader2 size={11} className="animate-spin" /> : <ExternalLink size={11} />}
-                  Open
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {docs.length > 0 && (
         <section>
@@ -173,7 +145,7 @@ export default function PortalDealDocuments({ dealId }: { dealId: string }) {
                     </button>
                   )}
                   <button
-                    onClick={() => handleDownload(d.id, false)}
+                    onClick={() => handleDownload(d.id)}
                     disabled={downloading === d.id}
                     className="flex items-center gap-1 rounded-lg bg-brand-navy/5 px-2.5 py-1 text-xs font-semibold text-brand-navy hover:bg-brand-navy/10 disabled:opacity-50 transition-colors"
                   >
