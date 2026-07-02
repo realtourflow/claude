@@ -369,7 +369,9 @@ export default function SellerOnboarding() {
   const token = searchParams.get('token');
 
   const activeUser = useAuthStore((s) => s.activeUser);
-  const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
+  const markOnboardingComplete = useAuthStore((s) => s.markOnboardingComplete);
+  // Never seed from the raw `agent` param — it's a UUID. Resolve the real name below.
+  const [agentName, setAgentName] = useState('Your Agent');
   const [dealId, setDealId] = useState<string | null>(null);
 
   const [data, setData] = useState<SellerData>(EMPTY);
@@ -383,6 +385,25 @@ export default function SellerOnboarding() {
       .then((inv) => { setAgentName(inv.agent_name); setDealId(inv.deal_id ?? null); })
       .catch(() => {});
   }, [token]);
+
+  // Resolve the agent's real NAME (never a raw UUID) for non-token entry points:
+  // an `?agent=<id>` link via the public lookup, or the seller's own deal when
+  // already authenticated (account-first flow).
+  useEffect(() => {
+    if (token) return;
+    const agentId = searchParams.get('agent');
+    if (agentId) {
+      fetch(`/api/agents/${agentId}/public`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { name?: string } | null) => { if (d?.name) setAgentName(d.name); })
+        .catch(() => {});
+    } else if (activeUser) {
+      api.get<{ agent_name: string }[]>('/me/deals')
+        .then((rows) => { if (rows[0]?.agent_name) setAgentName(rows[0].agent_name); })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeUser]);
 
   // On confirmation screen: persist contact info + claim invite
   const hasSubmittedRef = useRef(false);
@@ -405,7 +426,12 @@ export default function SellerOnboarding() {
     const phone = data.contactPhone;
     const email = activeUser?.email || data.contactEmail;
 
-    if (phone || name) {
+    if (activeUser) {
+      // Authenticated seller finishing onboarding: persist contact edits and
+      // mark onboarding complete (the PATCH flips onboarding_complete server-side).
+      api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
+      markOnboardingComplete();
+    } else if (phone || name) {
       api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
     }
     if (token && email) {

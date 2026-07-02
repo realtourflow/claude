@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { POST as clientInviteRoute } from "@/app/api/me/client-invite/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setEmailForTesting } from "@/lib/email";
+import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
@@ -59,7 +60,7 @@ function inviteReq(sub: string, roles: string[], body: unknown) {
 }
 
 describe("POST /api/me/client-invite — Resend email", () => {
-  it("1. emails the onboarding link and returns 200 {ok:true}", async () => {
+  it("1. creates an agent-owned deal + claimable invite and emails the /invite/<token> link", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|agent" });
     const { client, sent } = fakeEmail();
     setEmailForTesting(client);
@@ -71,19 +72,36 @@ describe("POST /api/me/client-invite — Resend email", () => {
     });
     const res = await clientInviteRoute(req);
     expect(res.status).toBe(200);
-    const out = (await res.json()) as { ok: boolean; inviteUrl: string };
+    const out = (await res.json()) as { ok: boolean; inviteUrl: string; dealId: string };
     expect(out.ok).toBe(true);
+    // Account-first: the link points at the tokened /invite/<token> flow.
+    expect(out.inviteUrl).toMatch(/\/invite\/[0-9a-f-]{36}$/i);
+
+    // A deal_invites row was created, tied to a new deal the inviting agent owns.
+    const invites = await prisma.$queryRaw<
+      { email: string; role: string; deal_id: string; invited_by: string }[]
+    >`SELECT email, role, deal_id, invited_by FROM deal_invites`;
+    expect(invites).toHaveLength(1);
+    expect(invites[0].email).toBe("buyer@example.com");
+    expect(invites[0].role).toBe("buyer");
+    expect(invites[0].invited_by).toBe(agent.id);
+
+    const deals = await prisma.$queryRaw<
+      { id: string; agent_id: string; type: string }[]
+    >`SELECT id, agent_id, type::text AS type FROM deals`;
+    expect(deals).toHaveLength(1);
+    expect(deals[0].agent_id).toBe(agent.id);
+    expect(deals[0].type).toBe("buy");
+    expect(deals[0].id).toBe(invites[0].deal_id);
+    expect(out.dealId).toBe(deals[0].id);
 
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toBe("buyer@example.com");
-    // The onboarding link carries the role + the resolved agent id.
-    const expectedUrl = `/onboard/buyer?agent=${agent.id}`;
-    expect(out.inviteUrl).toContain(expectedUrl);
-    expect(sent[0].html).toContain(expectedUrl);
+    expect(sent[0].html).toContain("/invite/");
   });
 
-  it("2. seller role builds a /onboard/seller link", async () => {
-    const agent = await createUser({ role: "agent", auth0_id: "auth0|seller-agent" });
+  it("2. seller role creates a 'sell' deal + invite", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|seller-agent" });
     const { client, sent } = fakeEmail();
     setEmailForTesting(client);
 
@@ -95,8 +113,16 @@ describe("POST /api/me/client-invite — Resend email", () => {
     const res = await clientInviteRoute(req);
     expect(res.status).toBe(200);
     const out = (await res.json()) as { inviteUrl: string };
-    expect(out.inviteUrl).toContain(`/onboard/seller?agent=${agent.id}`);
+    expect(out.inviteUrl).toMatch(/\/invite\/[0-9a-f-]{36}$/i);
     expect(sent).toHaveLength(1);
+
+    const rows = await prisma.$queryRaw<{ type: string; role: string }[]>`
+      SELECT d.type::text AS type, di.role
+      FROM deal_invites di JOIN deals d ON d.id = di.deal_id
+    `;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe("sell");
+    expect(rows[0].role).toBe("seller");
   });
 
   it("3. admin role is allowed", async () => {
