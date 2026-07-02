@@ -18,6 +18,7 @@ const SIDE_LABELS: Record<FormSide, string> = {
 const STATUS_STYLES: Record<FormStatus, { label: string; cls: string }> = {
   detecting: { label: "Detecting fields…", cls: "bg-blue-50 text-blue-700 border-blue-200" },
   pending_review: { label: "Pending review", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  pending_split: { label: "Awaiting split", cls: "bg-purple-50 text-purple-700 border-purple-200" },
   ready: { label: "Ready", cls: "bg-green-50 text-green-700 border-green-200" },
   rejected: { label: "Rejected", cls: "bg-red-50 text-red-700 border-red-200" },
   archived: { label: "Archived", cls: "bg-gray-100 text-gray-500 border-gray-200" },

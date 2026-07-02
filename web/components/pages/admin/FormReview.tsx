@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Check, AlertCircle } from "lucide-react";
+import { api } from "@/lib/api-client";
 import {
   useAdminFormsList,
   useAdminForm,
   type AdminFormField,
+  type AdminFormDetail,
   type CoreKey,
   type FieldPatch,
 } from "@/hooks/useAdminForms";
@@ -78,10 +80,14 @@ export function FormReview() {
                       {f.label}
                     </div>
                     <div className="mt-0.5 text-xs text-gray-400">
-                      {f.agent_name} · {f.field_count} fields
-                      {f.needs_review_count > 0
-                        ? ` · ${f.needs_review_count} need review`
-                        : ""}
+                      {f.agent_name}
+                      {f.status === "pending_split"
+                        ? " · Bundle — needs splitting"
+                        : ` · ${f.field_count} fields${
+                            f.needs_review_count > 0
+                              ? ` · ${f.needs_review_count} need review`
+                              : ""
+                          }`}
                     </div>
                   </button>
                 </li>
@@ -133,6 +139,12 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
   const [roleMapEdit, setRoleMapEdit] = useState<Record<string, string> | null>(null);
 
   if (loading || !detail) return <p className="text-sm text-gray-400">Loading…</p>;
+
+  // A combined-PDF bundle isn't reviewed field-by-field — the admin carves it
+  // into separate forms by page range first.
+  if (detail.status === "pending_split") {
+    return <BundleSplit id={id} detail={detail} onDone={onResolved} />;
+  }
 
   const unresolved = detail.fields.filter((f) => f.needs_review).length;
   const editable = detail.status === "pending_review";
@@ -371,6 +383,224 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Bundle split ─────────────────────────────────────────────────────────────
+
+type FormTypeOpt = { key: string; label: string; side: string };
+type SplitPart = { start: string; end: string; formType: string; label: string; side: string };
+type SplitResult = {
+  created: { id: string; label: string }[];
+  failed: { label: string; error: string }[];
+};
+
+function BundleSplit({
+  id,
+  detail,
+  onDone,
+}: {
+  id: string;
+  detail: AdminFormDetail;
+  onDone: () => void;
+}) {
+  const pageCount = detail.pages.length;
+  const [types, setTypes] = useState<FormTypeOpt[]>([]);
+  const [parts, setParts] = useState<SplitPart[]>([
+    { start: "1", end: String(pageCount || 1), formType: "", label: "", side: detail.side },
+  ]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [result, setResult] = useState<SplitResult | null>(null);
+
+  useEffect(() => {
+    api.get<FormTypeOpt[]>("/me/form-types").then(setTypes).catch(() => {});
+  }, []);
+
+  function updatePart(i: number, patch: Partial<SplitPart>) {
+    setParts((ps) => ps.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+  }
+  function addPart() {
+    setParts((ps) => [...ps, { start: "", end: "", formType: "", label: "", side: detail.side }]);
+  }
+  function removePart(i: number) {
+    setParts((ps) => ps.filter((_, idx) => idx !== i));
+  }
+
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await api.post<SplitResult>(`/admin/forms/${id}/split`, {
+        parts: parts.map((p) => ({
+          start_page: Number(p.start),
+          end_page: Number(p.end),
+          form_type: p.formType,
+          label: p.label.trim(),
+          side: p.side,
+        })),
+      });
+      setResult(res);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Split failed. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canSubmit =
+    !busy &&
+    parts.length > 0 &&
+    parts.every((p) => p.start && p.end && p.formType && p.label.trim());
+
+  if (result) {
+    return (
+      <div className="space-y-3">
+        <h2 className="text-lg font-bold text-brand-navy">Split complete</h2>
+        <p className="text-sm text-green-700">
+          Created {result.created.length} form{result.created.length !== 1 ? "s" : ""} — now in the
+          Pending queue for review.
+        </p>
+        {result.failed.length > 0 && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <p className="font-semibold">{result.failed.length} part(s) failed:</p>
+            <ul className="mt-1 list-disc pl-5">
+              {result.failed.map((f, i) => (
+                <li key={i}>
+                  {f.label}: {f.error}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-bold text-brand-navy">{detail.label}</h2>
+        <p className="text-sm text-gray-500">
+          Combined bundle · {pageCount} page{pageCount !== 1 ? "s" : ""} · from {detail.agent_name}
+        </p>
+        {detail.preview_url && (
+          <a
+            href={detail.preview_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-semibold text-brand-navy underline"
+          >
+            View the PDF
+          </a>
+        )}
+        <p className="mt-1 text-xs text-gray-400">
+          Tell me which pages make up each form. Each becomes its own form and goes through the
+          normal field review.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {parts.map((p, i) => (
+          <div key={i} className="space-y-2 rounded-xl border border-gray-200 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wide text-gray-400">
+                Form {i + 1}
+              </span>
+              {parts.length > 1 && (
+                <button
+                  onClick={() => removePart(i)}
+                  className="text-xs text-gray-400 hover:text-red-500"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block text-xs text-gray-500">
+                Start page
+                <input
+                  type="number"
+                  min={1}
+                  max={pageCount || undefined}
+                  value={p.start}
+                  onChange={(e) => updatePart(i, { start: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="block text-xs text-gray-500">
+                End page
+                <input
+                  type="number"
+                  min={1}
+                  max={pageCount || undefined}
+                  value={p.end}
+                  onChange={(e) => updatePart(i, { end: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                />
+              </label>
+            </div>
+            <label className="block text-xs text-gray-500">
+              Document type
+              <select
+                value={p.formType}
+                onChange={(e) => updatePart(i, { formType: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+              >
+                <option value="">Select a type…</option>
+                {types.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block text-xs text-gray-500">
+                Name
+                <input
+                  type="text"
+                  value={p.label}
+                  onChange={(e) => updatePart(i, { label: e.target.value })}
+                  placeholder="e.g. Buyer Agency Agreement"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="block text-xs text-gray-500">
+                Used on
+                <select
+                  value={p.side}
+                  onChange={(e) => updatePart(i, { side: e.target.value })}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+                >
+                  <option value="buy">Buyer-side</option>
+                  <option value="sell">Seller-side</option>
+                  <option value="both">Both</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={addPart}
+        className="text-sm font-semibold text-brand-navy hover:underline"
+      >
+        + Add another form
+      </button>
+
+      {err && <p className="text-sm text-red-600">{err}</p>}
+
+      <button
+        onClick={submit}
+        disabled={!canSubmit}
+        className="block w-full rounded-lg bg-brand-navy px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {busy ? "Splitting…" : `Split into ${parts.length} form${parts.length !== 1 ? "s" : ""}`}
+      </button>
     </div>
   );
 }

@@ -7,6 +7,7 @@ export type FormSide = "buy" | "sell" | "both";
 export type FormStatus =
   | "detecting"
   | "pending_review"
+  | "pending_split"
   | "ready"
   | "rejected"
   | "archived";
@@ -80,7 +81,8 @@ export function useAgentForms() {
     label: string,
     side: FormSide,
     attested: boolean,
-    formType: string
+    formType: string,
+    bundle = false
   ): Promise<UploadedForm> {
     const mimeType = file.type || "application/pdf";
 
@@ -106,6 +108,7 @@ export function useAgentForms() {
       mime_type: mimeType,
       attestation: attested,
       form_type: formType,
+      bundle,
     });
 
     const form = fromApi(raw);

@@ -17,6 +17,7 @@ export default function FormUploader({ onUploaded }: { onUploaded?: () => void }
   const [label, setLabel] = useState("");
   const [side, setSide] = useState<FormSide>("buy");
   const [formType, setFormType] = useState("");
+  const [bundle, setBundle] = useState(false);
   const [attested, setAttested] = useState(false);
   const [statement, setStatement] = useState(
     "I attest that I am licensed and permitted to use and host this form."
@@ -73,16 +74,17 @@ export default function FormUploader({ onUploaded }: { onUploaded?: () => void }
     setSide("buy");
     setFormType("");
     setTypeQuery("");
+    setBundle(false);
     setAttested(false);
     if (fileRef.current) fileRef.current.value = "";
   }
 
   async function handleSubmit() {
-    if (!file || !label.trim() || !formType || !attested || submitting) return;
+    if (!file || !label.trim() || (!bundle && !formType) || !attested || submitting) return;
     setSubmitting(true);
     setErr(null);
     try {
-      await uploadForm(file, label, side, attested, formType);
+      await uploadForm(file, label, side, attested, bundle ? "" : formType, bundle);
       reset();
       onUploaded?.();
     } catch (e) {
@@ -92,7 +94,8 @@ export default function FormUploader({ onUploaded }: { onUploaded?: () => void }
     }
   }
 
-  const canSubmit = !!file && !!label.trim() && !!formType && attested && !submitting;
+  const canSubmit =
+    !!file && !!label.trim() && (bundle || !!formType) && attested && !submitting;
 
   return (
     <div className="rounded-xl border border-gray-100 p-4 space-y-4">
@@ -108,7 +111,22 @@ export default function FormUploader({ onUploaded }: { onUploaded?: () => void }
         />
       </label>
 
+      {/* Combined-PDF bundle toggle */}
+      <label className="flex items-start gap-2.5 rounded-lg bg-gray-50 px-3 py-2.5">
+        <input
+          type="checkbox"
+          checked={bundle}
+          onChange={(e) => setBundle(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-brand-navy focus:ring-brand-navy"
+        />
+        <span className="text-sm text-gray-600">
+          This PDF has several forms in it (a combined bundle). Skip picking a type —
+          an admin will split it into separate forms.
+        </span>
+      </label>
+
       {/* Searchable document-type picker (the master forms catalog) */}
+      {!bundle && (
       <div ref={typeRef}>
         <span className="text-sm font-semibold text-brand-navy">Document type</span>
         <div className="relative mt-1">
@@ -164,6 +182,7 @@ export default function FormUploader({ onUploaded }: { onUploaded?: () => void }
           Search and pick what this document is so we can place its fields for you.
         </span>
       </div>
+      )}
 
       {/* Name + side */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -216,7 +235,7 @@ export default function FormUploader({ onUploaded }: { onUploaded?: () => void }
         className="inline-flex items-center gap-2 rounded-lg bg-brand-navy px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
       >
         <Upload size={15} />
-        {submitting ? "Uploading…" : "Upload form"}
+        {submitting ? "Uploading…" : bundle ? "Upload combined PDF" : "Upload form"}
       </button>
     </div>
   );

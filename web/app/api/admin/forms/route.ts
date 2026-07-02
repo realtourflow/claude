@@ -48,10 +48,15 @@ export async function GET(req: Request): Promise<Response> {
     const rows =
       status === "all"
         ? await prisma.$queryRawUnsafe<Row[]>(`${base} ${tail}`)
-        : await prisma.$queryRawUnsafe<Row[]>(
-            `${base} WHERE f.status = $1 ${tail}`,
-            status
-          );
+        : status === "pending_review"
+          ? // The pending queue also surfaces bundles awaiting a page-split.
+            await prisma.$queryRawUnsafe<Row[]>(
+              `${base} WHERE f.status IN ('pending_review', 'pending_split') ${tail}`
+            )
+          : await prisma.$queryRawUnsafe<Row[]>(
+              `${base} WHERE f.status = $1 ${tail}`,
+              status
+            );
 
     return json(rows.map(serialize));
   })) as Response;
