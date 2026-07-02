@@ -15,6 +15,7 @@ import {
 import { CORE_KEYS } from "@/lib/form-ai/core-keys";
 import { rememberApprovedForm } from "@/lib/remember-form";
 import { KnownFormConflictError } from "@/lib/known-forms";
+import { isValidMarket } from "@/lib/markets";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -43,7 +44,10 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
         docusign_template_id: true,
         detection_source: true,
         placement_confirmed_at: true,
-        promoted: true,
+        form_promotions: {
+          select: { id: true, brokerage: true, market: true },
+          orderBy: [{ brokerage: "asc" }, { market: "asc" }],
+        },
         form_type_id: true,
         users_uploaded_forms_agent_idTousers: {
           select: { name: true, email: true },
@@ -137,7 +141,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       placement_confirmed_at: form.placement_confirmed_at
         ? form.placement_confirmed_at.toISOString()
         : null,
-      promoted: form.promoted,
+      promotions: form.form_promotions,
       preview_url: previewUrl,
       pages,
       core_keys: CORE_KEYS,
@@ -163,6 +167,10 @@ type ActionBody = {
   action?: "approve" | "reject" | "promote" | "unpromote";
   review_notes?: string;
   signers?: SignersOverride;
+  // promote/unpromote: the company + market combo. ALWAYS both together — a
+  // promotion is never company-only or market-only.
+  brokerage?: string;
+  market?: string;
 };
 
 // POST /api/admin/forms/:id — the review gate. action=approve resolves the
@@ -183,10 +191,19 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     } catch {
       return error("action is required", 400);
     }
-    // Promote / unpromote — make an already-APPROVED form visible to (or hide it
-    // from) every agent in its market/board. A separate admin lever from approve:
-    // approve makes the form usable by its owning agent; promote shares it market-wide.
+    // Promote / unpromote — share an already-APPROVED form with every agent whose
+    // profile matches a COMPANY + MARKET combo (both together, always). Matching
+    // is computed live from agent profiles, so agents who onboard later with the
+    // same company + market get the form automatically. A separate admin lever
+    // from approve: approve makes the form usable by its owning agent only.
     if (body.action === "promote" || body.action === "unpromote") {
+      const brokerage = (body.brokerage ?? "").trim();
+      const market = (body.market ?? "").trim();
+      if (!brokerage || !market) {
+        return error("a promotion needs both a company and a market", 400);
+      }
+      if (!isValidMarket(market)) return error("unknown market", 400);
+
       const target = await prisma.uploaded_forms.findUnique({
         where: { id },
         select: { status: true },
@@ -195,11 +212,31 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       if (target.status !== "ready") {
         return error("only approved forms can be promoted", 409);
       }
-      await prisma.uploaded_forms.update({
-        where: { id },
-        data: { promoted: body.action === "promote" },
+
+      if (body.action === "promote") {
+        // Promotions target a company from the managed list (active only).
+        const known = await prisma.brokerages.findFirst({
+          where: { name: brokerage, status: "active" },
+          select: { id: true },
+        });
+        if (!known) return error("unknown company — add it to the list first", 400);
+        // Idempotent: re-promoting the same combo is a no-op.
+        await prisma.form_promotions.createMany({
+          data: [{ form_id: id, brokerage, market, created_by: adminId }],
+          skipDuplicates: true,
+        });
+      } else {
+        await prisma.form_promotions.deleteMany({
+          where: { form_id: id, brokerage, market },
+        });
+      }
+
+      const promotions = await prisma.form_promotions.findMany({
+        where: { form_id: id },
+        select: { id: true, brokerage: true, market: true },
+        orderBy: [{ brokerage: "asc" }, { market: "asc" }],
       });
-      return json({ id, promoted: body.action === "promote" });
+      return json({ id, promotions });
     }
 
     if (body.action !== "approve" && body.action !== "reject") {

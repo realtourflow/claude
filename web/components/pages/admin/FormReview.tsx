@@ -12,6 +12,7 @@ import {
   type FieldPatch,
 } from "@/hooks/useAdminForms";
 import { FieldPlacementOverlay } from "./FieldPlacementOverlay";
+import { MARKETS, MARKET_GROUPS, marketLabel } from "@/lib/markets";
 
 const STATUS_TABS = [
   { id: "pending_review", label: "Pending" },
@@ -128,11 +129,11 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
     approve,
     reject,
     promote,
+    unpromote,
   } = useAdminForm(id);
   const [rejecting, setRejecting] = useState(false);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
-  const [promoting, setPromoting] = useState(false);
   const [view, setView] = useState<"placement" | "fields">("placement");
   // Edited signer map; null until the admin changes it, then it overrides the
   // server-derived default. Reset per form via the `key` on FormDetail.
@@ -347,42 +348,137 @@ function FormDetail({ id, onResolved }: { id: string; onResolved: () => void }) 
       )}
 
       {detail.status === "ready" && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="flex items-center gap-2 text-xs text-gray-500">
             <AlertCircle size={14} className="shrink-0" />
             Approved — sendable on this agent&apos;s deals.
           </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={async () => {
-                setPromoting(true);
-                try {
-                  await promote(!detail.promoted);
-                } finally {
-                  setPromoting(false);
-                }
-              }}
-              disabled={promoting}
-              className={
-                detail.promoted
-                  ? "rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                  : "rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-navy/90 disabled:opacity-50"
-              }
-            >
-              {promoting
-                ? "…"
-                : detail.promoted
-                ? "Promoted to market — click to unpromote"
-                : "Promote to market"}
-            </button>
-            {detail.promoted && (
-              <span className="text-[11px] text-gray-400">
-                Available to every agent in this market.
-              </span>
-            )}
-          </div>
+          <PromotionManager
+            promotions={detail.promotions}
+            onPromote={promote}
+            onUnpromote={unpromote}
+          />
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Promotions (company + market combos) ────────────────────────────────────
+
+function PromotionManager({
+  promotions,
+  onPromote,
+  onUnpromote,
+}: {
+  promotions: { id: string; brokerage: string; market: string }[];
+  onPromote: (brokerage: string, market: string) => Promise<void>;
+  onUnpromote: (brokerage: string, market: string) => Promise<void>;
+}) {
+  const [companies, setCompanies] = useState<string[]>([]);
+  const [brokerage, setBrokerage] = useState("");
+  const [market, setMarket] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    api.get<string[]>("/brokerages").then(setCompanies).catch(() => {});
+  }, []);
+
+  async function add() {
+    if (!brokerage || !market || busy) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await onPromote(brokerage, market);
+      setBrokerage("");
+      setMarket("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Promotion failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(b: string, m: string) {
+    if (busy) return;
+    setBusy(true);
+    setErr("");
+    try {
+      await onUnpromote(b, m);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not remove the promotion.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-xl border border-gray-200 p-3">
+      <p className="text-xs font-bold uppercase tracking-wide text-gray-400">
+        Promotions — company + market
+      </p>
+      <p className="text-xs text-gray-400">
+        Every agent whose profile matches a combo below gets this form automatically —
+        including agents who join later.
+      </p>
+
+      {promotions.length > 0 && (
+        <ul className="space-y-1.5">
+          {promotions.map((p) => (
+            <li
+              key={p.id}
+              className="flex items-center justify-between gap-2 rounded-lg bg-brand-bg px-3 py-1.5 text-sm"
+            >
+              <span className="font-medium text-brand-navy">
+                {p.brokerage} <span className="text-gray-400">·</span> {marketLabel(p.market)}
+              </span>
+              <button
+                onClick={() => remove(p.brokerage, p.market)}
+                disabled={busy}
+                className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-40"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
+        <select
+          value={brokerage}
+          onChange={(e) => setBrokerage(e.target.value)}
+          className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+        >
+          <option value="">Company…</option>
+          {companies.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <select
+          value={market}
+          onChange={(e) => setMarket(e.target.value)}
+          className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+        >
+          <option value="">Market…</option>
+          {MARKET_GROUPS.map((g) => (
+            <optgroup key={g} label={g}>
+              {MARKETS.filter((m) => m.group === g).map((m) => (
+                <option key={m.code} value={m.code}>{m.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+        <button
+          onClick={add}
+          disabled={!brokerage || !market || busy}
+          className="rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+        >
+          {busy ? "…" : "Promote"}
+        </button>
+      </div>
+      {err && <p className="text-xs text-red-500">{err}</p>}
     </div>
   );
 }

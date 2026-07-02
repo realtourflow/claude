@@ -21,7 +21,7 @@ export async function GET(req: Request): Promise<Response> {
         if (!userId) return error("user not found", 404);
         const user = await prisma.users.findUnique({
           where: { id: userId },
-          select: { market: true },
+          select: { market: true, brokerage: true, markets: true },
         });
         const market = user?.market ?? "";
         const isAdminOrTc =
@@ -31,7 +31,11 @@ export async function GET(req: Request): Promise<Response> {
         const committed = isAdminOrTc
           ? listTemplates()
           : listTemplatesForMarket(market);
-        const agentForms = await listAgentFormsForAgent(userId, market);
+        const agentForms = await listAgentFormsForAgent({
+          agentId: userId,
+          brokerage: user?.brokerage ?? "",
+          markets: Array.isArray(user?.markets) ? (user.markets as string[]) : [],
+        });
         return json({ templates: [...committed, ...agentForms] });
       } catch (err) {
         if (err instanceof TemplateConfigError) return error(err.message, 500);

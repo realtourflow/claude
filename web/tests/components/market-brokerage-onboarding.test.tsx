@@ -1,19 +1,22 @@
 // @vitest-environment happy-dom
 /**
- * Agent onboarding now captures market (drives board forms) + brokerage
- * (informational) on the same step, and persists both to the profile record
- * (PATCH /me/profile) on finish. These tests drive the real AgentOnboarding
- * component through to that PATCH.
+ * Agent onboarding captures the agent's COMPANY (from the managed brokerages
+ * list, with an "Other" escape hatch) and MARKET(S) (multi-select from the
+ * canonical grouped list) on the same step, and persists both to the profile
+ * record (PATCH /me/profile) on finish. These tests drive the real
+ * AgentOnboarding component through to that PATCH.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import AgentOnboarding from "@/components/pages/onboarding/AgentOnboarding";
 
+const apiGet = vi.fn();
 const apiPatch = vi.fn().mockResolvedValue({});
 const apiPut = vi.fn().mockResolvedValue({});
 vi.mock("@/lib/api-client", () => ({
   api: {
+    get: (...a: unknown[]) => apiGet(...a),
     patch: (...a: unknown[]) => apiPatch(...a),
     put: (...a: unknown[]) => apiPut(...a),
   },
@@ -29,7 +32,7 @@ vi.mock("@/lib/store/authStore", () => ({
   useAuthStore: (sel: (s: unknown) => unknown) =>
     sel({ markOnboardingComplete: vi.fn(), activeUser: null }),
 }));
-// Onboarding now uploads through the Vision pipeline (useAgentForms / FormUploader).
+// Onboarding uploads through the Vision pipeline (useAgentForms / FormUploader).
 vi.mock("@/hooks/useAgentForms", () => ({
   useAgentForms: () => ({
     forms: [],
@@ -45,9 +48,14 @@ vi.mock("@/hooks/useAgentPhoto", () => ({ uploadAgentPhoto: vi.fn() }));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The managed company dropdown (GET /brokerages).
+  apiGet.mockImplementation(async (path: unknown) => {
+    if (path === "/brokerages") return ["ARC Realty", "RE/MAX"];
+    return [];
+  });
 });
 
-// Walk from the welcome screen to the Market & Brokerage step (screen 6).
+// Walk from the welcome screen to the Company & Markets step (screen 6).
 async function gotoMarketStep(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /build my office/i }));
   await user.type(screen.getByPlaceholderText(/Sarah Johnson/i), "Test Agent");
@@ -59,32 +67,42 @@ async function gotoMarketStep(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /Skip for now/i })); // bio
 }
 
-describe("AgentOnboarding — Market & Brokerage step", () => {
-  it("requires a market and brokerage before continuing", async () => {
+describe("AgentOnboarding — Company & Markets step", () => {
+  it("offers the grouped market list + managed company list; requires both", async () => {
     const user = userEvent.setup();
     render(<AgentOnboarding />);
     await gotoMarketStep(user);
 
-    expect(screen.getByText(/Your market & brokerage/i)).toBeInTheDocument();
-    // Both markets are offered with friendly labels.
-    expect(screen.getByRole("button", { name: "Birmingham" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Alabama Gulf Coast" })).toBeInTheDocument();
+    expect(screen.getByText(/Your company & markets/i)).toBeInTheDocument();
 
-    // Continue is disabled until BOTH market and brokerage are chosen.
+    // Markets come from the canonical grouped list (multi-select, no typing).
+    expect(screen.getByText("Greater Alabama MLS")).toBeInTheDocument();
+    expect(screen.getByText("Lake Markets")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Birmingham Metro/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Huntsville/ })).toBeInTheDocument();
+
+    // Companies come from the managed list (ARC Realty is seeded).
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "ARC Realty" })).toBeInTheDocument()
+    );
+
+    // Continue is disabled until BOTH at least one market and a company are set.
     const continueBtn = screen.getByRole("button", { name: /^Continue$/i });
     expect(continueBtn).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Birmingham" }));
-    expect(continueBtn).toBeDisabled(); // market only — still blocked
-    await user.click(screen.getByRole("button", { name: "RE/MAX" }));
+    await user.click(screen.getByRole("button", { name: /Birmingham Metro/ }));
+    expect(continueBtn).toBeDisabled(); // markets only — still blocked
+    await user.click(screen.getByRole("button", { name: "ARC Realty" }));
     expect(continueBtn).toBeEnabled();
   });
 
-  it("persists the chosen market + brokerage to the profile record on finish", async () => {
+  it("persists MULTIPLE markets + the company to the profile record on finish", async () => {
     const user = userEvent.setup();
     render(<AgentOnboarding />);
     await gotoMarketStep(user);
 
-    await user.click(screen.getByRole("button", { name: "Alabama Gulf Coast" }));
+    // Multi-select: two markets from different groups.
+    await user.click(screen.getByRole("button", { name: /Baldwin County \/ Gulf Coast/ }));
+    await user.click(screen.getByRole("button", { name: /Huntsville/ }));
     await user.click(screen.getByRole("button", { name: "RE/MAX" }));
     await user.click(screen.getByRole("button", { name: /^Continue$/i }));
 
@@ -97,13 +115,28 @@ describe("AgentOnboarding — Market & Brokerage step", () => {
     await user.click(screen.getByRole("button", { name: "Continue" })); // documents (no docs)
     await user.click(screen.getByRole("button", { name: /Skip — I/i })); // commission
 
-    // DoneScreen fires PATCH /me/profile with market + brokerage.
+    // DoneScreen fires PATCH /me/profile with markets[] + brokerage.
     await waitFor(() => expect(apiPatch).toHaveBeenCalledWith("/me/profile", expect.anything()));
-    const profileBody = apiPatch.mock.calls.find((c) => c[0] === "/me/profile")?.[1] as Record<
-      string,
-      string
-    >;
-    expect(profileBody.market).toBe("BALDWIN_GULF_COAST");
+    const profileBody = apiPatch.mock.calls.find((c) => c[0] === "/me/profile")?.[1] as {
+      markets: string[];
+      brokerage: string;
+    };
+    expect(profileBody.markets).toEqual(["BALDWIN_GULF_COAST", "HUNTSVILLE"]);
     expect(profileBody.brokerage).toBe("RE/MAX");
+  });
+
+  it("'Other' lets the agent type an unlisted company", async () => {
+    const user = userEvent.setup();
+    render(<AgentOnboarding />);
+    await gotoMarketStep(user);
+
+    await user.click(screen.getByRole("button", { name: /Tuscaloosa/ }));
+    await user.click(screen.getByRole("button", { name: "Other" }));
+    await user.type(
+      screen.getByPlaceholderText(/River City Realty/i),
+      "Smallville Homes"
+    );
+    const continueBtn = screen.getByRole("button", { name: /^Continue$/i });
+    expect(continueBtn).toBeEnabled();
   });
 });

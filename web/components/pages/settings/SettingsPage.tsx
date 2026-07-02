@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from "next/image";
+import { api } from "@/lib/api-client";
 import {
   User, Store, Bell, Plug, Star, Pencil, Trash2,
   ChevronUp, ChevronDown, Plus, X, Check, ExternalLink,
@@ -10,6 +11,8 @@ import {
 import { useAuthStore } from "@/lib/store/authStore";
 import { useTC, useMyAgents } from "@/hooks/useTC";
 import { MyFormsSection } from "@/components/pages/settings/MyFormsSection";
+import MarketMultiSelect from "@/components/MarketMultiSelect";
+import { BROKERAGE_FALLBACK } from "@/lib/brokerages";
 import {
   VendorCategory,
   VENDOR_CATEGORY_LABELS,
@@ -21,7 +24,6 @@ import { useMLSConnection } from "@/hooks/useMLS";
 import { uploadAgentPhoto } from "@/hooks/useAgentPhoto";
 import { useIntegrations } from "@/hooks/useIntegrations";
 import { settingsTabFromSearch } from "@/lib/settings-nav";
-import { MARKETS } from "@/lib/markets";
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
@@ -444,10 +446,34 @@ function ProfileSection() {
     phone: '',
     title: '',
     licenseNumber: '',
-    market: '',
-    brokerage: '',
     bio: '',
   });
+  const [markets, setMarkets] = useState<string[]>([]);
+  const [brokerage, setBrokerage] = useState('');
+  const [brokerageOther, setBrokerageOther] = useState(false);
+  // Company + markets hydrate from GET /me/profile — the SOURCE OF TRUTH (the
+  // settings JSON blob can be stale/missing) — and are only sent on Save after
+  // hydration, so a failed fetch can never wipe the profile columns.
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  useEffect(() => {
+    api.get<{ markets?: string[]; market?: string; brokerage?: string }>('/me/profile')
+      .then((p) => {
+        const saved = Array.isArray(p.markets) ? p.markets : [];
+        setMarkets(saved.length > 0 ? saved : p.market ? [p.market] : []);
+        setBrokerage(p.brokerage ?? '');
+        setProfileLoaded(true);
+      })
+      .catch(() => {});
+  }, []);
+  // Managed company list (seeded fallback while the fetch resolves); the saved
+  // value may be an admin-pending "Other" name — the picker shows it via the
+  // Other input once both fetches have settled.
+  const [companies, setCompanies] = useState<string[]>(BROKERAGE_FALLBACK);
+  useEffect(() => {
+    api.get<string[]>('/brokerages')
+      .then((names) => { if (names.length > 0) setCompanies(names); })
+      .catch(() => {});
+  }, []);
   const [photoUrl, setPhotoUrl] = useState<string>('');
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoErr, setPhotoErr] = useState('');
@@ -467,8 +493,6 @@ function ProfileSection() {
       phone: (settings.phone as string) ?? '',
       title: (settings.title as string) ?? '',
       licenseNumber: (settings.licenseNumber as string) ?? '',
-      market: (settings.market as string) ?? '',
-      brokerage: (settings.brokerage as string) ?? '',
       bio: (settings.bio as string) ?? '',
     }));
     setPhotoUrl((settings.photoUrl as string) ?? '');
@@ -479,16 +503,16 @@ function ProfileSection() {
     try {
       await Promise.all([
         saveProfile(form.name, form.phone, {
-          market: form.market,
-          brokerage: form.brokerage,
+          // Only write company/markets once hydrated from the profile — an
+          // unresolved fetch must never wipe them (undefined = leave unchanged).
+          ...(profileLoaded ? { markets, brokerage } : {}),
         }),
         saveSettings({
           name: form.name,
           phone: form.phone,
           title: form.title,
           licenseNumber: form.licenseNumber,
-          market: form.market,
-          brokerage: form.brokerage,
+          ...(profileLoaded ? { markets, brokerage } : {}),
           bio: form.bio,
         }),
       ]);
@@ -583,7 +607,6 @@ function ProfileSection() {
           { label: 'Phone', key: 'phone', placeholder: '(205) 555-0100' },
           { label: 'Title', key: 'title', placeholder: 'e.g. Realtor, Senior Agent' },
           { label: 'License #', key: 'licenseNumber', placeholder: 'e.g. AL-012345' },
-          { label: 'Brokerage', key: 'brokerage', placeholder: 'e.g. RE/MAX, Keller Williams' },
         ].map(({ label, key, placeholder }) => (
           <div key={key} className="flex items-center gap-4 px-5 py-3.5">
             <label className="w-28 flex-shrink-0 text-xs font-semibold text-gray-400 uppercase tracking-wide">
@@ -598,21 +621,49 @@ function ProfileSection() {
           </div>
         ))}
 
-        {/* Market — drives which board contract forms this agent can send */}
+        {/* Company — from the managed list; "Other" queues the typed name for
+            admin review into the dropdown. */}
         <div className="flex items-center gap-4 px-5 py-3.5">
           <label className="w-28 flex-shrink-0 text-xs font-semibold text-gray-400 uppercase tracking-wide">
-            Market
+            Company
           </label>
-          <select
-            value={form.market}
-            onChange={(e) => setForm((f) => ({ ...f, market: e.target.value }))}
-            className="flex-1 rounded-lg border border-transparent bg-gray-50 px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-navy/20 focus:bg-white focus:ring-2 focus:ring-brand-navy/10 transition-all"
-          >
-            <option value="">Select your market…</option>
-            {MARKETS.map((m) => (
-              <option key={m.code} value={m.code}>{m.label}</option>
-            ))}
-          </select>
+          <div className="flex-1 space-y-2">
+            <select
+              value={brokerageOther || (brokerage && !companies.includes(brokerage)) ? '__other__' : brokerage}
+              onChange={(e) => {
+                if (e.target.value === '__other__') {
+                  setBrokerageOther(true);
+                } else {
+                  setBrokerageOther(false);
+                  setBrokerage(e.target.value);
+                }
+              }}
+              className="w-full rounded-lg border border-transparent bg-gray-50 px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-navy/20 focus:bg-white focus:ring-2 focus:ring-brand-navy/10 transition-all"
+            >
+              <option value="">Select your company…</option>
+              {companies.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+              <option value="__other__">Other…</option>
+            </select>
+            {(brokerageOther || (brokerage !== '' && !companies.includes(brokerage))) && (
+              <input
+                value={brokerage}
+                onChange={(e) => setBrokerage(e.target.value)}
+                placeholder="Type your company name"
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-navy/20 focus:ring-2 focus:ring-brand-navy/10 transition-all"
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Markets — multi-select; the first pick is the primary market that
+            drives board contract forms. */}
+        <div className="px-5 py-3.5">
+          <label className="mb-2 block text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Market(s) <span className="font-normal normal-case text-gray-300">select all you serve</span>
+          </label>
+          <MarketMultiSelect selected={markets} onChange={setMarkets} />
         </div>
 
         {/* Bio */}

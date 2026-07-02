@@ -22,6 +22,8 @@ const USER_DATA_TABLES = [
   "uploaded_form_fields",
   "known_forms",
   "form_types",
+  "form_promotions",
+  "brokerages",
   "uploaded_forms",
   "tasks",
   "deals",

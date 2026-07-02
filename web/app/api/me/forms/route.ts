@@ -1,6 +1,7 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
+import { hasRole } from "@/lib/roles";
 import { getObjectBytes, getObjectSize, deleteObject } from "@/lib/s3";
 import {
   FORM_SIDES,
@@ -181,12 +182,28 @@ export async function POST(req: Request): Promise<Response> {
 
       const agentUser = await prisma.users.findUnique({
         where: { id: userId },
-        select: { market: true, name: true, email: true },
+        select: { market: true, markets: true, brokerage: true, name: true, email: true },
       });
       const agentMarket = agentUser?.market ?? "";
       const agentName = agentUser?.name || agentUser?.email || "An agent";
       const agentEmail = agentUser?.email ?? "";
       const origin = new URL(req.url).origin;
+
+      // An agent must have declared their company and market(s) before uploading
+      // any forms — promotion matching and board scoping both depend on them.
+      // Admins are exempt (they upload on agents' behalf via the split flow).
+      if (!hasRole(claims.roles, ["admin"])) {
+        const agentMarkets = Array.isArray(agentUser?.markets)
+          ? (agentUser.markets as string[])
+          : [];
+        if (!agentUser?.brokerage || (agentMarkets.length === 0 && !agentMarket)) {
+          await deleteObject(body.s3_key);
+          return error(
+            "set your company and market in your profile before uploading forms",
+            422
+          );
+        }
+      }
 
       // BUNDLE: one combined PDF (e.g. "all buyer docs"). We do NOT detect fields —
       // the admin carves it into individual forms by page range in Form Review.

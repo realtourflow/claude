@@ -92,6 +92,15 @@ afterEach(async () => {
   await prisma.system_config.deleteMany({});
 });
 
+// Uploading requires a declared company + market (the profile gate). Give the
+// agent both — mirrors a completed onboarding.
+async function onboard(agentId: string, market = "BIRMINGHAM_AAR") {
+  await prisma.users.update({
+    where: { id: agentId },
+    data: { brokerage: "ARC Realty", market, markets: [market] },
+  });
+}
+
 // Build a confirm Request with a real auth header for the given agent.
 async function postForm(agentId: string, sub: string, label = "Listing Agreement") {
   return new Request("http://localhost/api/me/forms", {
@@ -143,6 +152,7 @@ describe("POST /api/me/forms/upload-url", () => {
 describe("POST /api/me/forms (confirm + pipeline)", () => {
   it("creates a pending_review form, records the attestation, runs the pipeline", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     const res = await createForm(await postForm(agent.id, "auth0|a"));
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
@@ -178,6 +188,7 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
 
   it("recognizes a known form and copies the verified mapping (no AI mapper call)", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     // Seed the catalog with the fillable fixture's structure.
     const detected = await extractAcroFields(FILLABLE);
     const fp = computeStructureFingerprint(detected, 1);
@@ -237,17 +248,21 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
     expect(date.decision).toBe("accepted");
   });
 
-  it("captures board = the agent's market at upload", async () => {
+  it("captures board = the agent's PRIMARY market at upload", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
-    await prisma.users.update({
-      where: { id: agent.id },
-      data: { market: "BALDWIN" },
-    });
+    await onboard(agent.id, "BALDWIN_GULF_COAST");
     const res = await createForm(await postForm(agent.id, "auth0|a"));
     expect(res.status).toBe(201);
     const { id } = (await res.json()) as { id: string };
     const row = await prisma.uploaded_forms.findUnique({ where: { id } });
-    expect(row?.board).toBe("BALDWIN");
+    expect(row?.board).toBe("BALDWIN_GULF_COAST");
+  });
+
+  it("422 when the agent has not set their company + market yet", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const res = await createForm(await postForm(agent.id, "auth0|a"));
+    expect(res.status).toBe(422);
+    expect(await prisma.uploaded_forms.count()).toBe(0);
   });
 
   it("400 when the licensing attestation is not checked", async () => {
@@ -271,6 +286,7 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
 
   it("422 for an UNRECOGNIZED flat PDF, and persists nothing", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT) });
     const res = await createForm(await postForm(agent.id, "auth0|a"));
     expect(res.status).toBe(422);
@@ -289,6 +305,7 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
 
   it("recognizes a FLAT upload that matches a known form by content hash", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT) });
     // Seed a flat known-form keyed on the FLAT fixture's exact content hash.
     await prisma.known_forms.create({
@@ -329,7 +346,7 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
 
   it("recognizes a RE-SAVED FORM 300 (text-layout) through the route → 88 fields, exact positions", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
-    await prisma.users.update({ where: { id: agent.id }, data: { market: "BIRMINGHAM_AAR" } });
+    await onboard(agent.id);
     await seedForm300();
 
     // A re-saved copy of the real blank: DIFFERENT bytes (the content hash
@@ -402,6 +419,8 @@ describe("GET /api/me/forms", () => {
   it("returns only the caller's forms with counts", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const other = await createUser({ role: "agent", auth0_id: "auth0|other" });
+    await onboard(agent.id);
+    await onboard(other.id);
     await createForm(await postForm(agent.id, "auth0|a"));
     await createForm(await postForm(other.id, "auth0|other"));
 
@@ -425,6 +444,7 @@ describe("GET /api/me/forms/:id", () => {
   it("owner sees fields; a non-owner gets 404", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     await createUser({ role: "agent", auth0_id: "auth0|other" });
+    await onboard(agent.id);
     const created = await createForm(await postForm(agent.id, "auth0|a"));
     const { id } = (await created.json()) as { id: string };
 

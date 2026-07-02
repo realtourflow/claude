@@ -15,7 +15,9 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { uploadAgentPhoto } from "@/hooks/useAgentPhoto";
 import { useAgentForms } from "@/hooks/useAgentForms";
 import FormUploader from "@/components/FormUploader";
+import MarketMultiSelect from "@/components/MarketMultiSelect";
 import { MARKETS } from "@/lib/markets";
+import { BROKERAGE_FALLBACK } from "@/lib/brokerages";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +30,7 @@ type AgentSetupData = {
   licenseNumber: string;
   photoUrl: string;
   bio: string;
-  market: string;
+  markets: string[];
   brokerage: string;
   brokerageAddress: string;
   tcName: string;
@@ -66,7 +68,7 @@ const DEFAULT_SELLER_MSG =
 
 const EMPTY: AgentSetupData = {
   name: '', title: '', phone: '', licenseNumber: '', photoUrl: '', bio: '',
-  market: '', brokerage: '', brokerageAddress: '', tcName: '', tcEmail: '', tcPhone: '', tcLinkedUserId: '',
+  markets: [], brokerage: '', brokerageAddress: '', tcName: '', tcEmail: '', tcPhone: '', tcLinkedUserId: '',
   buyerMessage: DEFAULT_BUYER_MSG, sellerMessage: DEFAULT_SELLER_MSG,
   lenderChoice: '', otherLenderName: '',
   notifDealStage: true, notifClientMsg: true, notifOverdue: true,
@@ -102,11 +104,6 @@ const TITLE_OPTIONS = [
   'Buyer\'s Agent', 'Listing Specialist', 'Broker', 'Broker/Owner',
 ];
 
-const BROKERAGE_OPTIONS = [
-  'Keller Williams', 'RE/MAX', 'Coldwell Banker', 'eXp Realty',
-  'Compass', 'Century 21', 'Berkshire Hathaway HomeServices',
-  'Independent', 'Other',
-];
 
 const INTEGRATION_TOOLS: {
   key: keyof AgentSetupData;
@@ -437,22 +434,31 @@ function BioScreen({
 // ─── Screen 6: Market & Brokerage ────────────────────────────────────────────
 
 function MarketBrokerageScreen({
-  market,
-  onChangeMarket,
+  markets,
+  onChangeMarkets,
+  onPersist,
   onContinue,
 }: {
-  market: string;
-  onChangeMarket: (code: string) => void;
+  markets: string[];
+  onChangeMarkets: (codes: string[]) => void;
+  onPersist: (brokerage: string, markets: string[]) => void;
   onContinue: (brokerage: string, address: string) => void;
 }) {
   const [otherSelected, setOtherSelected] = useState(false);
   const [brokerage, setBrokerage] = useState('');
   const [customName, setCustomName] = useState('');
   const [customAddress, setCustomAddress] = useState('');
+  // The managed company list (admin-approved). Falls back to the seed list.
+  const [companies, setCompanies] = useState<string[]>(BROKERAGE_FALLBACK);
 
-  const namedOptions = BROKERAGE_OPTIONS.filter((b) => b !== 'Other');
+  useEffect(() => {
+    api.get<string[]>('/brokerages')
+      .then((names) => { if (names.length > 0) setCompanies(names); })
+      .catch(() => {});
+  }, []);
+
   const effectiveBrokerage = otherSelected ? customName.trim() : brokerage;
-  const canContinue = !!market && !!effectiveBrokerage;
+  const canContinue = markets.length > 0 && !!effectiveBrokerage;
 
   function pickNamed(b: string) {
     setBrokerage(b);
@@ -461,32 +467,25 @@ function MarketBrokerageScreen({
 
   return (
     <div className="flex flex-col items-center">
-      <Question text="Your market & brokerage" note="Your market sets which contract forms you'll use." />
-      <div className="w-full max-w-xs space-y-5">
-        {/* Market — required, single choice. Drives form visibility. */}
+      <Question text="Your company & markets" note="These decide which contract forms you'll get." />
+      <div className="w-full max-w-md space-y-5">
+        {/* Markets — required, pick every market you serve. */}
         <div>
           <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-400">
-            Market <span className="text-red-400">*</span>
+            Your market(s) <span className="text-red-400">*</span>
+            <span className="ml-1 font-normal normal-case text-gray-300">select all that apply</span>
           </label>
-          <div className="space-y-2.5">
-            {MARKETS.map((m) => (
-              <OptionBtn
-                key={m.code}
-                label={m.label}
-                selected={market === m.code}
-                onClick={() => onChangeMarket(m.code)}
-              />
-            ))}
-          </div>
+          <MarketMultiSelect selected={markets} onChange={onChangeMarkets} />
         </div>
 
-        {/* Brokerage — required (informational; Paul wires brokerage forms). */}
+        {/* Company — required; picked from the managed list, or typed via Other
+            (unknown names go to the admin review queue). */}
         <div>
           <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-400">
-            Brokerage <span className="text-red-400">*</span>
+            Company <span className="text-red-400">*</span>
           </label>
           <div className="space-y-2.5">
-            {namedOptions.map((b) => (
+            {companies.map((b) => (
               <OptionBtn
                 key={b}
                 label={b}
@@ -508,7 +507,7 @@ function MarketBrokerageScreen({
               <div className="rounded-xl border border-brand-navy/20 bg-brand-navy/5 px-4 py-4 space-y-3">
                 <div>
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-gray-400">
-                    Brokerage name <span className="text-red-400">*</span>
+                    Company name <span className="text-red-400">*</span>
                   </label>
                   <input
                     autoFocus
@@ -537,7 +536,10 @@ function MarketBrokerageScreen({
         </div>
 
         <ContinueBtn
-          onClick={() => onContinue(effectiveBrokerage, otherSelected ? customAddress.trim() : '')}
+          onClick={() => {
+            onPersist(effectiveBrokerage, markets);
+            onContinue(effectiveBrokerage, otherSelected ? customAddress.trim() : '');
+          }}
           disabled={!canContinue}
         />
       </div>
@@ -835,8 +837,26 @@ function IntegrationsScreen({
 
 // ─── Screen 12: Document Templates ───────────────────────────────────────────
 
-function DocumentsScreen({ onContinue }: { onContinue: () => void }) {
+function DocumentsScreen({
+  brokerage,
+  markets,
+  onContinue,
+}: {
+  brokerage: string;
+  markets: string[];
+  onContinue: () => void;
+}) {
   const { forms, loading } = useAgentForms();
+
+  // The upload gate needs company + markets on the PROFILE. They were persisted
+  // when the Company & Markets step continued — re-assert here (idempotent,
+  // complete:false) in case that fire-and-forget PATCH failed.
+  useEffect(() => {
+    if (brokerage && markets.length > 0) {
+      api.patch('/me/profile', { brokerage, markets, complete: false }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div>
@@ -1055,13 +1075,13 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
   const isSolo = !data.tcName;
 
   useEffect(() => {
-    // Persist the queryable profile columns: name/phone plus market (drives
-    // which board forms the agent sees) and brokerage (informational — Paul
-    // wires brokerage-specific forms from it).
-    const profileUpdate: Record<string, string> = {};
+    // Persist the queryable profile columns: name/phone plus markets (multi —
+    // the server keeps users.market in sync as the first pick) and brokerage
+    // (from the managed company list; unknown names get queued for admin review).
+    const profileUpdate: Record<string, string | string[]> = {};
     if (data.name) profileUpdate.name = data.name;
     if (data.phone) profileUpdate.phone = data.phone;
-    if (data.market) profileUpdate.market = data.market;
+    if (data.markets.length > 0) profileUpdate.markets = data.markets;
     if (data.brokerage) profileUpdate.brokerage = data.brokerage;
     api.patch('/me/profile', Object.keys(profileUpdate).length > 0 ? profileUpdate : {})
       .then(() => markOnboardingComplete())
@@ -1073,7 +1093,7 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
       title: data.title,
       phone: data.phone,
       licenseNumber: data.licenseNumber,
-      market: data.market,
+      markets: data.markets,
       brokerage: data.brokerage,
       brokerageAddress: data.brokerageAddress,
       bio: data.bio,
@@ -1115,7 +1135,7 @@ function DoneScreen({ data }: { data: AgentSetupData }) {
 
   const summary = [
     { label: 'Profile',    value: data.title ? `${data.title}${data.brokerage ? ` · ${data.brokerage}` : ''}` : 'Complete', ok: true },
-    { label: 'Market',     value: MARKETS.find((m) => m.code === data.market)?.label ?? 'Not set', ok: !!data.market },
+    { label: 'Markets',    value: data.markets.length > 0 ? data.markets.map((c) => MARKETS.find((m) => m.code === c)?.label ?? c).join(', ') : 'Not set', ok: data.markets.length > 0 },
     { label: 'TC',         value: isSolo ? 'Solo mode — TC tasks built into your view' : data.tcName, ok: true },
     { label: 'Lender',     value: data.lenderChoice === 'mountain' ? 'Mountain Mortgage (ARIVE integrated)' : data.lenderChoice === 'other' ? 'Other lender — milestones managed manually' : 'Will configure in Settings', ok: !!data.lenderChoice },
     { label: 'Messages',   value: 'Buyer & seller templates saved', ok: true },
@@ -1245,8 +1265,13 @@ export default function AgentOnboarding() {
 
       case 6: return (
         <MarketBrokerageScreen
-          market={data.market}
-          onChangeMarket={(code) => set('market', code)}
+          markets={data.markets}
+          onChangeMarkets={(codes) => set('markets', codes)}
+          onPersist={(brokerage, markets) => {
+            // Persist company + markets NOW (mid-onboarding, complete:false) so
+            // the forms-upload step a few screens later passes the profile gate.
+            api.patch('/me/profile', { brokerage, markets, complete: false }).catch(() => {});
+          }}
           onContinue={(name, address) => { set('brokerage', name); set('brokerageAddress', address); advance(); }}
         />
       );
@@ -1283,7 +1308,7 @@ export default function AgentOnboarding() {
       );
 
       case 12: return (
-        <DocumentsScreen onContinue={advance} />
+        <DocumentsScreen brokerage={data.brokerage} markets={data.markets} onContinue={advance} />
       );
 
       case 13: return (

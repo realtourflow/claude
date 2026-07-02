@@ -350,52 +350,114 @@ describe("admin form review — correction + approve/reject", () => {
   });
 });
 
-describe("admin form review — promote to market", () => {
-  it("promotes an approved form (promoted=true), then unpromotes", async () => {
+describe("admin form review — promote to a company + market combo", () => {
+  async function seedBrokerage(name = "ARC Realty") {
+    await prisma.brokerages.create({ data: { name, status: "active" } });
+  }
+
+  it("promotes an approved form to a combo, then unpromotes it", async () => {
     await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await seedBrokerage();
     const id = await seedForm(agent.id, [], "ready");
 
-    const res = await action(await actionReq(id, { action: "promote" }), {
-      params: Promise.resolve({ id }),
-    });
+    const res = await action(
+      await actionReq(id, { action: "promote", brokerage: "ARC Realty", market: "HUNTSVILLE" }),
+      { params: Promise.resolve({ id }) }
+    );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { promoted: boolean };
-    expect(body.promoted).toBe(true);
-    expect((await prisma.uploaded_forms.findUnique({ where: { id } }))?.promoted).toBe(true);
+    const body = (await res.json()) as {
+      promotions: { brokerage: string; market: string }[];
+    };
+    expect(body.promotions).toEqual([
+      expect.objectContaining({ brokerage: "ARC Realty", market: "HUNTSVILLE" }),
+    ]);
 
-    const res2 = await action(await actionReq(id, { action: "unpromote" }), {
-      params: Promise.resolve({ id }),
-    });
+    // Idempotent: re-promoting the same combo doesn't duplicate.
+    await action(
+      await actionReq(id, { action: "promote", brokerage: "ARC Realty", market: "HUNTSVILLE" }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(await prisma.form_promotions.count({ where: { form_id: id } })).toBe(1);
+
+    const res2 = await action(
+      await actionReq(id, { action: "unpromote", brokerage: "ARC Realty", market: "HUNTSVILLE" }),
+      { params: Promise.resolve({ id }) }
+    );
     expect(res2.status).toBe(200);
-    expect((await prisma.uploaded_forms.findUnique({ where: { id } }))?.promoted).toBe(false);
+    expect(await prisma.form_promotions.count({ where: { form_id: id } })).toBe(0);
+  });
+
+  it("400 without BOTH company and market (never one or the other)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await seedBrokerage();
+    const id = await seedForm(agent.id, [], "ready");
+
+    for (const body of [
+      { action: "promote" },
+      { action: "promote", brokerage: "ARC Realty" },
+      { action: "promote", market: "HUNTSVILLE" },
+    ]) {
+      const res = await action(await actionReq(id, body), {
+        params: Promise.resolve({ id }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("400 for an unknown market or a company not in the managed list", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await seedBrokerage();
+    const id = await seedForm(agent.id, [], "ready");
+
+    const badMarket = await action(
+      await actionReq(id, { action: "promote", brokerage: "ARC Realty", market: "NOT_A_MARKET" }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(badMarket.status).toBe(400);
+
+    const badCompany = await action(
+      await actionReq(id, { action: "promote", brokerage: "Nonexistent Realty", market: "HUNTSVILLE" }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(badCompany.status).toBe(400);
   });
 
   it("409 when promoting a form that is not approved", async () => {
     await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await seedBrokerage();
     const id = await seedForm(agent.id, [{ needs_review: true }]); // pending_review
-    const res = await action(await actionReq(id, { action: "promote" }), {
-      params: Promise.resolve({ id }),
-    });
+    const res = await action(
+      await actionReq(id, { action: "promote", brokerage: "ARC Realty", market: "HUNTSVILLE" }),
+      { params: Promise.resolve({ id }) }
+    );
     expect(res.status).toBe(409);
   });
 
-  it("detail exposes the promoted flag", async () => {
+  it("detail exposes the promotions list", async () => {
     await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await seedBrokerage();
     const id = await seedForm(agent.id, [], "ready");
-    await action(await actionReq(id, { action: "promote" }), {
-      params: Promise.resolve({ id }),
-    });
+    await action(
+      await actionReq(id, { action: "promote", brokerage: "ARC Realty", market: "HUNTSVILLE" }),
+      { params: Promise.resolve({ id }) }
+    );
     const res = await detail(
       new Request(`http://localhost/api/admin/forms/${id}`, {
         headers: { authorization: await adminHdr() },
       }),
       { params: Promise.resolve({ id }) }
     );
-    const body = (await res.json()) as { promoted: boolean };
-    expect(body.promoted).toBe(true);
+    const body = (await res.json()) as {
+      promotions: { brokerage: string; market: string }[];
+    };
+    expect(body.promotions).toEqual([
+      expect.objectContaining({ brokerage: "ARC Realty", market: "HUNTSVILLE" }),
+    ]);
   });
 });
 
