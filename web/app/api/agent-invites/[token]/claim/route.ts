@@ -1,6 +1,9 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { upsertUser } from "@/lib/users";
+import { sendNotificationEmail } from "@/lib/email";
+
+const ADMIN_NOTIFY_EMAIL = "paul@mountain.mortgage";
 
 type Ctx = { params: Promise<{ token: string }> };
 
@@ -54,6 +57,20 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       SET claimed_at = NOW(), claimed_by = ${user.id}::uuid
       WHERE id = ${invite.id}::uuid
     `;
+
+    // Best-effort: let the admin know a new agent has joined. Never block claim.
+    try {
+      const origin = new URL(req.url).origin;
+      await sendNotificationEmail({
+        to: ADMIN_NOTIFY_EMAIL,
+        subject: `New agent joined: ${claimName}`,
+        heading: "A new agent joined RealTourFlow",
+        body: `${claimName} (${claimEmail}) accepted their agent invite and set up their account.`,
+        dealUrl: `${origin}/admin/users`,
+      });
+    } catch (err) {
+      console.error("failed to send admin new-agent notification", err);
+    }
 
     return json(user);
   })) as Response;

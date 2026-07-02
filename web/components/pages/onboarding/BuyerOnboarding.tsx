@@ -479,7 +479,7 @@ function WelcomeScreen({ agentName, agentAvatar, onStart }: {
           />
         ) : (
           <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-brand-navy text-white text-3xl font-black shadow-md">
-            {agentName[0]}
+            {/^[A-Za-z]/.test(agentName) ? agentName[0] : 'A'}
           </div>
         )}
       </div>
@@ -591,8 +591,11 @@ export default function BuyerOnboarding() {
   const token = searchParams.get('token');
 
   const activeUser = useAuthStore((s) => s.activeUser);
+  const markOnboardingComplete = useAuthStore((s) => s.markOnboardingComplete);
 
-  const [agentName, setAgentName] = useState(searchParams.get('agent') ?? 'Your Agent');
+  // Never seed from the raw `agent` param — it's a UUID. Start generic and
+  // resolve the agent's real name below.
+  const [agentName, setAgentName] = useState('Your Agent');
 
   // Lazy initializers read sessionStorage once at mount. This satisfies the
   // React 19 set-state-in-effect rule — the "resume after Fast Pass" branch
@@ -625,6 +628,26 @@ export default function BuyerOnboarding() {
       .catch(() => {});
   }, [token]);
 
+  // Resolve the agent's real NAME (never a raw UUID). Token links use the effect
+  // above. Otherwise: an `?agent=<id>` link resolves via the public name lookup;
+  // an already-authenticated buyer (account-first flow) resolves from their deal.
+  useEffect(() => {
+    if (token) return;
+    const agentId = searchParams.get('agent');
+    if (agentId) {
+      // Public, unauthenticated-safe — plain fetch bypasses the Auth0 api client.
+      fetch(`/api/agents/${agentId}/public`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { name?: string } | null) => { if (d?.name) setAgentName(d.name); })
+        .catch(() => {});
+    } else if (activeUser) {
+      api.get<{ agent_name: string }[]>('/me/deals')
+        .then((rows) => { if (rows[0]?.agent_name) setAgentName(rows[0].agent_name); })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeUser]);
+
   // On done screen: persist contact info + claim invite (which advances stage + creates task + notifies agent)
   const hasSubmittedRef = useRef(false);
   useEffect(() => {
@@ -635,7 +658,13 @@ export default function BuyerOnboarding() {
     const phone = data.contactPhone;
     const email = activeUser?.email || data.contactEmail;
 
-    if (phone || name) {
+    if (activeUser) {
+      // Authenticated buyer finishing onboarding: persist any contact edits and
+      // mark onboarding complete. The PATCH flips onboarding_complete
+      // server-side so next login routes straight to their dashboard.
+      api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
+      markOnboardingComplete();
+    } else if (phone || name) {
       api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
     }
 
