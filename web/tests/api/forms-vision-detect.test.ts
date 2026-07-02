@@ -83,6 +83,14 @@ afterEach(() => {
   setVisionDetectorForTesting(undefined);
 });
 
+// Uploading requires a declared company + market (the profile gate).
+async function onboard(agentId: string) {
+  await prisma.users.update({
+    where: { id: agentId },
+    data: { brokerage: "ARC Realty", market: "BIRMINGHAM_AAR", markets: ["BIRMINGHAM_AAR"] },
+  });
+}
+
 async function uploadFlat(agentId: string, withType = true) {
   return createForm(
     new Request("http://localhost/api/me/forms", {
@@ -104,6 +112,7 @@ async function uploadFlat(agentId: string, withType = true) {
 describe("guided-vision detect job (Phase 3, pt 2b)", () => {
   it("flat + typed + unrecognized upload → 'detecting' (no fields yet)", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     const res = await uploadFlat(agent.id);
     expect(res.status).toBe(201);
     const body = (await res.json()) as { id: string; status: string; field_count: number };
@@ -118,6 +127,7 @@ describe("guided-vision detect job (Phase 3, pt 2b)", () => {
 
   it("the background job locates fields, maps them from the type, and flips to pending_review", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     const { id } = (await (await uploadFlat(agent.id)).json()) as { id: string };
 
     // (>=1: the pgboss queue persists across tests, so a prior test's orphan job
@@ -146,6 +156,7 @@ describe("guided-vision detect job (Phase 3, pt 2b)", () => {
 
   it("is idempotent — re-processing a finished form writes nothing new", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     const { id } = (await (await uploadFlat(agent.id)).json()) as { id: string };
     await processFormDetectJobs({ limit: 5 });
     // a stray re-run of the job is a no-op (status is no longer 'detecting')
@@ -155,6 +166,7 @@ describe("guided-vision detect job (Phase 3, pt 2b)", () => {
 
   it("a 'detecting' form with no type doesn't strand — flips to pending_review empty", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     const form = await prisma.uploaded_forms.create({
       data: {
         agent_id: agent.id,
@@ -179,6 +191,7 @@ describe("guided-vision detect job (Phase 3, pt 2b)", () => {
 
   it("rejects a flat upload with NO declared type (can't guide vision)", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
     const res = await uploadFlat(agent.id, false);
     expect(res.status).toBe(422);
     expect(await prisma.uploaded_forms.count()).toBe(0);

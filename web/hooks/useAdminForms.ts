@@ -78,6 +78,8 @@ export type AdminFormDetail = {
   docusign_template_id: string | null;
   detection_source: string; // "acroform" | "recognized" | "vision"
   placement_confirmed_at: string | null;
+  // Company + market combos this form is promoted to (always both together).
+  promotions: { id: string; brokerage: string; market: string }[];
   preview_url: string;
   pages: Array<{ page: number; width: number; height: number }>;
   core_keys: CoreKey[];
@@ -183,6 +185,21 @@ export function useAdminForm(id: string | null) {
     void queryClient.invalidateQueries({ queryKey: ["admin-forms"] });
   }
 
+  // Promote an APPROVED form to company + market combos (always both together);
+  // several markets can be granted in one call — each becomes its own combo row.
+  // Every agent whose profile matches gets it automatically — now and later.
+  async function promote(brokerage: string, markets: string[]): Promise<void> {
+    await api.post(`/admin/forms/${id}`, { action: "promote", brokerage, markets });
+    await query.refetch();
+    void queryClient.invalidateQueries({ queryKey: ["admin-forms"] });
+  }
+
+  async function unpromote(brokerage: string, market: string): Promise<void> {
+    await api.post(`/admin/forms/${id}`, { action: "unpromote", brokerage, market });
+    await query.refetch();
+    void queryClient.invalidateQueries({ queryKey: ["admin-forms"] });
+  }
+
   return {
     detail: query.data,
     loading: query.isLoading,
@@ -194,6 +211,8 @@ export function useAdminForm(id: string | null) {
     confirmPlacement,
     approve,
     reject,
+    promote,
+    unpromote,
     refetch: () => query.refetch(),
   };
 }

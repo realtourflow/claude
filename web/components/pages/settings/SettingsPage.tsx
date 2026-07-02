@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Image from "next/image";
+import { api } from "@/lib/api-client";
 import {
   User, Store, Bell, Plug, Star, Pencil, Trash2,
   ChevronUp, ChevronDown, Plus, X, Check, ExternalLink,
@@ -9,8 +10,9 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from "@/lib/store/authStore";
 import { useTC, useMyAgents } from "@/hooks/useTC";
-import { useAgentDocs, DocType, DOC_TYPE_LABELS, AgentDocTemplate } from "@/hooks/useAgentDocs";
 import { MyFormsSection } from "@/components/pages/settings/MyFormsSection";
+import MarketMultiSelect from "@/components/MarketMultiSelect";
+import { BROKERAGE_FALLBACK } from "@/lib/brokerages";
 import {
   VendorCategory,
   VENDOR_CATEGORY_LABELS,
@@ -22,11 +24,10 @@ import { useMLSConnection } from "@/hooks/useMLS";
 import { uploadAgentPhoto } from "@/hooks/useAgentPhoto";
 import { useIntegrations } from "@/hooks/useIntegrations";
 import { settingsTabFromSearch } from "@/lib/settings-nav";
-import { MARKETS } from "@/lib/markets";
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'profile' | 'tc' | 'vendors' | 'my_agents' | 'notifications' | 'integrations' | 'documents' | 'forms';
+type Tab = 'profile' | 'tc' | 'vendors' | 'my_agents' | 'notifications' | 'integrations' | 'forms';
 
 // Tabs vary by role — built dynamically in the main component
 
@@ -445,10 +446,34 @@ function ProfileSection() {
     phone: '',
     title: '',
     licenseNumber: '',
-    market: '',
-    brokerage: '',
     bio: '',
   });
+  const [markets, setMarkets] = useState<string[]>([]);
+  const [brokerage, setBrokerage] = useState('');
+  const [brokerageOther, setBrokerageOther] = useState(false);
+  // Company + markets hydrate from GET /me/profile — the SOURCE OF TRUTH (the
+  // settings JSON blob can be stale/missing) — and are only sent on Save after
+  // hydration, so a failed fetch can never wipe the profile columns.
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  useEffect(() => {
+    api.get<{ markets?: string[]; market?: string; brokerage?: string }>('/me/profile')
+      .then((p) => {
+        const saved = Array.isArray(p.markets) ? p.markets : [];
+        setMarkets(saved.length > 0 ? saved : p.market ? [p.market] : []);
+        setBrokerage(p.brokerage ?? '');
+        setProfileLoaded(true);
+      })
+      .catch(() => {});
+  }, []);
+  // Managed company list (seeded fallback while the fetch resolves); the saved
+  // value may be an admin-pending "Other" name — the picker shows it via the
+  // Other input once both fetches have settled.
+  const [companies, setCompanies] = useState<string[]>(BROKERAGE_FALLBACK);
+  useEffect(() => {
+    api.get<string[]>('/brokerages')
+      .then((names) => { if (names.length > 0) setCompanies(names); })
+      .catch(() => {});
+  }, []);
   const [photoUrl, setPhotoUrl] = useState<string>('');
   const [photoUploading, setPhotoUploading] = useState(false);
   const [photoErr, setPhotoErr] = useState('');
@@ -468,8 +493,6 @@ function ProfileSection() {
       phone: (settings.phone as string) ?? '',
       title: (settings.title as string) ?? '',
       licenseNumber: (settings.licenseNumber as string) ?? '',
-      market: (settings.market as string) ?? '',
-      brokerage: (settings.brokerage as string) ?? '',
       bio: (settings.bio as string) ?? '',
     }));
     setPhotoUrl((settings.photoUrl as string) ?? '');
@@ -480,16 +503,16 @@ function ProfileSection() {
     try {
       await Promise.all([
         saveProfile(form.name, form.phone, {
-          market: form.market,
-          brokerage: form.brokerage,
+          // Only write company/markets once hydrated from the profile — an
+          // unresolved fetch must never wipe them (undefined = leave unchanged).
+          ...(profileLoaded ? { markets, brokerage } : {}),
         }),
         saveSettings({
           name: form.name,
           phone: form.phone,
           title: form.title,
           licenseNumber: form.licenseNumber,
-          market: form.market,
-          brokerage: form.brokerage,
+          ...(profileLoaded ? { markets, brokerage } : {}),
           bio: form.bio,
         }),
       ]);
@@ -584,7 +607,6 @@ function ProfileSection() {
           { label: 'Phone', key: 'phone', placeholder: '(205) 555-0100' },
           { label: 'Title', key: 'title', placeholder: 'e.g. Realtor, Senior Agent' },
           { label: 'License #', key: 'licenseNumber', placeholder: 'e.g. AL-012345' },
-          { label: 'Brokerage', key: 'brokerage', placeholder: 'e.g. RE/MAX, Keller Williams' },
         ].map(({ label, key, placeholder }) => (
           <div key={key} className="flex items-center gap-4 px-5 py-3.5">
             <label className="w-28 flex-shrink-0 text-xs font-semibold text-gray-400 uppercase tracking-wide">
@@ -599,21 +621,49 @@ function ProfileSection() {
           </div>
         ))}
 
-        {/* Market — drives which board contract forms this agent can send */}
+        {/* Company — from the managed list; "Other" queues the typed name for
+            admin review into the dropdown. */}
         <div className="flex items-center gap-4 px-5 py-3.5">
           <label className="w-28 flex-shrink-0 text-xs font-semibold text-gray-400 uppercase tracking-wide">
-            Market
+            Company
           </label>
-          <select
-            value={form.market}
-            onChange={(e) => setForm((f) => ({ ...f, market: e.target.value }))}
-            className="flex-1 rounded-lg border border-transparent bg-gray-50 px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-navy/20 focus:bg-white focus:ring-2 focus:ring-brand-navy/10 transition-all"
-          >
-            <option value="">Select your market…</option>
-            {MARKETS.map((m) => (
-              <option key={m.code} value={m.code}>{m.label}</option>
-            ))}
-          </select>
+          <div className="flex-1 space-y-2">
+            <select
+              value={brokerageOther || (brokerage && !companies.includes(brokerage)) ? '__other__' : brokerage}
+              onChange={(e) => {
+                if (e.target.value === '__other__') {
+                  setBrokerageOther(true);
+                } else {
+                  setBrokerageOther(false);
+                  setBrokerage(e.target.value);
+                }
+              }}
+              className="w-full rounded-lg border border-transparent bg-gray-50 px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-navy/20 focus:bg-white focus:ring-2 focus:ring-brand-navy/10 transition-all"
+            >
+              <option value="">Select your company…</option>
+              {companies.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+              <option value="__other__">Other…</option>
+            </select>
+            {(brokerageOther || (brokerage !== '' && !companies.includes(brokerage))) && (
+              <input
+                value={brokerage}
+                onChange={(e) => setBrokerage(e.target.value)}
+                placeholder="Type your company name"
+                className="w-full rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-navy/20 focus:ring-2 focus:ring-brand-navy/10 transition-all"
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Markets — multi-select; the first pick is the primary market that
+            drives board contract forms. */}
+        <div className="px-5 py-3.5">
+          <label className="mb-2 block text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Market(s) <span className="font-normal normal-case text-gray-300">select all you serve</span>
+          </label>
+          <MarketMultiSelect selected={markets} onChange={setMarkets} />
         </div>
 
         {/* Bio */}
@@ -1384,207 +1434,6 @@ function MyAgentsSection({ tcUserId: _tcUserId }: { tcUserId: string }) {
   );
 }
 
-// ─── Documents Section ────────────────────────────────────────────────────────
-
-const ALL_DOC_TYPES: DocType[] = ['baa', 'listing_agreement', 'purchase_contract', 'disclosure', 'other'];
-
-function DocumentsSection({ agentId: _agentId }: { agentId: string }) {
-  const { docs, loading, uploadDoc, updateDoc, removeDoc, getDownloadUrl } = useAgentDocs();
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formDocType, setFormDocType] = useState<DocType>('baa');
-  const [formName, setFormName]       = useState('');
-  const [formNotes, setFormNotes]     = useState('');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadErr, setUploadErr] = useState('');
-
-  async function handleAdd() {
-    if (!selectedFile || uploading) return;
-    // Reject obviously bad files early.
-    const ALLOWED = ['.pdf', '.doc', '.docx'];
-    const ext = selectedFile.name.toLowerCase().slice(selectedFile.name.lastIndexOf('.'));
-    if (!ALLOWED.includes(ext)) {
-      setUploadErr(`Unsupported file type "${ext}". Use PDF, DOC, or DOCX.`);
-      return;
-    }
-    if (selectedFile.size > 25 * 1024 * 1024) {
-      setUploadErr('File is too large — max 25 MB.');
-      return;
-    }
-    setUploading(true);
-    setUploadErr('');
-    try {
-      await uploadDoc(selectedFile, formDocType, formName, formNotes);
-      setShowAddForm(false);
-      setFormName(''); setFormNotes(''); setFormDocType('baa'); setSelectedFile(null);
-    } catch (e) {
-      setUploadErr(e instanceof Error ? `Upload failed — ${e.message}` : 'Upload failed — please try again.');
-    }
-    setUploading(false);
-  }
-
-  async function handleSaveEdit(doc: AgentDocTemplate) {
-    await updateDoc(doc.id, {
-      name: formName.trim() || undefined,
-      notes: formNotes.trim() || null,
-    }).catch(() => {});
-    setEditingId(null);
-  }
-
-  async function handleDownload(id: string) {
-    try {
-      const url = await getDownloadUrl(id);
-      window.open(url, '_blank');
-    } catch {}
-  }
-
-  const DOC_TYPE_ICON_COLOR: Record<DocType, string> = {
-    baa:               'bg-blue-100 text-blue-600',
-    listing_agreement: 'bg-purple-100 text-purple-600',
-    purchase_contract: 'bg-green-100 text-green-600',
-    disclosure:        'bg-amber-100 text-amber-600',
-    other:             'bg-gray-100 text-gray-500',
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-base font-bold text-brand-navy">Document Templates</h2>
-          <p className="text-xs text-gray-400 mt-0.5">Templates sent to clients at the right stage of their deal</p>
-        </div>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-brand-navy px-3 py-2 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors"
-        >
-          <Plus size={13} /> Add template
-        </button>
-      </div>
-
-      {/* Add form */}
-      {showAddForm && (
-        <div className="rounded-xl border border-brand-navy/20 bg-brand-navy/5 p-4 space-y-3">
-          <p className="text-xs font-bold text-brand-navy uppercase tracking-wide">New Template</p>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Document Type</label>
-            <select value={formDocType} onChange={(e) => setFormDocType(e.target.value as DocType)}
-              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none text-brand-navy">
-              {ALL_DOC_TYPES.map((t) => <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Display Name (optional)</label>
-            <input value={formName} onChange={(e) => setFormName(e.target.value)}
-              placeholder={DOC_TYPE_LABELS[formDocType]}
-              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none text-brand-navy placeholder:text-gray-300" />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">Notes (optional)</label>
-            <input value={formNotes} onChange={(e) => setFormNotes(e.target.value)}
-              placeholder="e.g. Valid 90 days from signing"
-              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none text-brand-navy placeholder:text-gray-300" />
-          </div>
-          <div>
-            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wide mb-1">File <span className="text-red-400">*</span></label>
-            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-500 hover:border-brand-navy/30 hover:bg-gray-50 transition-colors">
-              <Upload size={14} className="text-gray-400" />
-              {selectedFile ? selectedFile.name : 'Choose file…'}
-              <input type="file" className="hidden"
-                accept=".pdf,.doc,.docx"
-                onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)} />
-            </label>
-          </div>
-          {uploadErr && <p className="text-xs text-red-500">{uploadErr}</p>}
-          <div className="flex items-center gap-2 pt-1">
-            <button
-              onClick={handleAdd}
-              disabled={!selectedFile || uploading}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-navy py-2 text-sm font-bold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-40">
-              <Upload size={13} /> {uploading ? 'Uploading…' : 'Upload template'}
-            </button>
-            <button onClick={() => { setShowAddForm(false); setFormName(''); setFormNotes(''); setSelectedFile(null); setUploadErr(''); }}
-              className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 transition-colors">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Template list */}
-      {loading ? (
-        <div className="rounded-xl border border-dashed border-gray-200 px-5 py-6 text-center">
-          <p className="text-sm text-gray-300">Loading…</p>
-        </div>
-      ) : docs.length === 0 && !showAddForm ? (
-        <div className="rounded-xl border border-dashed border-gray-200 px-5 py-10 text-center">
-          <FileText size={28} className="mx-auto mb-2 text-gray-200" />
-          <p className="text-sm font-semibold text-gray-400">No templates yet</p>
-          <p className="mt-1 text-xs text-gray-300">Add your buyer agency agreement, listing agreement, and more.</p>
-        </div>
-      ) : null}
-
-      <div className="space-y-2">
-        {docs.map((doc) => {
-          const isEditing = editingId === doc.id;
-          return (
-            <div key={doc.id} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-              <div className="flex items-start gap-3 p-4">
-                <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${DOC_TYPE_ICON_COLOR[doc.docType]}`}>
-                  <FileText size={16} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  {isEditing ? (
-                    <div className="space-y-2">
-                      <input value={formName} onChange={(e) => setFormName(e.target.value)}
-                        className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm outline-none text-brand-navy" />
-                      <input value={formNotes} onChange={(e) => setFormNotes(e.target.value)}
-                        placeholder="Notes (optional)"
-                        className="w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs outline-none text-gray-600 placeholder:text-gray-300" />
-                      <div className="flex gap-2">
-                        <button onClick={() => handleSaveEdit(doc)}
-                          className="rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors">Save</button>
-                        <button onClick={() => setEditingId(null)}
-                          className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50 transition-colors">Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-sm font-semibold text-brand-navy">{doc.name}</p>
-                      <button
-                        onClick={() => handleDownload(doc.id)}
-                        className="flex items-center gap-1 text-xs text-brand-navy/60 hover:text-brand-navy transition-colors mt-0.5 truncate max-w-full"
-                      >
-                        <ExternalLink size={10} className="flex-shrink-0" /> {doc.fileName}
-                      </button>
-                      {doc.notes && <p className="text-xs text-gray-400 italic mt-0.5">{doc.notes}</p>}
-                      <p className="text-[10px] text-gray-300 mt-1">
-                        Added {new Date(doc.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </p>
-                    </>
-                  )}
-                </div>
-                {!isEditing && (
-                  <div className="flex-shrink-0 flex gap-1.5">
-                    <button onClick={() => { setEditingId(doc.id); setFormName(doc.name); setFormNotes(doc.notes ?? ''); }}
-                      className="text-gray-400 hover:text-brand-navy transition-colors p-1">
-                      <Pencil size={13} />
-                    </button>
-                    <button onClick={() => removeDoc(doc.id)}
-                      className="text-gray-300 hover:text-red-400 transition-colors p-1">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -1597,7 +1446,6 @@ export default function SettingsPage() {
     { id: 'profile',   label: 'Profile',                  icon: <User size={15} /> },
     ...(isAgent ? [{ id: 'tc' as Tab,        label: 'Transaction Coordinator', icon: <UserCheck size={15} /> }] : []),
     ...(isAgent ? [{ id: 'vendors' as Tab,   label: 'My Vendors',             icon: <Store size={15} /> }] : []),
-    ...(isAgent ? [{ id: 'documents' as Tab, label: 'Documents',              icon: <FileText size={15} /> }] : []),
     ...(isAgent ? [{ id: 'forms' as Tab,     label: 'My Forms',               icon: <FileSignature size={15} /> }] : []),
     ...(isTC    ? [{ id: 'my_agents' as Tab, label: 'My Agents',              icon: <Users size={15} /> }] : []),
     { id: 'notifications', label: 'Notifications', icon: <Bell size={15} /> },
@@ -1642,7 +1490,6 @@ export default function SettingsPage() {
       {tab === 'profile'        && <ProfileSection />}
       {tab === 'tc'             && <TransactionCoordinatorSection agentId={agentId} />}
       {tab === 'vendors'        && <VendorsSection agentId={agentId} />}
-      {tab === 'documents'      && <DocumentsSection agentId={agentId} />}
       {tab === 'forms'          && <MyFormsSection />}
       {tab === 'my_agents'      && <MyAgentsSection tcUserId={activeUser?.id ?? 'tc-taylor'} />}
       {tab === 'notifications'  && <NotificationsSection />}

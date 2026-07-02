@@ -104,8 +104,18 @@ describe("form types — pick-the-type upload (Phase 2)", () => {
     expect(pa).not.toHaveProperty("field_set"); // only the pickable label, not the answer key
   });
 
-  it("upload with a valid form_type records the type link", async () => {
+  
+// Uploading requires a declared company + market (the profile gate).
+async function onboard(agentId: string) {
+  await prisma.users.update({
+    where: { id: agentId },
+    data: { brokerage: "ARC Realty", market: "BIRMINGHAM_AAR", markets: ["BIRMINGHAM_AAR"] },
+  });
+}
+
+it("upload with a valid form_type records the type link", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|t" });
+    await onboard(agent.id);
     const res = await postForm(agent.id, PURCHASE_AGREEMENT_KEY);
     expect(res.status).toBe(201);
     const { id } = (await res.json()) as { id: string };
@@ -124,6 +134,7 @@ describe("form types — pick-the-type upload (Phase 2)", () => {
 
   it("still accepts an upload with no form_type (type link null)", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|t" });
+    await onboard(agent.id);
     const res = await postForm(agent.id);
     expect(res.status).toBe(201);
     const { id } = (await res.json()) as { id: string };

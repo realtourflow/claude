@@ -136,6 +136,7 @@ const ADMIN_NAV = [
   { label: 'ARIVE Status', icon: Activity, href: '/admin/arive' },
   { label: 'User Management', icon: Users, href: '/admin/users' },
   { label: 'Form Review', icon: ClipboardList, href: '/admin/forms' },
+  { label: 'Companies', icon: UserPlus, href: '/admin/brokerages' },
   { label: 'Promotions', icon: Tag, href: '/admin/promotions' },
   { label: 'System Config', icon: Sliders, href: '/admin/config' },
   { label: 'Audit Log', icon: ScrollText, href: '/admin/audit' },

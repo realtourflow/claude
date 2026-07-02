@@ -15,6 +15,7 @@ import {
 import { CORE_KEYS } from "@/lib/form-ai/core-keys";
 import { rememberApprovedForm } from "@/lib/remember-form";
 import { KnownFormConflictError } from "@/lib/known-forms";
+import { isValidMarket } from "@/lib/markets";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -43,6 +44,10 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
         docusign_template_id: true,
         detection_source: true,
         placement_confirmed_at: true,
+        form_promotions: {
+          select: { id: true, brokerage: true, market: true },
+          orderBy: [{ brokerage: "asc" }, { market: "asc" }],
+        },
         form_type_id: true,
         users_uploaded_forms_agent_idTousers: {
           select: { name: true, email: true },
@@ -136,6 +141,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       placement_confirmed_at: form.placement_confirmed_at
         ? form.placement_confirmed_at.toISOString()
         : null,
+      promotions: form.form_promotions,
       preview_url: previewUrl,
       pages,
       core_keys: CORE_KEYS,
@@ -158,9 +164,16 @@ type SignersOverride = {
   consumer_roles?: string[];
 };
 type ActionBody = {
-  action?: "approve" | "reject";
+  action?: "approve" | "reject" | "promote" | "unpromote";
   review_notes?: string;
   signers?: SignersOverride;
+  // promote/unpromote: the company + market combo(s). ALWAYS both together — a
+  // promotion is never company-only or market-only. `markets` promotes the same
+  // company across several markets in one call (each stored as its own combo);
+  // `market` is the single-market form of the same thing.
+  brokerage?: string;
+  market?: string;
+  markets?: string[];
 };
 
 // POST /api/admin/forms/:id — the review gate. action=approve resolves the
@@ -181,8 +194,72 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     } catch {
       return error("action is required", 400);
     }
+    // Promote / unpromote — share an already-APPROVED form with every agent whose
+    // profile matches a COMPANY + MARKET combo (both together, always). Matching
+    // is computed live from agent profiles, so agents who onboard later with the
+    // same company + market get the form automatically. A separate admin lever
+    // from approve: approve makes the form usable by its owning agent only.
+    if (body.action === "promote" || body.action === "unpromote") {
+      const brokerage = (body.brokerage ?? "").trim();
+      // One market or SEVERAL at once (a form is often good in multiple markets —
+      // the UI can tick many, or all). Each stored promotion row is still one
+      // company + one market combo; visibility matching is unchanged.
+      const markets = [
+        ...new Set(
+          (body.markets ?? (body.market ? [body.market] : []))
+            .filter((m): m is string => typeof m === "string")
+            .map((m) => m.trim())
+            .filter(Boolean)
+        ),
+      ];
+      if (!brokerage || markets.length === 0) {
+        return error("a promotion needs both a company and at least one market", 400);
+      }
+      const badMarket = markets.find((m) => !isValidMarket(m));
+      if (badMarket !== undefined) return error(`unknown market: ${badMarket}`, 400);
+
+      const target = await prisma.uploaded_forms.findUnique({
+        where: { id },
+        select: { status: true },
+      });
+      if (!target) return error("form not found", 404);
+      if (target.status !== "ready") {
+        return error("only approved forms can be promoted", 409);
+      }
+
+      if (body.action === "promote") {
+        // Promotions target a company from the managed list (active only).
+        const known = await prisma.brokerages.findFirst({
+          where: { name: brokerage, status: "active" },
+          select: { id: true },
+        });
+        if (!known) return error("unknown company — add it to the list first", 400);
+        // Idempotent: re-promoting an existing combo is a no-op.
+        await prisma.form_promotions.createMany({
+          data: markets.map((market) => ({
+            form_id: id,
+            brokerage,
+            market,
+            created_by: adminId,
+          })),
+          skipDuplicates: true,
+        });
+      } else {
+        await prisma.form_promotions.deleteMany({
+          where: { form_id: id, brokerage, market: { in: markets } },
+        });
+      }
+
+      const promotions = await prisma.form_promotions.findMany({
+        where: { form_id: id },
+        select: { id: true, brokerage: true, market: true },
+        orderBy: [{ brokerage: "asc" }, { market: "asc" }],
+      });
+      return json({ id, promotions });
+    }
+
     if (body.action !== "approve" && body.action !== "reject") {
-      return error("action must be approve or reject", 400);
+      return error("action must be approve, reject, or promote", 400);
     }
 
     const form = await prisma.uploaded_forms.findUnique({

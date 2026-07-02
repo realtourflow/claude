@@ -1,27 +1,43 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
+import { hasRole } from "@/lib/roles";
 import { getObjectBytes, getObjectSize, deleteObject } from "@/lib/s3";
-import { extractAcroFields } from "@/lib/form-ai/extract";
-import { PDFDocument } from "pdf-lib";
-import {
-  matchKnownForm,
-  matchFlatKnownForm,
-  matchTextLayoutKnownForm,
-  TEXT_LAYOUT_MATCH_THRESHOLD,
-  copyKnownFields,
-  type KnownFormRow,
-} from "@/lib/known-forms";
-import { extractPdfText } from "@/lib/pdf-text";
-import { computeTextFingerprint } from "@/lib/text-layout";
-import { enqueueFormDetectJob } from "@/lib/queue";
 import {
   FORM_SIDES,
   type FormSide,
   getAttestationStatement,
-  runFieldPipeline,
   sha256Hex,
 } from "@/lib/uploaded-forms";
+import {
+  createUploadedForm,
+  FormTypeRequiredError,
+  FormDetectEnqueueError,
+} from "@/lib/create-uploaded-form";
+import { sendNotificationEmail } from "@/lib/email";
+
+const ADMIN_NOTIFY_EMAIL = "paul@mountain.mortgage";
+
+// Best-effort: tell the admin an agent uploaded a form that needs Vision
+// field-placement review. A delivery failure must never fail the upload.
+async function notifyAdminOfFormUpload(opts: {
+  origin: string;
+  agentName: string;
+  agentEmail: string;
+  label: string;
+}): Promise<void> {
+  try {
+    await sendNotificationEmail({
+      to: ADMIN_NOTIFY_EMAIL,
+      subject: `New form to review from ${opts.agentName}`,
+      heading: "An agent uploaded a form for review",
+      body: `${opts.agentName} (${opts.agentEmail}) uploaded "${opts.label}" for review. Open Admin → Form Review to place the fields and approve it.`,
+      dealUrl: `${opts.origin}/admin/forms`,
+    });
+  } catch (err) {
+    console.error("failed to send admin form-upload notification", err);
+  }
+}
 
 // Bound the work this route does on untrusted upload bytes (it loads them into
 // pdf-lib AND pdfjs). Cap the function time and reject an oversized object before
@@ -87,6 +103,9 @@ type CreateBody = {
   // The document type the agent declared ("this is my purchase agreement"). Its
   // key in form_types; selects the field set guided vision will locate (Phase 3).
   form_type?: string;
+  // True when this is ONE combined PDF holding several forms — the admin splits it
+  // into individual forms by page range in Form Review (no field detection here).
+  bundle?: boolean;
 };
 
 // POST /api/me/forms — confirm an uploaded blank form. Requires the licensing
@@ -161,65 +180,36 @@ export async function POST(req: Request): Promise<Response> {
         return error("uploaded file not found", 400);
       }
 
-      const fields = await extractAcroFields(bytes);
-
-      const statement = await getAttestationStatement();
       const agentUser = await prisma.users.findUnique({
         where: { id: userId },
-        select: { market: true },
+        select: { market: true, markets: true, brokerage: true, name: true, email: true },
       });
       const agentMarket = agentUser?.market ?? "";
+      const agentName = agentUser?.name || agentUser?.email || "An agent";
+      const agentEmail = agentUser?.email ?? "";
+      const origin = new URL(req.url).origin;
 
-      // Recognition (Layer 1): consult the known-forms catalog FIRST. FILLABLE
-      // PDFs match by AcroForm structure. FLAT PDFs (no fields) match by exact
-      // CONTENT HASH and then, if that misses, by TEXT-LAYOUT similarity — so a
-      // re-saved / re-exported same-layout copy (different bytes) still matches a
-      // known form (e.g. the seeded FORM 300) and gets its exact placement, no
-      // vision. A hit pre-fills the verified field map and skips the AI mapper.
-      // Best-effort: errors fall through and never 500. Never auto-approves.
-      let fingerprint = "";
-      let known: KnownFormRow | null = null;
-      try {
-        if (fields.length === 0) {
-          const r = await matchFlatKnownForm({ bytes, market: agentMarket });
-          fingerprint = r.fingerprint;
-          known = r.known;
-          if (!known) {
-            // Content hash missed → text similarity. pdfjs runs on Vercel (no poppler).
-            const tf = computeTextFingerprint(await extractPdfText(bytes));
-            const t = await matchTextLayoutKnownForm({
-              fingerprint: tf,
-              market: agentMarket,
-              threshold: TEXT_LAYOUT_MATCH_THRESHOLD,
-            });
-            known = t.best;
-          }
-        } else {
-          const pageCount = (
-            await PDFDocument.load(bytes, { ignoreEncryption: true })
-          ).getPageCount();
-          const r = await matchKnownForm({ fields, pageCount, market: agentMarket });
-          fingerprint = r.fingerprint;
-          known = r.known;
-        }
-      } catch (err) {
-        console.error("form recognition failed; using AI pipeline", err);
-      }
-
-      // A FLAT upload we don't recognize → GUIDED VISION. It needs the agent's
-      // declared type to know which field set to locate. Create the form in
-      // 'detecting' and run vision in the background (N model calls won't fit this
-      // request); it flips to pending_review when done, where the MANDATORY
-      // placement overlay gates it (detection_source='vision').
-      if (fields.length === 0 && !known) {
-        if (!formTypeId) {
+      // An agent must have declared their company and market(s) before uploading
+      // any forms — promotion matching and board scoping both depend on them.
+      // Admins are exempt (they upload on agents' behalf via the split flow).
+      if (!hasRole(claims.roles, ["admin"])) {
+        const agentMarkets = Array.isArray(agentUser?.markets)
+          ? (agentUser.markets as string[])
+          : [];
+        if (!agentUser?.brokerage || (agentMarkets.length === 0 && !agentMarket)) {
           await deleteObject(body.s3_key);
           return error(
-            "pick the document type so we can detect this form's fields",
+            "set your company and market in your profile before uploading forms",
             422
           );
         }
-        const visionForm = await prisma.uploaded_forms.create({
+      }
+
+      // BUNDLE: one combined PDF (e.g. "all buyer docs"). We do NOT detect fields —
+      // the admin carves it into individual forms by page range in Form Review.
+      if (body.bundle === true) {
+        const statement = await getAttestationStatement();
+        const bundle = await prisma.uploaded_forms.create({
           data: {
             agent_id: userId,
             label,
@@ -230,10 +220,8 @@ export async function POST(req: Request): Promise<Response> {
             mime_type: body.mime_type ?? "application/pdf",
             file_size: bytes.length,
             file_sha256: sha256Hex(bytes),
-            structure_sha256: fingerprint,
-            form_type_id: formTypeId,
-            detection_source: "vision",
-            status: "detecting",
+            detection_source: "bundle",
+            status: "pending_split",
             attested_by: userId,
             attestation_statement: statement,
           },
@@ -246,24 +234,15 @@ export async function POST(req: Request): Promise<Response> {
             created_at: true,
           },
         });
-        try {
-          await enqueueFormDetectJob(visionForm.id);
-        } catch (err) {
-          // The job row is the durability record — if we can't enqueue, don't
-          // strand a 'detecting' form. Roll back and ask the agent to retry.
-          console.error("failed to enqueue vision detect job", err);
-          await prisma.uploaded_forms.delete({ where: { id: visionForm.id } });
-          await deleteObject(body.s3_key);
-          return error("couldn't start form detection — please try again", 503);
-        }
+        await notifyAdminOfFormUpload({ origin, agentName, agentEmail, label: bundle.label });
         return json(
           {
-            id: visionForm.id,
-            label: visionForm.label,
-            side: visionForm.side,
-            status: visionForm.status,
-            source_file_name: visionForm.source_file_name,
-            created_at: visionForm.created_at.toISOString(),
+            id: bundle.id,
+            label: bundle.label,
+            side: bundle.side,
+            status: bundle.status,
+            source_file_name: bundle.source_file_name,
+            created_at: bundle.created_at.toISOString(),
             field_count: 0,
             needs_review_count: 0,
           },
@@ -271,65 +250,49 @@ export async function POST(req: Request): Promise<Response> {
         );
       }
 
-      const form = await prisma.uploaded_forms.create({
-        data: {
-          agent_id: userId,
+      // Recognition (known-forms) → exact AcroForm → guided vision. Shared with
+      // the admin bundle-split via createUploadedForm so both paths place fields
+      // identically.
+      let result;
+      try {
+        result = await createUploadedForm({
+          agentId: userId,
+          s3Key: body.s3_key,
+          bytes,
           label,
           side,
-          // A recognized form inherits the catalog's market; otherwise default to
-          // the agent's market (recorded from day one to avoid a backfill).
-          board: known?.board ?? agentMarket,
-          source_s3_key: body.s3_key,
-          source_file_name: body.file_name ?? "",
-          mime_type: body.mime_type ?? "application/pdf",
-          file_size: bytes.length,
-          file_sha256: sha256Hex(bytes),
-          structure_sha256: fingerprint,
-          recognized_from_known_form_id: known?.id ?? null,
-          form_type_id: formTypeId,
-          // Trusted positions: catalog (recognized) or exact AcroForm rects — no
-          // vision, so no placement gate (detection_source defaults handle that).
-          detection_source: known ? "recognized" : "acroform",
-          attested_by: userId,
-          attestation_statement: statement,
-          ...(known?.role_mapping
-            ? { role_mapping: known.role_mapping as object }
-            : {}),
-        },
-        select: {
-          id: true,
-          label: true,
-          side: true,
-          status: true,
-          source_file_name: true,
-          created_at: true,
-        },
-      });
-
-      // Recognized → copy the verified field map (no AI call). Else AI pipeline.
-      // A copy failure falls back to the pipeline so the upload never 500s.
-      let counts: { fieldCount: number; needsReviewCount: number };
-      if (known) {
-        try {
-          counts = await copyKnownFields(form.id, known);
-        } catch (err) {
-          console.error("copyKnownFields failed; using AI pipeline", err);
-          counts = await runFieldPipeline({ formId: form.id, side, fields });
+          formTypeId,
+          market: agentMarket,
+          fileName: body.file_name ?? "",
+          mimeType: body.mime_type ?? "application/pdf",
+        });
+      } catch (err) {
+        if (err instanceof FormTypeRequiredError) {
+          await deleteObject(body.s3_key);
+          return error(
+            "pick the document type so we can detect this form's fields",
+            422
+          );
         }
-      } else {
-        counts = await runFieldPipeline({ formId: form.id, side, fields });
+        if (err instanceof FormDetectEnqueueError) {
+          await deleteObject(body.s3_key);
+          return error("couldn't start form detection — please try again", 503);
+        }
+        throw err;
       }
+
+      await notifyAdminOfFormUpload({ origin, agentName, agentEmail, label: result.label });
 
       return json(
         {
-          id: form.id,
-          label: form.label,
-          side: form.side,
-          status: form.status,
-          source_file_name: form.source_file_name,
-          created_at: form.created_at.toISOString(),
-          field_count: counts.fieldCount,
-          needs_review_count: counts.needsReviewCount,
+          id: result.id,
+          label: result.label,
+          side: result.side,
+          status: result.status,
+          source_file_name: result.source_file_name,
+          created_at: result.created_at.toISOString(),
+          field_count: result.fieldCount,
+          needs_review_count: result.needsReviewCount,
         },
         201
       );

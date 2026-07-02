@@ -5,9 +5,11 @@
  * send route and the template-listing route consult these as a fallback after
  * the committed registry. Additive: the committed path is untouched.
  *
- * Visibility mirrors committed forms: the owning agent always, plus (once
- * promoted) agents in the matching market via the same board filter
- * (board === '' || board === market).
+ * Visibility: the owning agent always sees their own approved forms. Beyond the
+ * owner, a form is visible to an agent iff the admin promoted it to a COMPANY +
+ * MARKET combo (form_promotions) matching the agent's profile — same brokerage
+ * AND the combo's market is one of the agent's markets. Computed live from the
+ * profile, so agents who onboard later match automatically with no manual push.
  */
 import { prisma } from "./db";
 import type {
@@ -57,14 +59,37 @@ const SELECT = {
   docusign_template_id: true,
 } as const;
 
-// A ready uploaded form is resolvable to the caller if they own it OR it's
-// promoted, AND it's visible in the given market (universal or market-matched).
-function visibilityWhere(agentId: string, market: string) {
+/** The caller's profile fields that decide which promoted forms they match. */
+export type AgentFormViewer = {
+  agentId: string;
+  brokerage: string;
+  markets: string[];
+};
+
+// A ready uploaded form is resolvable to the caller if they own it OR the admin
+// promoted it to their company + one of their markets. The brokerage match is
+// case-insensitive as defense in depth — profile writes canonicalize to the
+// managed list's spelling, but a legacy/hand-edited value must still match.
+function visibilityWhere(viewer: AgentFormViewer) {
+  const markets = viewer.markets.length > 0 ? viewer.markets : ["__none__"];
   return {
     status: "ready",
     docusign_template_id: { not: null },
-    OR: [{ agent_id: agentId }, { promoted: true }],
-    board: { in: ["", market] },
+    OR: [
+      { agent_id: viewer.agentId },
+      ...(viewer.brokerage
+        ? [
+            {
+              form_promotions: {
+                some: {
+                  brokerage: { equals: viewer.brokerage, mode: "insensitive" as const },
+                  market: { in: markets },
+                },
+              },
+            },
+          ]
+        : []),
+    ],
   };
 }
 
@@ -75,15 +100,30 @@ function visibilityWhere(agentId: string, market: string) {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Fetch the viewer profile fields for a user id (brokerage + markets). */
+export async function agentFormViewer(agentId: string): Promise<AgentFormViewer> {
+  const u = await prisma.users.findUnique({
+    where: { id: agentId },
+    select: { brokerage: true, market: true, markets: true },
+  });
+  const markets = Array.isArray(u?.markets) ? (u.markets as string[]) : [];
+  return {
+    agentId,
+    brokerage: u?.brokerage ?? "",
+    // Legacy fallback: a profile written before multi-market (markets empty but
+    // a primary market set) still matches promotions for that market.
+    markets: markets.length > 0 ? markets : u?.market ? [u.market] : [],
+  };
+}
+
 /** One uploaded form resolved to a TemplateConfig, or null if not resolvable. */
 export async function getAgentFormConfig(
   formKey: string,
-  agentId: string,
-  market: string
+  viewer: AgentFormViewer
 ): Promise<TemplateConfig | null> {
   if (!UUID_RE.test(formKey)) return null;
   const row = await prisma.uploaded_forms.findFirst({
-    where: { id: formKey, ...visibilityWhere(agentId, market) },
+    where: { id: formKey, ...visibilityWhere(viewer) },
     select: SELECT,
   });
   return row ? toConfig(row) : null;
@@ -91,11 +131,10 @@ export async function getAgentFormConfig(
 
 /** The caller's sendable uploaded forms (for the form picker). */
 export async function listAgentFormsForAgent(
-  agentId: string,
-  market: string
+  viewer: AgentFormViewer
 ): Promise<TemplateListing[]> {
   const rows = await prisma.uploaded_forms.findMany({
-    where: visibilityWhere(agentId, market),
+    where: visibilityWhere(viewer),
     select: SELECT,
     orderBy: { created_at: "desc" },
   });

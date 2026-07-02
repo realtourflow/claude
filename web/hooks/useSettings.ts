@@ -41,7 +41,7 @@ export function useSettings() {
   async function saveProfile(
     name: string,
     phone: string,
-    extra?: { market?: string; brokerage?: string },
+    extra?: { market?: string; markets?: string[]; brokerage?: string },
   ) {
     try {
       await api.patch('/me/profile', { name, phone, ...(extra ?? {}) });

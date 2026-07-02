@@ -55,18 +55,9 @@ vi.mock("@/hooks/useMLS", () => ({
   useMLSListings: () => ({ listings: [], loading: false, error: null, search: vi.fn() }),
 }));
 
-vi.mock("@/hooks/useAgentDocs", () => ({
-  useAgentDocTemplatesForDeal: () => ({ templates: [], loading: false, getDownloadUrl: vi.fn() }),
-  DOC_TYPE_LABELS: {},
-}));
-
 vi.mock("@/hooks/useDocuments", () => ({
   useDocuments: () => ({ docs: [], loading: false, error: null }),
   getDownloadUrl: vi.fn(),
-}));
-
-vi.mock("@/lib/store/agentDocStore", () => ({
-  useAgentDocStore: () => ({ templates: [] }),
 }));
 
 vi.mock("@/components/ClientNotifications", () => ({

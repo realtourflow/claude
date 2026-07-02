@@ -8,7 +8,7 @@ import {
   TemplateConfigError,
   UnknownFormError,
 } from "@/lib/docusign-templates";
-import { getAgentFormConfig } from "@/lib/agent-forms";
+import { getAgentFormConfig, agentFormViewer } from "@/lib/agent-forms";
 import {
   assignTemplateRoles,
   assignConsumerRoles,
@@ -62,28 +62,50 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     if (!body.form_key) return error("form_key required", 400);
 
     let template;
+    let isAgentForm = false;
     try {
       template = getTemplateConfig(body.form_key);
     } catch (err) {
       if (err instanceof UnknownFormError) {
         // Fall back to an approved agent-uploaded form — same TemplateConfig
-        // shape, so everything below is reused unchanged. Scoped to the deal's
-        // market (owner always; promoted forms via the board filter).
-        const agentForm = await getAgentFormConfig(
-          body.form_key,
-          userId,
-          owned.market
-        );
+        // shape, so everything below is reused unchanged. Visible if the caller
+        // owns it or the admin promoted it to their company + one of their markets.
+        const viewer = await agentFormViewer(userId);
+        const agentForm = await getAgentFormConfig(body.form_key, viewer);
         if (!agentForm) return error(err.message, 400);
+        // DEAL scope (distinct from visibility): a board-keyed uploaded contract
+        // only sends on a deal in that market — unless a promotion combo for the
+        // caller's company explicitly covers the DEAL's market. Prevents sending
+        // a wrong-board legal contract on a cross-market deal.
+        if (agentForm.board && agentForm.board !== owned.market) {
+          const covering = viewer.brokerage
+            ? await prisma.form_promotions.findFirst({
+                where: {
+                  form_id: body.form_key,
+                  brokerage: { equals: viewer.brokerage, mode: "insensitive" },
+                  market: owned.market,
+                },
+                select: { id: true },
+              })
+            : null;
+          if (!covering) {
+            return error(
+              `form "${agentForm.label}" belongs to board ${agentForm.board}; this deal's market is ${owned.market || "unset"}`,
+              400
+            );
+          }
+        }
         template = agentForm;
+        isAgentForm = true;
       } else if (err instanceof TemplateConfigError) {
         return error(err.message, 500);
       } else {
         throw err;
       }
     }
-    // Board-keyed forms only send on deals in that market.
-    if (template.board && template.board !== owned.market) {
+    // Board-keyed COMMITTED forms only send on deals in that market. Uploaded
+    // forms passed their own deal-scope check above.
+    if (!isAgentForm && template.board && template.board !== owned.market) {
       return error(
         `form "${body.form_key}" belongs to board ${template.board}; this deal's market is ${owned.market || "unset"}`,
         400

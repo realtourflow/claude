@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useUsers, AppUser } from "@/hooks/useUsers";
@@ -2217,6 +2217,125 @@ function ComingSoon({ title }: { title: string }) {
   );
 }
 
+// ─── Companies (brokerage suggestions review queue) ─────────────────────────────
+
+type BrokerageRow = {
+  id: string;
+  name: string;
+  status: string;
+  created_at: string;
+  suggested_by_name: string | null;
+  suggested_by_email: string | null;
+};
+
+function CompaniesQueue() {
+  const [pending, setPending] = useState<BrokerageRow[] | null>(null);
+  const [active, setActive] = useState<BrokerageRow[] | null>(null);
+  const [err, setErr] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  function load() {
+    api.get<BrokerageRow[]>('/admin/brokerages?status=pending')
+      .then(setPending)
+      .catch((e) => setErr(e instanceof Error ? e.message : 'Failed to load'));
+    api.get<BrokerageRow[]>('/admin/brokerages?status=active')
+      .then(setActive)
+      .catch(() => {});
+  }
+  useEffect(load, []);
+
+  async function review(id: string, action: 'approve' | 'reject') {
+    setBusyId(id);
+    setErr('');
+    try {
+      await api.post(`/admin/brokerages/${id}`, { action });
+      load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Action failed');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="p-6 md:p-8 space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold text-brand-navy">Companies</h1>
+        <p className="text-sm text-gray-400 mt-1">
+          Approve agent-entered companies into the onboarding dropdown, and see the active list.
+        </p>
+      </div>
+
+      {err && <p className="text-sm text-red-500">{err}</p>}
+
+      <section>
+        <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-gray-400">
+          Pending review
+        </h2>
+        {!pending ? (
+          <p className="text-sm text-gray-400">Loading…</p>
+        ) : pending.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-400">
+            Nothing to review.
+          </div>
+        ) : (
+          <ul className="space-y-2">
+            {pending.map((b) => (
+              <li
+                key={b.id}
+                className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-brand-navy">{b.name}</p>
+                  <p className="text-xs text-gray-400">
+                    Entered by {b.suggested_by_name ?? 'unknown'}
+                    {b.suggested_by_email ? ` (${b.suggested_by_email})` : ''} ·{' '}
+                    {new Date(b.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </p>
+                </div>
+                <div className="flex flex-shrink-0 gap-2">
+                  <button
+                    onClick={() => review(b.id, 'approve')}
+                    disabled={busyId === b.id}
+                    className="rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-40"
+                  >
+                    Add to list
+                  </button>
+                  <button
+                    onClick={() => review(b.id, 'reject')}
+                    disabled={busyId === b.id}
+                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-500 hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section>
+        <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-gray-400">
+          In the dropdown
+        </h2>
+        {active && (
+          <div className="flex flex-wrap gap-1.5">
+            {active.map((b) => (
+              <span
+                key={b.id}
+                className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600"
+              >
+                {b.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 // ─── Main AdminDashboard ───────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
@@ -2224,6 +2343,7 @@ export default function AdminDashboard() {
   const { deals, loading } = useDeals();
 
   if (section === 'users') return <UserManagement />;
+  if (section === 'brokerages') return <CompaniesQueue />;
 
   if (loading) {
     return (
