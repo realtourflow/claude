@@ -703,10 +703,11 @@ export default function LandingPage() {
                 fontFamily: "Georgia, 'Times New Roman', serif",
               }}
             >
-              &ldquo;I stopped losing track of deadlines the first week.&rdquo;
+              &ldquo;I stopped losing track of deadlines the first week and my
+              clients love their daily portal!&rdquo;
             </p>
             <p style={{ fontSize: 14, color: S.textMuted, margin: "0 0 20px" }}>
-              — [Agent name], [Brokerage], [City]
+              — Chad Harris, Gulf Shores, AL
             </p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
               {["Built with real agents", "In active beta", "Launching 2026"].map((label) => (
