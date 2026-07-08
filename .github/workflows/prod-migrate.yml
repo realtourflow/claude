@@ -1,0 +1,49 @@
+name: Prod DB Migrate
+
+# Applies pending golang-migrate SQL from migrations/ to production Neon, so the
+# prod schema never falls behind code that Vercel has already deployed from main.
+#
+# Fires on every merge to main that changes a migration, plus a manual trigger
+# (workflow_dispatch) used for one-off catch-ups and as an escape hatch.
+#
+# NOTE: paths deliberately EXCLUDES this workflow file, so editing the workflow
+# never itself triggers a prod migration.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "migrations/**"
+  workflow_dispatch: {}
+
+# One prod migration at a time; never cancel a half-applied run.
+concurrency:
+  group: prod-migrate
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Apply migrations to prod Neon
+    runs-on: ubuntu-latest
+    env:
+      # Neon neondb DIRECT (non-pooled) connection string, incl. ?sslmode=require.
+      # golang-migrate takes a session-level advisory lock, which does not work
+      # through Neon's transaction-mode pooler — use the direct endpoint.
+      PROD_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install golang-migrate
+        run: |
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.18.1/migrate.linux-amd64.tar.gz | tar xvz
+          sudo mv migrate /usr/local/bin/migrate
+          migrate -version
+
+      - name: Current prod schema version (before)
+        run: migrate -path "$GITHUB_WORKSPACE/migrations" -database "$PROD_DATABASE_URL" version
+
+      - name: Apply pending migrations
+        run: migrate -path "$GITHUB_WORKSPACE/migrations" -database "$PROD_DATABASE_URL" up
+
+      - name: Confirm prod schema version (after)
+        if: always()
+        run: migrate -path "$GITHUB_WORKSPACE/migrations" -database "$PROD_DATABASE_URL" version
