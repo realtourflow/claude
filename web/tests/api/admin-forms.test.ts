@@ -6,21 +6,13 @@ import {
   beforeEach,
   afterAll,
 } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  type GetObjectCommandOutput,
-} from "@aws-sdk/client-s3";
 import { PDFDocument } from "pdf-lib";
 import { GET as listForms } from "@/app/api/admin/forms/route";
 import { GET as detail, POST as action } from "@/app/api/admin/forms/[id]/route";
 import { PATCH as patchField } from "@/app/api/admin/forms/[id]/fields/[fieldId]/route";
 import { POST as saveKnown } from "@/app/api/admin/forms/[id]/known/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setDocusignForTesting, type DocusignClient } from "@/lib/docusign";
 import { MARKETS } from "@/lib/markets";
 import { prisma } from "@/lib/db";
@@ -28,7 +20,7 @@ import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 let PDF: Uint8Array;
 let lastTemplateSigners: unknown[] = [];
 
@@ -47,22 +39,10 @@ const fakeDocusign: DocusignClient = {
   },
 };
 
-function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
-  return {
-    transformToByteArray: async () => bytes,
-  } as unknown as GetObjectCommandOutput["Body"];
-}
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-  setS3ClientForTesting(
-    new S3Client({
-      region: "us-east-1",
-      credentials: { accessKeyId: "test", secretAccessKey: "test" },
-    }),
-    "test-bucket"
-  );
   setDocusignForTesting(fakeDocusign);
   const doc = await PDFDocument.create();
   doc.addPage([612, 792]);
@@ -75,10 +55,8 @@ afterAll(() => {
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock.on(PutObjectCommand).resolves({});
-  s3Mock.on(DeleteObjectCommand).resolves({});
-  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(PDF) });
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = PDF;
   lastTemplateSigners = [];
 });
 
@@ -214,7 +192,7 @@ describe("admin form review — access + queue", () => {
     };
     expect(body.status).toBe("pending_review");
     expect(body.fields).toHaveLength(1);
-    expect(body.preview_url).toMatch(/^https:\/\//);
+    expect(body.preview_url).toMatch(/^\/api\/storage\/blob-get\?/);
     expect(body.derived_signers.roleMapping).toMatchObject({ buyer: "Buyer" });
   });
 });

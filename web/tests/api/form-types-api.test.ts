@@ -1,18 +1,9 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  DeleteObjectCommand,
-  type GetObjectCommandOutput,
-} from "@aws-sdk/client-s3";
 import { PDFDocument } from "pdf-lib";
 import { GET as listFormTypes } from "@/app/api/me/form-types/route";
 import { POST as createForm } from "@/app/api/me/forms/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setFieldMapperForTesting } from "@/lib/form-ai/mapper";
 import type { FieldMapper } from "@/lib/form-ai/types";
 import { seedFormTypes, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
@@ -21,7 +12,7 @@ import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 let FILLABLE: Uint8Array;
 
 const fakeMapper: FieldMapper = {
@@ -29,9 +20,6 @@ const fakeMapper: FieldMapper = {
     fields.map(() => ({ coreKey: null, role: null, confidence: 0, rationale: "" })),
 };
 
-function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
-  return { transformToByteArray: async () => bytes } as unknown as GetObjectCommandOutput["Body"];
-}
 
 async function makeFillable(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -43,26 +31,20 @@ async function makeFillable(): Promise<Uint8Array> {
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-  setS3ClientForTesting(
-    new S3Client({ region: "us-east-1", credentials: { accessKeyId: "t", secretAccessKey: "t" } }),
-    "test-bucket"
-  );
   FILLABLE = await makeFillable();
 });
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock.on(PutObjectCommand).resolves({});
-  s3Mock.on(DeleteObjectCommand).resolves({});
-  s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 4096 });
-  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FILLABLE) });
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = FILLABLE;
+  storage.defaultSize = 4096;
   setFieldMapperForTesting(fakeMapper);
   await seedFormTypes();
 });
 
 afterEach(() => {
-  s3Mock.reset();
+  setStorageForTesting(false);
   setFieldMapperForTesting(undefined);
 });
 

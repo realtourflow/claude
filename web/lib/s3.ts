@@ -1,69 +1,32 @@
 /**
- * Object-storage helpers — pre-signed PUT/GET URLs + object read/write/delete.
+ * Object-storage facade — pre-signed-equivalent PUT/GET capability URLs + object
+ * read/write/delete. Backed entirely by Vercel Blob (lib/blob-storage); AWS S3 has
+ * been retired. The function names keep their historical `S3`/`Object` shape so the
+ * ~15 call sites are unchanged; only the backend moved.
  *
- * Two backends behind one seam: S3 (production) and Vercel Blob (preview). When a
- * Blob store is configured (Preview only — see blobEnabled), every operation routes
- * through Blob; otherwise it uses S3 exactly as before, so production is untouched.
- * Key generators are backend-agnostic (a key is just a path).
+ * Key generators are backend-agnostic (a key is just a path) — the `deals/`,
+ * `agent-templates/`, and `agent-forms/` prefixes are the three namespaces the
+ * upload proxy (/api/storage/blob-put) accepts.
  */
 import {
-  S3Client,
-  DeleteObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  PutObjectCommand,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { env } from "./env";
-import {
-  blobEnabled,
+  assertStorageConfigured,
   blobUploadPath,
+  blobDownloadPath,
   putBlob,
   getBlobBytes,
   getBlobSize,
-  getBlobUrl,
   deleteBlob,
 } from "./blob-storage";
 
-const FIFTEEN_MINUTES_SECONDS = 60 * 15;
-
-let cached: { client: S3Client; bucket: string } | undefined;
-
-function getClient(): { client: S3Client; bucket: string } {
-  if (cached) return cached;
-  const e = env();
-  cached = {
-    client: new S3Client({ region: e.AWS_REGION || "us-east-1" }),
-    bucket: e.S3_BUCKET,
-  };
-  return cached;
-}
-
-/**
- * Test seam — lets integration tests inject a mocked S3Client and a fake
- * bucket name without touching env. Pass `undefined` to reset.
- */
-export function setS3ClientForTesting(
-  client: S3Client | undefined,
-  bucket = "test-bucket"
-): void {
-  if (client === undefined) {
-    cached = undefined;
-    return;
-  }
-  cached = { client, bucket };
-}
-
-/** Generates a deal-scoped S3 key with a timestamp prefix to avoid collisions. */
+/** Generates a deal-scoped storage key with a timestamp prefix to avoid collisions. */
 export function makeS3Key(dealId: string, fileName: string): string {
   const safe = fileName.split("/").pop()!.replace(/\s+/g, "-");
   return `deals/${dealId}/${Date.now()}/${safe}`;
 }
 
 /**
- * Generates an agent-scoped S3 key for a doc template, with a timestamp prefix
- * to avoid collisions. Mirrors agentDocS3Key in
- * the legacy Go backend.
+ * Generates an agent-scoped storage key for a doc template, with a timestamp prefix
+ * to avoid collisions. Mirrors agentDocS3Key in the legacy Go backend.
  */
 export function makeAgentDocS3Key(agentId: string, fileName: string): string {
   const safe = fileName.split("/").pop()!.replace(/\s+/g, "-");
@@ -71,7 +34,7 @@ export function makeAgentDocS3Key(agentId: string, fileName: string): string {
 }
 
 /**
- * Generates an agent-scoped S3 key for an uploaded form (the form-upload
+ * Generates an agent-scoped storage key for an uploaded form (the form-upload
  * pipeline), with a timestamp prefix. Separate `agent-forms/` namespace so it
  * never collides with doc templates (`agent-templates/`) or deal docs.
  */
@@ -80,60 +43,43 @@ export function makeAgentFormS3Key(agentId: string, fileName: string): string {
   return `agent-forms/${agentId}/${Date.now()}/${safe}`;
 }
 
+/**
+ * A capability URL the client PUTs the file to. The content-type is sent by the
+ * client on the PUT itself (the blob-put proxy reads it from the request), so the
+ * `contentType` arg is accepted for call-site compatibility but not baked into the URL.
+ */
 export async function getUploadUrl(input: {
   key: string;
   contentType?: string;
 }): Promise<string> {
-  if (blobEnabled()) return blobUploadPath(input.key);
-  const { client, bucket } = getClient();
-  const cmd = new PutObjectCommand({
-    Bucket: bucket,
-    Key: input.key,
-    ContentType: input.contentType ?? "application/octet-stream",
-  });
-  return getSignedUrl(client, cmd, { expiresIn: FIFTEEN_MINUTES_SECONDS });
+  assertStorageConfigured();
+  return blobUploadPath(input.key);
 }
 
+/** A capability URL the browser opens to download the file. */
 export async function getDownloadUrl(input: { key: string }): Promise<string> {
-  if (blobEnabled()) return getBlobUrl(input.key);
-  const { client, bucket } = getClient();
-  const cmd = new GetObjectCommand({
-    Bucket: bucket,
-    Key: input.key,
-  });
-  return getSignedUrl(client, cmd, { expiresIn: FIFTEEN_MINUTES_SECONDS });
+  assertStorageConfigured();
+  return blobDownloadPath(input.key);
 }
 
 /**
  * Fetches the full object body as bytes. Used to hand a document's contents to
- * DocuSign. Mirrors downloadS3Object in the legacy Go backend.
+ * DocuSign / the PDF renderer.
  */
 export async function getObjectBytes(key: string): Promise<Uint8Array> {
-  if (blobEnabled()) return getBlobBytes(key);
-  const { client, bucket } = getClient();
-  const result = await client.send(
-    new GetObjectCommand({ Bucket: bucket, Key: key })
-  );
-  if (!result.Body) {
-    throw new Error(`s3 get object ${key}: empty body`);
-  }
-  // v3 SDK exposes a stream helper that collects the whole body for us.
-  return result.Body.transformToByteArray();
+  return getBlobBytes(key);
 }
 
 /**
- * Object size in bytes via HeadObject (cheap metadata — no body download). Used
- * to reject an oversized upload BEFORE buffering/parsing it.
+ * Object size in bytes (cheap metadata — no body download). Used to reject an
+ * oversized upload BEFORE buffering/parsing it.
  */
 export async function getObjectSize(key: string): Promise<number> {
-  if (blobEnabled()) return getBlobSize(key);
-  const { client, bucket } = getClient();
-  const head = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
-  return head.ContentLength ?? 0;
+  return getBlobSize(key);
 }
 
 /**
- * Uploads bytes directly to storage (server-side put, no pre-signed URL). Used to
+ * Uploads bytes directly to storage (server-side put, no capability URL). Used to
  * store server-generated files such as merged disclosure packets.
  */
 export async function putObjectBytes(
@@ -141,24 +87,13 @@ export async function putObjectBytes(
   bytes: Uint8Array,
   contentType: string
 ): Promise<void> {
-  if (blobEnabled()) return putBlob(key, bytes, contentType);
-  const { client, bucket } = getClient();
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      Body: bytes,
-      ContentType: contentType,
-    })
-  );
+  await putBlob(key, bytes, contentType);
 }
 
-/** Best-effort delete. Logs and swallows errors — matches Go behavior. */
+/** Best-effort delete. Logs and swallows errors. */
 export async function deleteObject(key: string): Promise<void> {
   try {
-    if (blobEnabled()) return await deleteBlob(key);
-    const { client, bucket } = getClient();
-    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    await deleteBlob(key);
   } catch (err) {
     console.warn("object delete failed (ignored)", { key, err });
   }

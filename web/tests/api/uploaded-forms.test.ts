@@ -1,20 +1,11 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  DeleteObjectCommand,
-  type GetObjectCommandOutput,
-} from "@aws-sdk/client-s3";
 import { PDFDocument } from "pdf-lib";
 import { GET as listForms, POST as createForm } from "@/app/api/me/forms/route";
 import { POST as uploadUrl } from "@/app/api/me/forms/upload-url/route";
 import { GET as formDetail } from "@/app/api/me/forms/[id]/route";
 import { GET as attestation } from "@/app/api/me/forms/attestation/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setFieldMapperForTesting } from "@/lib/form-ai/mapper";
 import { extractAcroFields } from "@/lib/form-ai/extract";
 import { computeStructureFingerprint } from "@/lib/form-ai/fingerprint";
@@ -27,7 +18,7 @@ import { createUser } from "../helpers/factories";
 import { readFileSync } from "node:fs";
 import { seedForm300 } from "@/lib/form-300-seed";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 
 let FILLABLE: Uint8Array;
 let FLAT: Uint8Array;
@@ -42,12 +33,6 @@ const fakeMapper: FieldMapper = {
         : { coreKey: null, role: null, confidence: 0, rationale: "" }
     ),
 };
-
-function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
-  return {
-    transformToByteArray: async () => bytes,
-  } as unknown as GetObjectCommandOutput["Body"];
-}
 
 async function makeFillable(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -67,27 +52,22 @@ async function makeFlat(): Promise<Uint8Array> {
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-  const client = new S3Client({
-    region: "us-east-1",
-    credentials: { accessKeyId: "test", secretAccessKey: "test" },
-  });
-  setS3ClientForTesting(client, "test-bucket");
   FILLABLE = await makeFillable();
   FLAT = await makeFlat();
 });
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock.on(PutObjectCommand).resolves({});
-  s3Mock.on(DeleteObjectCommand).resolves({});
-  s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 4096 }); // within the size cap
-  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FILLABLE) });
+  // Fresh in-memory Blob backend; any key read returns the fillable test PDF, and
+  // size reads report within the cap unless a test overrides storage.defaultSize.
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = FILLABLE;
+  storage.defaultSize = 4096;
   setFieldMapperForTesting(fakeMapper);
 });
 
 afterEach(async () => {
-  s3Mock.reset();
+  setStorageForTesting(false);
   setFieldMapperForTesting(undefined);
   await prisma.system_config.deleteMany({});
 });
@@ -287,7 +267,7 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
   it("422 for an UNRECOGNIZED flat PDF, and persists nothing", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     await onboard(agent.id);
-    s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT) });
+    storage.defaultBytes = FLAT;
     const res = await createForm(await postForm(agent.id, "auth0|a"));
     expect(res.status).toBe(422);
     expect(await prisma.uploaded_forms.count()).toBe(0);
@@ -295,18 +275,18 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
 
   it("413 for an oversized upload — rejected before any parsing, persists nothing", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
-    s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 30 * 1024 * 1024 }); // 30MB > 25MB cap
-    // If the route parsed the bytes it would blow up here — it must not get this far.
-    s3Mock.on(GetObjectCommand).rejects(new Error("body should not be fetched for an oversized upload"));
+    storage.defaultSize = 30 * 1024 * 1024; // 30MB > 25MB cap
     const res = await createForm(await postForm(agent.id, "auth0|a"));
     expect(res.status).toBe(413);
     expect(await prisma.uploaded_forms.count()).toBe(0);
+    // Rejected on size before any parsing — the bytes must never have been fetched.
+    expect(storage.reads).toHaveLength(0);
   });
 
   it("recognizes a FLAT upload that matches a known form by content hash", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     await onboard(agent.id);
-    s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT) });
+    storage.defaultBytes = FLAT;
     // Seed a flat known-form keyed on the FLAT fixture's exact content hash.
     await prisma.known_forms.create({
       data: {
@@ -356,7 +336,7 @@ describe("POST /api/me/forms (confirm + pipeline)", () => {
     const reSaved = await (
       await PDFDocument.load(new Uint8Array(real), { ignoreEncryption: true })
     ).save();
-    s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(reSaved) });
+    storage.defaultBytes = reSaved;
     // Recognition must skip the AI mapper entirely.
     setFieldMapperForTesting({
       proposeMappings: async () => {

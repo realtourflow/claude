@@ -1,17 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  DeleteObjectCommand,
-  type GetObjectCommandOutput,
-} from "@aws-sdk/client-s3";
 import { PDFDocument } from "pdf-lib";
 import { POST as createForm } from "@/app/api/me/forms/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setVisionDetectorForTesting, type VisionFieldDetector } from "@/lib/form-ai/vision";
 import { seedFormTypes, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
 import { runFormDetectJob } from "@/lib/form-detect";
@@ -21,7 +12,7 @@ import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 let FLAT2: Uint8Array;
 
 // Canned "located" fields — real detector replaced; labels MUST exist in the type
@@ -46,17 +37,10 @@ const fakeDetector: VisionFieldDetector = {
   },
 };
 
-function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
-  return { transformToByteArray: async () => bytes } as unknown as GetObjectCommandOutput["Body"];
-}
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-  setS3ClientForTesting(
-    new S3Client({ region: "us-east-1", credentials: { accessKeyId: "t", secretAccessKey: "t" } }),
-    "test-bucket"
-  );
   const doc = await PDFDocument.create();
   doc.addPage([612, 792]);
   doc.addPage([612, 792]);
@@ -70,11 +54,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock.on(PutObjectCommand).resolves({});
-  s3Mock.on(DeleteObjectCommand).resolves({});
-  s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 4096 });
-  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT2) });
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = FLAT2;
+  storage.defaultSize = 4096;
   setVisionDetectorForTesting(fakeDetector);
   await seedFormTypes();
 });

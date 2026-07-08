@@ -7,20 +7,13 @@ import {
   afterAll,
   afterEach,
 } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import {
-  S3Client,
-  GetObjectCommand,
-  DeleteObjectCommand,
-} from "@aws-sdk/client-s3";
-import type { StreamingBlobPayloadOutputTypes } from "@smithy/types";
 import { POST as sendTemplateRoute } from "@/app/api/deals/[id]/docusign/send-template/route";
 import { GET as listTemplatesRoute } from "@/app/api/docusign/templates/route";
 import { POST as sendForSignatureRoute } from "@/app/api/deals/[id]/documents/[documentId]/send-for-signature/route";
 import { GET as downloadUrlRoute } from "@/app/api/documents/[id]/download-url/route";
 import { DELETE as deleteDocumentRoute } from "@/app/api/documents/[id]/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import {
   setDocusignForTesting,
   type DocusignClient,
@@ -33,7 +26,7 @@ import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal } from "../helpers/factories";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 
 const TEMPLATES = {
   buyer_agency_agreement: {
@@ -90,28 +83,16 @@ function makeFakeDocusign(): FakeDocusign {
 let fakeDocusign: FakeDocusign;
 const savedTemplatesEnv = process.env.DOCUSIGN_TEMPLATES;
 
-function bodyOf(bytes: Uint8Array): StreamingBlobPayloadOutputTypes {
-  return {
-    transformToByteArray: async () => bytes,
-  } as unknown as StreamingBlobPayloadOutputTypes;
-}
-
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-  const client = new S3Client({
-    region: "us-east-1",
-    credentials: { accessKeyId: "test", secretAccessKey: "test" },
-  });
-  setS3ClientForTesting(client, "test-bucket");
 });
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock
-    .on(GetObjectCommand)
-    .resolves({ Body: bodyOf(new Uint8Array([1, 2, 3])) });
+  // Fresh in-memory Blob backend; any key read returns dummy PDF bytes.
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = new Uint8Array([1, 2, 3]);
   fakeDocusign = makeFakeDocusign();
   setDocusignForTesting(fakeDocusign);
   process.env.DOCUSIGN_TEMPLATES = JSON.stringify(TEMPLATES);
@@ -119,12 +100,11 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  s3Mock.reset();
+  setStorageForTesting(false);
 });
 
 afterAll(() => {
   setDocusignForTesting(undefined);
-  setS3ClientForTesting(undefined);
   if (savedTemplatesEnv === undefined) delete process.env.DOCUSIGN_TEMPLATES;
   else process.env.DOCUSIGN_TEMPLATES = savedTemplatesEnv;
   resetEnvForTesting();
@@ -572,7 +552,7 @@ describe("placeholder documents (s3_key='') guards", () => {
     });
     const res = await deleteDocumentRoute(req, ctx(doc.id));
     expect(res.status).toBe(204);
-    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(0);
+    expect(storage.deletes).toHaveLength(0);
     expect(await prisma.documents.count()).toBe(0);
   });
 });

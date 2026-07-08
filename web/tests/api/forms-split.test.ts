@@ -7,19 +7,10 @@ import {
   beforeEach,
   afterEach,
 } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  HeadObjectCommand,
-  type GetObjectCommandOutput,
-} from "@aws-sdk/client-s3";
 import { PDFDocument } from "pdf-lib";
 import { POST as splitForm } from "@/app/api/admin/forms/[id]/split/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import {
   setVisionDetectorForTesting,
   type VisionFieldDetector,
@@ -31,7 +22,7 @@ import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 let FLAT3: Uint8Array;
 
 const fakeDetector: VisionFieldDetector = {
@@ -39,22 +30,10 @@ const fakeDetector: VisionFieldDetector = {
   detectGuided: async () => [],
 };
 
-function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
-  return {
-    transformToByteArray: async () => bytes,
-  } as unknown as GetObjectCommandOutput["Body"];
-}
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-  setS3ClientForTesting(
-    new S3Client({
-      region: "us-east-1",
-      credentials: { accessKeyId: "t", secretAccessKey: "t" },
-    }),
-    "test-bucket"
-  );
   const doc = await PDFDocument.create();
   doc.addPage([612, 792]);
   doc.addPage([612, 792]);
@@ -69,11 +48,9 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock.on(PutObjectCommand).resolves({});
-  s3Mock.on(DeleteObjectCommand).resolves({});
-  s3Mock.on(HeadObjectCommand).resolves({ ContentLength: 8192 });
-  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT3) });
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = FLAT3;
+  storage.defaultSize = 8192;
   setVisionDetectorForTesting(fakeDetector);
   await seedFormTypes();
 });
