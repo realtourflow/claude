@@ -26,6 +26,10 @@ export type BlogPostMeta = {
   author: string;
   tags: string[];
   coverUrl: string | null;
+  // Notion page `last_edited_time` (ISO 8601). Changes whenever the post is
+  // published or edited, so it's the signal the IndexNow sweep uses to decide
+  // what's "recently changed" (lib/indexnow.ts). Empty if Notion omits it.
+  lastEdited: string;
 };
 
 export type NotionAnnotations = {
@@ -84,6 +88,7 @@ function metaFromPage(page: any): BlogPostMeta {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tags: (props.Tags?.multi_select ?? []).map((t: any) => t.name),
     coverUrl,
+    lastEdited: page.last_edited_time ?? "",
   };
 }
 
