@@ -13,7 +13,7 @@ import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
-import { createUser } from "../helpers/factories";
+import { createUser, createDeal } from "../helpers/factories";
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
@@ -162,8 +162,26 @@ describe("Promo codes", () => {
 });
 
 describe("Audit log", () => {
-  it("returns recent entries with actor name (limit + offset)", async () => {
-    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin", name: "Admin Z" });
+  type AuditEntry = {
+    id: string;
+    actor_id: string | null;
+    actor_name: string | null;
+    actor_email: string | null;
+    event_type: string;
+    deal_id: string | null;
+    deal_title: string | null;
+    target_id: string | null;
+    metadata: unknown;
+    created_at: string;
+  };
+  type AuditBody = { entries: AuditEntry[]; total: number };
+
+  it("returns an {entries, total} object, not a bare array", async () => {
+    const admin = await createUser({
+      role: "admin",
+      auth0_id: "auth0|admin",
+      name: "Admin Z",
+    });
     await prisma.audit_log.createMany({
       data: [
         { actor_id: admin.id, event_type: "test_1" },
@@ -176,11 +194,65 @@ describe("Audit log", () => {
       })
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
-      event_type: string;
-      actor_name: string | null;
-    }[];
-    expect(body.length).toBe(2);
-    expect(body[0].actor_name).toBe("Admin Z");
+    const body = (await res.json()) as AuditBody;
+    // The bug: route used to return a bare array, so entries/total were undefined.
+    expect(Array.isArray(body)).toBe(false);
+    expect(Array.isArray(body.entries)).toBe(true);
+    expect(body.entries.length).toBe(2);
+    expect(body.total).toBe(2);
+    expect(body.entries[0].actor_name).toBe("Admin Z");
+  });
+
+  it("honors the event_type query param in the WHERE clause", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    await prisma.audit_log.createMany({
+      data: [
+        { actor_id: admin.id, event_type: "user_deactivated" },
+        { actor_id: admin.id, event_type: "invite_created" },
+        { actor_id: admin.id, event_type: "user_deactivated" },
+      ],
+    });
+    const res = await auditLogRoute(
+      new Request(
+        "http://localhost/api/admin/audit-log?event_type=user_deactivated",
+        { headers: { authorization: await authHeader("auth0|admin", ["admin"]) } }
+      )
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as AuditBody;
+    expect(body.total).toBe(2);
+    expect(body.entries.length).toBe(2);
+    expect(body.entries.every((e) => e.event_type === "user_deactivated")).toBe(
+      true
+    );
+  });
+
+  it("enriches entries with actor_email and deal_title via LEFT JOINs", async () => {
+    const admin = await createUser({
+      role: "admin",
+      auth0_id: "auth0|admin",
+      name: "Admin Z",
+      email: "adminz@example.com",
+    });
+    const deal = await createDeal({ agent_id: admin.id, title: "123 Main St" });
+    await prisma.audit_log.createMany({
+      data: [
+        { actor_id: admin.id, event_type: "with_deal", deal_id: deal.id },
+        { actor_id: admin.id, event_type: "no_deal" },
+      ],
+    });
+    const res = await auditLogRoute(
+      new Request("http://localhost/api/admin/audit-log", {
+        headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as AuditBody;
+    const byType = Object.fromEntries(body.entries.map((e) => [e.event_type, e]));
+    expect(byType["with_deal"].actor_email).toBe("adminz@example.com");
+    expect(byType["with_deal"].deal_title).toBe("123 Main St");
+    // A row with no deal LEFT JOINs to a null title (not an error).
+    expect(byType["no_deal"].deal_title).toBeNull();
+    expect(byType["no_deal"].actor_email).toBe("adminz@example.com");
   });
 });
