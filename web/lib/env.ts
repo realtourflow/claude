@@ -31,13 +31,10 @@ const shape = z.object({
   AUTH0_MGMT_CLIENT_ID: z.string().default(""),
   AUTH0_MGMT_CLIENT_SECRET: z.string().default(""),
 
-  AWS_REGION: z.string().default(""),
-  S3_BUCKET: z.string().default(""),
-  // Vercel Blob (Preview storage). When a store is configured, lib/s3 routes
-  // reads/writes through Blob instead of S3 — so the preview never needs AWS.
-  // Two auth modes: a static R/W token, OR OIDC (the newer store model) which the
-  // SDK derives from VERCEL_OIDC_TOKEN + the store id. Unset in production →
-  // production keeps using S3, untouched.
+  // Vercel Blob is the app's file-storage backend (S3 retired). A store must be
+  // configured in every real environment. Two auth modes: a static R/W token, OR
+  // OIDC (the newer store model) which the SDK derives from VERCEL_OIDC_TOKEN + the
+  // store id at runtime. lib/blob-storage throws loudly if neither is present.
   BLOB_READ_WRITE_TOKEN: z.string().default(""),
   BLOB_STORE_ID: z.string().default(""),
 

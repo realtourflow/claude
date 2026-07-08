@@ -7,15 +7,12 @@ import {
   afterAll,
   afterEach,
 } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
 import { createHmac } from "node:crypto";
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import type { StreamingBlobPayloadOutputTypes } from "@smithy/types";
 import { POST as sendForSignatureRoute } from "@/app/api/deals/[id]/documents/[documentId]/send-for-signature/route";
 import { POST as refreshRoute } from "@/app/api/deals/[id]/documents/[documentId]/docusign/refresh/route";
 import { POST as webhookRoute } from "@/app/api/docusign/webhook/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import {
   setDocusignForTesting,
   type DocusignClient,
@@ -28,7 +25,7 @@ import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal } from "../helpers/factories";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 
 // A small in-memory DocuSign fake. createEnvelope records its args + returns a
 // fixed id; getEnvelopeStatus returns a settable status; enabled() is
@@ -75,41 +72,26 @@ function makeFakeDocusign(): FakeDocusign {
 
 let fakeDocusign: FakeDocusign;
 
-// A mock GetObject body exposing the v3 stream helper getObjectBytes() calls.
-function bodyOf(bytes: Uint8Array): StreamingBlobPayloadOutputTypes {
-  return {
-    transformToByteArray: async () => bytes,
-  } as unknown as StreamingBlobPayloadOutputTypes;
-}
-
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-
-  const client = new S3Client({
-    region: "us-east-1",
-    credentials: { accessKeyId: "test", secretAccessKey: "test" },
-  });
-  setS3ClientForTesting(client, "test-bucket");
 });
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock
-    .on(GetObjectCommand)
-    .resolves({ Body: bodyOf(new Uint8Array([1, 2, 3])) });
+  // Fresh in-memory Blob backend; any key read returns dummy PDF bytes.
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = new Uint8Array([1, 2, 3]);
   fakeDocusign = makeFakeDocusign();
   setDocusignForTesting(fakeDocusign);
 });
 
 afterEach(() => {
-  s3Mock.reset();
+  setStorageForTesting(false);
 });
 
 afterAll(() => {
   setDocusignForTesting(undefined);
-  setS3ClientForTesting(undefined);
 });
 
 function ctx(id: string, documentId: string) {
@@ -465,7 +447,7 @@ describe("POST /api/deals/[id]/documents/[documentId]/docusign/refresh", () => {
       where: { document_id: doc.id },
     });
     expect(recip?.status).toBe("completed");
-    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(1);
+    expect(storage.puts).toHaveLength(1);
     const row = await prisma.documents.findUnique({ where: { id: doc.id } });
     expect(row?.docusign_signed_s3_key).toBeTruthy();
     const dealRow = await prisma.deals.findUnique({ where: { id: deal.id } });
@@ -515,7 +497,7 @@ describe("POST /api/deals/[id]/documents/[documentId]/docusign/refresh", () => {
       where: { document_id: doc.id },
     });
     expect(recip?.status).toBe("delivered");
-    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(0);
+    expect(storage.puts).toHaveLength(0);
   });
 
   it("404 when the document has no envelope", async () => {
@@ -718,9 +700,9 @@ describe("POST /api/docusign/webhook (status automation + archival)", () => {
     );
     expect(res.status).toBe(200);
 
-    const puts = s3Mock.commandCalls(PutObjectCommand);
+    const puts = storage.puts;
     expect(puts).toHaveLength(1);
-    expect(puts[0].args[0].input.ContentType).toBe("application/pdf");
+    expect(puts[0].contentType).toBe("application/pdf");
 
     const row = await prisma.documents.findUnique({ where: { id: doc.id } });
     expect(row?.docusign_status).toBe("completed");
@@ -736,7 +718,7 @@ describe("POST /api/docusign/webhook (status automation + archival)", () => {
     };
     await webhookRoute(webhookReq(payload));
     await webhookRoute(webhookReq(payload));
-    expect(s3Mock.commandCalls(PutObjectCommand)).toHaveLength(1);
+    expect(storage.puts).toHaveLength(1);
   });
 
   it("completing a purpose='baa' document flips deals.baa_signed", async () => {

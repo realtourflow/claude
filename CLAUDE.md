@@ -50,7 +50,7 @@ and integrates with ARIVE (loan milestone sync) for Mountain Mortgage / Fast Pas
 | App | Next.js 16 (App Router) — serves UI **and** API in one project |
 | ORM / DB access | Prisma 7 (driver-adapter, introspection-only) |
 | Database | Neon serverless Postgres (`neondb`) |
-| File storage | AWS S3 (documents) via pre-signed URLs |
+| File storage | Vercel Blob (private store) via HMAC capability URLs; S3 retired |
 | Auth | Auth0 (JWT RS256, JWKS validation) |
 | UI | React (Server + Client Components), Tailwind 4 |
 | Background jobs | pg-boss durable queue + a Vercel Cron sweep (calendar push) |
@@ -71,7 +71,7 @@ The legacy Go + chi backend and React + Vite frontend have been removed.
 |---|---|
 | App hosting | Vercel — production domain `app.realtourflow.com` |
 | Database | Neon serverless Postgres — DB `neondb`, endpoint `ep-winter-fire-apcnrqsw` (us-east-1); injected via the Vercel Production `DATABASE_URL` (a **Sensitive** var — not readable through the CLI) |
-| Document storage | AWS S3 bucket `realtourflow-documents` (CORS allows `https://app.realtourflow.com`) |
+| Document storage | Vercel Blob **private** store (`BLOB_STORE_ID` set in Prod; OIDC auth at runtime). S3 retired — see the storage note below |
 | Auth0 Tenant | dev-30md8ukv8qd3u27c.us.auth0.com |
 | Auth0 Audience | https://api.realtourflow.com |
 | Auth0 SPA Client ID | JMIZVqGbZ6KRmJGHyowg5kopHRmHGVhe |
@@ -82,8 +82,13 @@ The legacy Go + chi backend and React + Vite frontend have been removed.
 `/ecs/realtourflow-api` CloudWatch log group, the `realtourflow/*` Secrets Manager
 secrets, and the `api.realtourflow.com` DNS record still exist and the old Go API still
 answers, but CI no longer redeploys it (the `deploy.yml` workflow was deleted). Draining
-and deleting that infra is an open ops task that needs AWS credentials. **Keep the S3
-bucket** — `web/` uses it for documents. ⚠️ The production **database is Neon, not RDS**
+and deleting that infra is an open ops task that needs AWS credentials. **File storage
+has been migrated off S3 to Vercel Blob** (a private store; uploads/downloads flow through
+HMAC capability-URL proxy routes — `web/lib/blob-storage.ts`). The old
+`realtourflow-documents` S3 bucket + AWS SDK are retired: `web/` no longer touches S3, so
+the bucket is now a decommission candidate too (any documents uploaded before the cutover
+still live only in that bucket — migrate or re-upload them before deleting it).
+⚠️ The production **database is Neon, not RDS**
 (verified 2026-06-24 by a runtime probe — `current_database()` returned `neondb`). The AWS
 RDS in account 508859666048 is **not used by the live app** and is itself a decommission
 candidate (verify before deleting).
@@ -109,9 +114,10 @@ golang-migrate against `migrations/`.
 
 ### Environment
 `web/` reads env from `web/.env.local` (gitignored). See `web/.env.example` for the keys —
-Auth0 (incl. the Management API M2M for email verification), `DATABASE_URL`, S3/AWS,
-Stripe, ARIVE, DocuSign, Resend, calendar OAuth, and `CRON_SECRET`. Production values live
-in the Vercel project env.
+Auth0 (incl. the Management API M2M for email verification), `DATABASE_URL`, Vercel Blob
+(`BLOB_READ_WRITE_TOKEN` / `BLOB_STORE_ID` — set one for local file storage), Stripe,
+ARIVE, DocuSign, Resend, calendar OAuth, and `CRON_SECRET`. Production values live in the
+Vercel project env.
 
 ---
 
@@ -164,10 +170,10 @@ password-reset, verification, jobs/process, docusign, stripe/arive webhooks, …
 | GET | /deals/:dealId/messages | ✅ | ListMessages | `?channel=client_thread\|internal`; joins sender name/role |
 | POST | /deals/:dealId/messages | ✅ | CreateMessage | Returns full message with sender info |
 | GET | /deals/:dealId/documents | ✅ | ListDocuments | Ownership-checked; returns docs with uploader name |
-| POST | /deals/:dealId/documents/upload-url | ✅ | GetUploadURL | S3 pre-signed PUT URL + s3_key |
+| POST | /deals/:dealId/documents/upload-url | ✅ | GetUploadURL | Blob upload capability URL (`/api/storage/blob-put`) + s3_key |
 | POST | /deals/:dealId/documents | ✅ | CreateDocument | Confirms upload; stores name, s3_key, mime_type, file_size |
-| GET | /documents/:documentId/download-url | ✅ | GetDownloadURL | S3 pre-signed GET URL |
-| DELETE | /documents/:documentId | ✅ | DeleteDocument | DB record + best-effort S3 delete |
+| GET | /documents/:documentId/download-url | ✅ | GetDownloadURL | Blob download capability URL (`/api/storage/blob-get`); ownership-checked first |
+| DELETE | /documents/:documentId | ✅ | DeleteDocument | DB record + best-effort Blob delete |
 | GET | /vendors | ✅ | ListVendors | Agent-scoped; ordered by category, sort_order |
 | POST/PATCH/DELETE | /vendors[/:vendorId] | ✅ | Vendor CRUD | Agent-scoped |
 | GET | /me/deals | ✅ | ListMyDeals | Deals where the JWT user is a participant; includes agent contact |
@@ -230,7 +236,8 @@ fast-follow milestone, now live:
 | `web/lib/http.ts` | `withAuth`, `json`, `error` helpers |
 | `web/lib/db.ts` | Prisma client (lazy driver-adapter) |
 | `web/lib/users.ts` / `web/lib/roles.ts` / `web/lib/auth.ts` | `resolveUserId`/`upsertUser`, `hasRole`, JWKS verification |
-| `web/lib/s3.ts` | S3 pre-signed URLs + get/put/delete object |
+| `web/lib/s3.ts` | Storage facade (Blob-backed) — capability URLs + get/put/delete object; `setStorageForTesting` seam lives in `blob-storage.ts` |
+| `web/lib/blob-storage.ts` | Vercel Blob backend + HMAC capability signing; `/api/storage/blob-{put,get}` proxy the private-store uploads/downloads |
 | `web/lib/{stripe,arive,docusign,simplyrets,auth0,email}.ts` | External clients (each with a `setXForTesting()` seam) |
 | `web/lib/{jobs,queue,calendar}.ts` | Calendar push + durable pg-boss queue |
 | `web/lib/{disclosures,docusign-documents}.ts` | Disclosure-packet merge + shared DocuSign envelope send |

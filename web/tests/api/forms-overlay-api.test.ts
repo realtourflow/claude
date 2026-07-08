@@ -1,32 +1,23 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import { S3Client, GetObjectCommand, type GetObjectCommandOutput } from "@aws-sdk/client-s3";
 import { PDFDocument } from "pdf-lib";
 import { GET as pageImage } from "@/app/api/admin/forms/[id]/page-image/route";
 import { GET as formDetail } from "@/app/api/admin/forms/[id]/route";
 import { POST as nudgePage } from "@/app/api/admin/forms/[id]/nudge-page/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { seedFormTypes, resolveFormTypeId, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 let PDF: Uint8Array;
 
-function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
-  return { transformToByteArray: async () => bytes } as unknown as GetObjectCommandOutput["Body"];
-}
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-  setS3ClientForTesting(
-    new S3Client({ region: "us-east-1", credentials: { accessKeyId: "t", secretAccessKey: "t" } }),
-    "test-bucket"
-  );
   const doc = await PDFDocument.create();
   doc.addPage([612, 792]);
   PDF = await doc.save();
@@ -34,8 +25,8 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(PDF) });
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = PDF;
   await seedFormTypes();
 });
 

@@ -1,17 +1,9 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { mockClient } from "aws-sdk-client-mock";
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  type GetObjectCommandOutput,
-} from "@aws-sdk/client-s3";
 import { PDFDocument } from "pdf-lib";
 import { POST as action } from "@/app/api/admin/forms/[id]/route";
 import { POST as confirmPlacement } from "@/app/api/admin/forms/[id]/confirm-placement/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
-import { setS3ClientForTesting } from "@/lib/s3";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setDocusignForTesting, type DocusignClient } from "@/lib/docusign";
 import { seedFormTypes, resolveFormTypeId, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
 import { matchFlatKnownForm } from "@/lib/known-forms";
@@ -20,7 +12,7 @@ import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
 
-const s3Mock = mockClient(S3Client);
+let storage: TestStorage;
 let FLAT: Uint8Array;
 
 const fakeDocusign: DocusignClient = {
@@ -34,31 +26,25 @@ const fakeDocusign: DocusignClient = {
   createTemplateFromDocument: async () => "tmpl-xyz",
 };
 
-function bodyOf(bytes: Uint8Array): GetObjectCommandOutput["Body"] {
-  return { transformToByteArray: async () => bytes } as unknown as GetObjectCommandOutput["Body"];
-}
-
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
-  setS3ClientForTesting(
-    new S3Client({ region: "us-east-1", credentials: { accessKeyId: "t", secretAccessKey: "t" } }),
-    "test-bucket"
-  );
   setDocusignForTesting(fakeDocusign);
   const doc = await PDFDocument.create(); // flat (no AcroForm fields)
   doc.addPage([612, 792]);
   FLAT = await doc.save();
 });
 
-afterAll(() => setDocusignForTesting(undefined));
+afterAll(() => {
+  setDocusignForTesting(undefined);
+  setStorageForTesting(false);
+});
 
 beforeEach(async () => {
   await truncateAll();
-  s3Mock.reset();
-  s3Mock.on(PutObjectCommand).resolves({});
-  s3Mock.on(DeleteObjectCommand).resolves({});
-  s3Mock.on(GetObjectCommand).resolves({ Body: bodyOf(FLAT) });
+  // Fresh in-memory Blob backend; any key read returns the flat test PDF.
+  storage = setStorageForTesting()!;
+  storage.defaultBytes = FLAT;
   await seedFormTypes();
 });
 
