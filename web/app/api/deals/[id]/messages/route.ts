@@ -72,12 +72,21 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     // once the response is sent. Best-effort throughout: createNotification
     // swallows internally, the participant lookup is wrapped here, so a
     // notification failure never fails the send.
+    //
+    // Channel guard (#177): the internal thread is "Agent + TC only — not
+    // visible to clients", so internal posts must NEVER create notifications
+    // for client participants (the snippet leaks agent/TC-only content).
+    // Internal fan-out goes only to TC participants; client_thread fan-out
+    // is unchanged (all participants).
     try {
       const title = "New message on your deal";
       const snippet = text.length > 80 ? text.slice(0, 80) + "…" : text;
       if (access.isAgent) {
         const participants = await prisma.deal_participants.findMany({
-          where: { deal_id: dealId },
+          where:
+            channel === "internal"
+              ? { deal_id: dealId, role: "tc" }
+              : { deal_id: dealId },
           select: { user_id: true },
         });
         for (const p of participants) {
