@@ -1,7 +1,8 @@
 /**
  * GET/POST /api/indexnow — push changed blog URLs to IndexNow (Bing et al.).
  *
- * GET  — the hourly Vercel Cron sweep (see web/vercel.json). Vercel sends
+ * GET  — the daily Vercel Cron sweep (see web/vercel.json; daily because the
+ *        Hobby plan caps cron frequency). Vercel sends
  *        `Authorization: Bearer ${CRON_SECRET}` when that env var is set.
  *        Submits every post changed within the lookback window.
  * POST — manual/ops trigger. Same sweep by default; with a JSON body of
