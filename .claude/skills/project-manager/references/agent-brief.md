@@ -36,7 +36,10 @@ override the skill where they conflict:
      - `git checkout -b <kebab-slug-from-title> origin/<DEFAULT_BRANCH>`
    Base off the remote-tracking ref so you never need to check out the local `main` branch.
 
-2. **Never pause for a human.** Do NOT use AskUserQuestion and do NOT stop to wait for answers
+2. **Never stop to wait.** Do not end your turn while a long-running command (npm install, the
+   test suite) is in progress — run such commands in the FOREGROUND with a generous timeout
+   (up to 10 minutes) and continue when they finish. Ending your turn "to wait" strands the run
+   until the PM manually resumes you. Likewise, do NOT use AskUserQuestion and do NOT stop to wait for answers
    (this overrides new-feature Step 2's "stop and wait"). Your ticket is detailed; when something is
    genuinely ambiguous, choose the most reasonable interpretation consistent with the ticket's Scope
    and the existing codebase conventions, and record it under "Assumptions" in the PR body. Only
@@ -56,6 +59,13 @@ override the skill where they conflict:
 
 5. **Green before PR.** Run the full suite (`cd web && npm test`) and get it green before opening
    the PR. Also run `npm run typecheck` and `npm run lint` if quick — CI will run them anyway.
+   Parallel-fleet etiquette (other agents share this machine and its docker Postgres):
+   - Use a per-ticket test database so vitest's drop/recreate can't collide with siblings:
+     `TEST_DATABASE_NAME=rtf_test_issue<NUM> npm test`.
+   - Never kill processes by broad name (`pkill -f vitest`, `pkill node`) — you will kill the
+     other agents' runs. Only kill PIDs you started and recorded.
+   - A flaky full-suite run under heavy machine load (several agents npm-installing at once) is
+     common — re-run before treating a failure as real.
 
 6. **Open the PR** with `gh pr create`. The PR body MUST:
    - end with a line `Closes #<NUM>` so merging auto-closes the issue;
