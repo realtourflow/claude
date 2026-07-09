@@ -46,20 +46,37 @@ describe("GET /api/deals", () => {
     expect(body[0].title).toBe("Mine");
   });
 
-  it("returns ALL deals for tc/admin role", async () => {
-    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-1" });
+  it("returns ALL deals for admin role", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin-1" });
     const agent = await createUser({ role: "agent" });
     await createDeal({ agent_id: agent.id, title: "Deal A" });
     await createDeal({ agent_id: agent.id, title: "Deal B" });
-    // tc has no deal but still sees the agent's two
-    void tc;
+
+    const req = new Request("http://localhost/api/deals", {
+      headers: { authorization: await authHeader("auth0|admin-1", ["admin"]) },
+    });
+    const res = await listDeals(req);
+    const body = (await res.json()) as unknown[];
+    expect(body.length).toBe(2);
+  });
+
+  it("returns only linked agents' deals for tc role (#172)", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-1" });
+    const linkedAgent = await createUser({ role: "agent" });
+    const otherAgent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: linkedAgent.id },
+      data: { tc_user_id: tc.id },
+    });
+    await createDeal({ agent_id: linkedAgent.id, title: "Linked deal" });
+    await createDeal({ agent_id: otherAgent.id, title: "Foreign deal" });
 
     const req = new Request("http://localhost/api/deals", {
       headers: { authorization: await authHeader("auth0|tc-1", ["tc"]) },
     });
     const res = await listDeals(req);
-    const body = (await res.json()) as unknown[];
-    expect(body.length).toBe(2);
+    const body = (await res.json()) as { title: string }[];
+    expect(body.map((d) => d.title)).toEqual(["Linked deal"]);
   });
 
   it("returns 404 if user has not been synced yet", async () => {

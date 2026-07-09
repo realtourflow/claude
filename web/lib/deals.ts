@@ -80,16 +80,20 @@ export type DealWithStats = DealRow & {
 };
 
 /**
- * List deals visible to the given user. Agents see their own deals; TC and
- * admin see all.
+ * List deals visible to the given user. Agents see their own deals; TCs see
+ * only the deals of agents who have linked them (users.tc_user_id = tc.id) —
+ * never platform-wide (#172); admins see all.
  */
 export async function listDealsForUser(
   userId: string,
-  isTCOrAdmin: boolean
+  opts: { isAdmin: boolean; isTC: boolean }
 ): Promise<DealWithStats[]> {
-  const filter = isTCOrAdmin
+  const filter = opts.isAdmin
     ? Prisma.sql``
-    : Prisma.sql`WHERE deals.agent_id = ${userId}::uuid`;
+    : opts.isTC
+      ? // Linked agents' deals, plus the caller's own (covers dual-role users).
+        Prisma.sql`WHERE (deals.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid) OR deals.agent_id = ${userId}::uuid)`
+      : Prisma.sql`WHERE deals.agent_id = ${userId}::uuid`;
 
   return prisma.$queryRaw<DealWithStats[]>`
     SELECT deals.id, deals.agent_id, deals.type::text AS type, deals.stage::text AS stage,

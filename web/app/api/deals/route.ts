@@ -9,8 +9,10 @@ export async function GET(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found — call /users/sync first", 404);
-    const isTCOrAdmin = hasRole(claims.roles, ["tc", "admin"]);
-    const deals = await listDealsForUser(userId, isTCOrAdmin);
+    const deals = await listDealsForUser(userId, {
+      isAdmin: hasRole(claims.roles, ["admin"]),
+      isTC: hasRole(claims.roles, ["tc"]),
+    });
     return json(deals);
   })) as Response;
 }

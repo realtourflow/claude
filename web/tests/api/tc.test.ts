@@ -5,11 +5,15 @@ import {
   DELETE as deleteTcRoute,
 } from "@/app/api/me/tc/route";
 import { GET as getAgentsRoute } from "@/app/api/me/agents/route";
+import { GET as listDealsRoute } from "@/app/api/deals/route";
+import { GET as listTasksRoute } from "@/app/api/tasks/route";
+import { GET as getChecklistRoute } from "@/app/api/deals/[id]/checklist/route";
+import { GET as getContingenciesRoute } from "@/app/api/deals/[id]/contingencies/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
-import { createUser, createDeal } from "../helpers/factories";
+import { createUser, createDeal, createTask } from "../helpers/factories";
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
@@ -252,5 +256,187 @@ describe("GET /api/me/agents", () => {
       })
     );
     expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #172 — TC cross-tenant scoping. A TC must only see data for agents who have
+// linked them (users.tc_user_id = tc.id). Admins remain global.
+// ---------------------------------------------------------------------------
+
+function ctx(id: string) {
+  return { params: Promise.resolve({ id }) };
+}
+
+/**
+ * Seeds: TC-A linked to Agent-A (tc_user_id), Agent-B unlinked.
+ * Each agent has one deal with one task.
+ */
+async function seedTwoTenants() {
+  const tcA = await createUser({ role: "tc", auth0_id: "auth0|tc-a", name: "TC Able" });
+  const agentA = await createUser({ role: "agent", auth0_id: "auth0|agent-a" });
+  const agentB = await createUser({ role: "agent", auth0_id: "auth0|agent-b" });
+  await prisma.users.update({
+    where: { id: agentA.id },
+    data: { tc_user_id: tcA.id },
+  });
+  const dealA = await createDeal({ agent_id: agentA.id, title: "Agent A Deal" });
+  const dealB = await createDeal({ agent_id: agentB.id, title: "Agent B Deal" });
+  await createTask({ deal_id: dealA.id, title: "Task A" });
+  await createTask({ deal_id: dealB.id, title: "Task B" });
+  return { tcA, agentA, agentB, dealA, dealB };
+}
+
+describe("TC cross-tenant scoping (#172) — GET /api/deals", () => {
+  it("TC sees only linked agents' deals; unlinked agent's deal is ABSENT", async () => {
+    const { dealA, dealB } = await seedTwoTenants();
+
+    const res = await listDealsRoute(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|tc-a", ["tc"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; title: string }[];
+    const ids = body.map((d) => d.id);
+    expect(ids).toContain(dealA.id);
+    expect(ids).not.toContain(dealB.id);
+    expect(body.length).toBe(1);
+  });
+
+  it("a TC linked by no agents sees zero deals", async () => {
+    await seedTwoTenants();
+    await createUser({ role: "tc", auth0_id: "auth0|tc-lonely" });
+
+    const res = await listDealsRoute(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|tc-lonely", ["tc"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it("admin still sees all deals", async () => {
+    const { dealA, dealB } = await seedTwoTenants();
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+
+    const res = await listDealsRoute(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const ids = ((await res.json()) as { id: string }[]).map((d) => d.id);
+    expect(ids).toContain(dealA.id);
+    expect(ids).toContain(dealB.id);
+  });
+});
+
+describe("TC cross-tenant scoping (#172) — GET /api/tasks", () => {
+  it("TC sees only tasks on linked agents' deals", async () => {
+    await seedTwoTenants();
+
+    const res = await listTasksRoute(
+      new Request("http://localhost/api/tasks", {
+        headers: { authorization: await authHeader("auth0|tc-a", ["tc"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string }[];
+    expect(body.map((t) => t.title)).toEqual(["Task A"]);
+  });
+
+  it("admin still sees all tasks", async () => {
+    await seedTwoTenants();
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+
+    const res = await listTasksRoute(
+      new Request("http://localhost/api/tasks", {
+        headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const titles = ((await res.json()) as { title: string }[]).map((t) => t.title);
+    expect(titles).toContain("Task A");
+    expect(titles).toContain("Task B");
+  });
+});
+
+describe("TC cross-tenant scoping (#172) — checklist access", () => {
+  it("TC can read the checklist of a linked agent's deal", async () => {
+    const { dealA } = await seedTwoTenants();
+
+    const res = await getChecklistRoute(
+      new Request(`http://localhost/api/deals/${dealA.id}/checklist`, {
+        headers: { authorization: await authHeader("auth0|tc-a", ["tc"]) },
+      }),
+      ctx(dealA.id)
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("TC gets 404 on an unlinked agent's checklist", async () => {
+    const { dealB } = await seedTwoTenants();
+
+    const res = await getChecklistRoute(
+      new Request(`http://localhost/api/deals/${dealB.id}/checklist`, {
+        headers: { authorization: await authHeader("auth0|tc-a", ["tc"]) },
+      }),
+      ctx(dealB.id)
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("admin still has checklist access to any deal", async () => {
+    const { dealB } = await seedTwoTenants();
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+
+    const res = await getChecklistRoute(
+      new Request(`http://localhost/api/deals/${dealB.id}/checklist`, {
+        headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+      }),
+      ctx(dealB.id)
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("TC cross-tenant scoping (#172) — contingency access", () => {
+  it("TC can read contingencies of a linked agent's deal", async () => {
+    const { dealA } = await seedTwoTenants();
+
+    const res = await getContingenciesRoute(
+      new Request(`http://localhost/api/deals/${dealA.id}/contingencies`, {
+        headers: { authorization: await authHeader("auth0|tc-a", ["tc"]) },
+      }),
+      ctx(dealA.id)
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("TC gets 403 on an unlinked agent's contingencies", async () => {
+    const { dealB } = await seedTwoTenants();
+
+    const res = await getContingenciesRoute(
+      new Request(`http://localhost/api/deals/${dealB.id}/contingencies`, {
+        headers: { authorization: await authHeader("auth0|tc-a", ["tc"]) },
+      }),
+      ctx(dealB.id)
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("admin still has contingency access to any deal", async () => {
+    const { dealB } = await seedTwoTenants();
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+
+    const res = await getContingenciesRoute(
+      new Request(`http://localhost/api/deals/${dealB.id}/contingencies`, {
+        headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+      }),
+      ctx(dealB.id)
+    );
+    expect(res.status).toBe(200);
   });
 });

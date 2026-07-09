@@ -24,10 +24,14 @@ export async function GET(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
-    const isTCOrAdmin = hasRole(claims.roles, ["tc", "admin"]);
-    const filter = isTCOrAdmin
+    // Admins see all tasks; TCs only tasks on deals of agents who linked
+    // them (users.tc_user_id) — never platform-wide (#172); agents their own.
+    const filter = hasRole(claims.roles, ["admin"])
       ? Prisma.sql``
-      : Prisma.sql`WHERE d.agent_id = ${userId}::uuid`;
+      : hasRole(claims.roles, ["tc"])
+        ? // Linked agents' deals, plus the caller's own (covers dual-role users).
+          Prisma.sql`WHERE (d.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid) OR d.agent_id = ${userId}::uuid)`
+        : Prisma.sql`WHERE d.agent_id = ${userId}::uuid`;
 
     const tasks = await prisma.$queryRaw<TaskRow[]>`
       SELECT t.id, t.deal_id, t.assigned_to, t.title, t.description,

@@ -48,20 +48,40 @@ describe("GET /api/tasks", () => {
     expect(body[0].title).toBe("Mine");
   });
 
-  it("returns ALL tasks for tc/admin role", async () => {
-    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc" });
+  it("returns ALL tasks for admin role", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const agent = await createUser({ role: "agent" });
     const deal = await createDeal({ agent_id: agent.id });
     await createTask({ deal_id: deal.id, title: "T1" });
     await createTask({ deal_id: deal.id, title: "T2" });
-    void tc;
+
+    const req = new Request("http://localhost/api/tasks", {
+      headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+    });
+    const res = await listAllRoute(req);
+    const body = (await res.json()) as unknown[];
+    expect(body.length).toBe(2);
+  });
+
+  it("returns only linked agents' tasks for tc role (#172)", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc" });
+    const linkedAgent = await createUser({ role: "agent" });
+    const otherAgent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: linkedAgent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const linkedDeal = await createDeal({ agent_id: linkedAgent.id });
+    const foreignDeal = await createDeal({ agent_id: otherAgent.id });
+    await createTask({ deal_id: linkedDeal.id, title: "Linked task" });
+    await createTask({ deal_id: foreignDeal.id, title: "Foreign task" });
 
     const req = new Request("http://localhost/api/tasks", {
       headers: { authorization: await authHeader("auth0|tc", ["tc"]) },
     });
     const res = await listAllRoute(req);
-    const body = (await res.json()) as unknown[];
-    expect(body.length).toBe(2);
+    const body = (await res.json()) as { title: string }[];
+    expect(body.map((t) => t.title)).toEqual(["Linked task"]);
   });
 });
 
