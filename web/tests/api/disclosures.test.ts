@@ -49,9 +49,13 @@ describe("PATCH /api/deals/[id]/disclosures", () => {
     expect(row?.disclosures_updated_at).not.toBeNull();
   });
 
-  it("a TC can update any deal; toggling back off works", async () => {
+  it("a linked TC (agent.tc_user_id = caller) can update the deal; toggling back off works", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc" });
     const agent = await createUser({ role: "agent" });
-    await createUser({ role: "tc", auth0_id: "auth0|tc" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
     const deal = await createDeal({ agent_id: agent.id });
     await prisma.deals.update({
       where: { id: deal.id },
@@ -64,6 +68,53 @@ describe("PATCH /api/deals/[id]/disclosures", () => {
     expect(res.status).toBe(200);
     const row = await prisma.deals.findUnique({ where: { id: deal.id } });
     expect(row?.disclosures_complete).toBe(false);
+  });
+
+  it("an UNLINKED TC gets 404 and the deal is unchanged (#172 write scoping)", async () => {
+    await createUser({ role: "tc", auth0_id: "auth0|tc-outsider" });
+    const agent = await createUser({ role: "agent" }); // no tc_user_id link
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await disclosuresRoute(
+      patchReq(deal.id, { complete: true }, await authHeader("auth0|tc-outsider", ["tc"])),
+      ctx(deal.id)
+    );
+    expect(res.status).toBe(404);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.disclosures_complete).toBe(false);
+  });
+
+  it("a TC linked to a DIFFERENT agent gets 404 on a foreign deal", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-other" });
+    const ownAgent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: ownAgent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const foreignAgent = await createUser({ role: "agent" });
+    const foreignDeal = await createDeal({ agent_id: foreignAgent.id });
+
+    const res = await disclosuresRoute(
+      patchReq(foreignDeal.id, { complete: true }, await authHeader("auth0|tc-other", ["tc"])),
+      ctx(foreignDeal.id)
+    );
+    expect(res.status).toBe(404);
+    const row = await prisma.deals.findUnique({ where: { id: foreignDeal.id } });
+    expect(row?.disclosures_complete).toBe(false);
+  });
+
+  it("an admin stays global — can update any deal without a link", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await disclosuresRoute(
+      patchReq(deal.id, { complete: true }, await authHeader("auth0|admin", ["admin"])),
+      ctx(deal.id)
+    );
+    expect(res.status).toBe(200);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.disclosures_complete).toBe(true);
   });
 
   it("a non-owner agent gets 404; a buyer participant gets 403 via role gate", async () => {
