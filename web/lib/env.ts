@@ -8,6 +8,16 @@ const DEV_OAUTH_STATE_SECRET = "rtf-dev-oauth-state-secret-change-in-prod";
 
 const MIN_OAUTH_STATE_SECRET_LENGTH = 32;
 
+// Dev fallback for the Blob capability-URL HMAC key (lib/blob-storage.ts).
+// Same contract as DEV_OAUTH_STATE_SECRET: substituted when the env var is
+// unset OR empty outside Vercel production — but NEVER in production: this
+// string is committed, so falling back there would let anyone forge an
+// upload/download capability URL for any file in the store. See the
+// superRefine below (#188).
+const DEV_BLOB_CAP_SECRET = "rtf-dev-blob-cap-secret-change-in-prod";
+
+const MIN_BLOB_CAP_SECRET_LENGTH = 32;
+
 const shape = z.object({
   // Vercel deployment environment: "production" | "preview" | "development",
   // unset outside Vercel (local dev, vitest, CI, Playwright's `next dev`).
@@ -37,6 +47,15 @@ const shape = z.object({
   // store id at runtime. lib/blob-storage throws loudly if neither is present.
   BLOB_READ_WRITE_TOKEN: z.string().default(""),
   BLOB_STORE_ID: z.string().default(""),
+  // HMAC key for the short-lived upload/download capability URLs that proxy
+  // the private Blob store (lib/blob-storage.ts → /api/storage/blob-{put,get}).
+  // A DEDICATED secret — never derived from BLOB_READ_WRITE_TOKEN or
+  // BLOB_STORE_ID (#188: the store id is a visible identifier — dashboard,
+  // env listings, blob hostnames — not a secret). Outside Vercel production
+  // an unset/empty value falls back to a committed dev value so local dev /
+  // CI / previews stay zero-config; in production (VERCEL_ENV=production) it
+  // is REQUIRED with at least 32 chars — enforced by the superRefine below.
+  BLOB_CAP_SECRET: z.string().default(""),
 
   STRIPE_SECRET_KEY: z.string().default(""),
   STRIPE_WEBHOOK_SECRET: z.string().default(""),
@@ -172,6 +191,29 @@ const schema = shape
           `environment variables.`,
       });
     }
+
+    // Fail closed in production for the Blob capability-URL signing key
+    // (#188): hmacSecret() used to degrade to BLOB_STORE_ID — a visible
+    // identifier (Vercel dashboard, env listings, blob hostnames), not a
+    // secret — letting anyone who learns the store id forge a valid
+    // upload/download capability for any key. Mirror the OAUTH_STATE_SECRET
+    // guard: require a dedicated random secret whenever VERCEL_ENV=production.
+    if (
+      vals.VERCEL_ENV === "production" &&
+      vals.BLOB_CAP_SECRET.length < MIN_BLOB_CAP_SECRET_LENGTH
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["BLOB_CAP_SECRET"],
+        message:
+          `BLOB_CAP_SECRET must be set to a random value of at least ` +
+          `${MIN_BLOB_CAP_SECRET_LENGTH} characters when ` +
+          `VERCEL_ENV=production — Blob capability URLs must never be ` +
+          `signed with the store id or the committed dev fallback. ` +
+          `Generate one (e.g. \`openssl rand -hex 32\`) and set ` +
+          `BLOB_CAP_SECRET in the Vercel project environment variables.`,
+      });
+    }
   })
   // Dev/test/preview convenience: unset or empty resolves to the dev value.
   // Unreachable in production — the refine above already rejected anything
@@ -179,6 +221,7 @@ const schema = shape
   .transform((vals) => ({
     ...vals,
     OAUTH_STATE_SECRET: vals.OAUTH_STATE_SECRET || DEV_OAUTH_STATE_SECRET,
+    BLOB_CAP_SECRET: vals.BLOB_CAP_SECRET || DEV_BLOB_CAP_SECRET,
   }));
 
 export type Env = z.infer<typeof schema>;

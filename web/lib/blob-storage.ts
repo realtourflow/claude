@@ -13,9 +13,10 @@
  * public-URL fetch). Because a private blob URL can't be opened by the browser, both
  * client-direct uploads AND downloads go through tiny proxy routes
  * (/api/storage/blob-put, /api/storage/blob-get) authorized by a short-lived HMAC
- * capability over the key — the same shape as an S3 pre-signed PUT/GET, signed with a
- * server-only secret. `window.open(url)` sends no Authorization header, so the
- * capability (not the JWT) is what authorizes the streamed bytes.
+ * capability over the key — the same shape as an S3 pre-signed PUT/GET, signed with
+ * the dedicated server-only BLOB_CAP_SECRET (required in production; see hmacSecret).
+ * `window.open(url)` sends no Authorization header, so the capability (not the JWT)
+ * is what authorizes the streamed bytes.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { put, del, head, get } from "@vercel/blob";
@@ -112,12 +113,17 @@ function auth(): { token?: string } {
   return t ? { token: t } : {};
 }
 
-// HMAC secret for the upload/download capabilities — a server-only value present in
-// either auth mode (the R/W token, else the store id). Never exposed to the client.
+// HMAC secret for the upload/download capabilities — the DEDICATED
+// BLOB_CAP_SECRET, exclusively. Never derived from BLOB_READ_WRITE_TOKEN and
+// NEVER from BLOB_STORE_ID: the store id is a visible identifier (Vercel
+// dashboard, env listings, blob hostnames), not a secret, so signing with it
+// would let anyone forge a capability for any key (#188). lib/env.ts fails
+// closed in production (requires 32+ random chars when VERCEL_ENV=production)
+// and substitutes a committed dev value elsewhere so local dev / CI / previews
+// stay zero-config.
 function hmacSecret(): string {
   if (testStore) return TEST_HMAC_SECRET;
-  const e = env();
-  return e.BLOB_READ_WRITE_TOKEN || e.BLOB_STORE_ID;
+  return env().BLOB_CAP_SECRET;
 }
 
 // ---------------------------------------------------------------------------
