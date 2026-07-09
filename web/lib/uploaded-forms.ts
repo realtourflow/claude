@@ -159,12 +159,51 @@ function effective(f: ApprovedFieldRow): Effective {
   return { coreKey, role, type, label: coreKey ?? f.detected_name };
 }
 
+// Agent is checked FIRST: "BuyerAgent" / "SellerAgent" are agent signers, and
+// the old buyer→seller→agent order collapsed them into buyer/seller (#192).
 function normalizeParticipant(templateRole: string): string {
   const r = templateRole.toLowerCase();
+  if (r.includes("agent")) return "agent";
   if (r.includes("buyer")) return "buyer";
   if (r.includes("seller")) return "seller";
-  if (r.includes("agent")) return "agent";
   return r;
+}
+
+/**
+ * Assigns every DISTINCT template role used by the fields its own participant
+ * key. Keys are the normalized participant with a numeric suffix on collision
+ * (buyer, buyer2, agent, agent2, …) so Buyer1/Buyer2 or BuyerAgent/SellerAgent
+ * never collapse into one signer. Among agent roles, the form's own side
+ * (BuyerAgent on a buy form, SellerAgent on a sell form) claims the bare
+ * "agent" key — that's the key the send flow auto-matches to the deal's agent;
+ * suffixed keys surface as explicit outside-signer entries at send time.
+ */
+function participantKeys(
+  fields: ApprovedFieldRow[],
+  side: FormSide
+): Map<string, string> {
+  const roles: string[] = [];
+  for (const f of fields) {
+    const role = effective(f).role;
+    if (role && !roles.includes(role)) roles.push(role);
+  }
+  const ownSideAgent = side === "sell" ? "selleragent" : "buyeragent";
+  const offSideAgent = (role: string) => {
+    const r = role.toLowerCase();
+    return r.includes("agent") && !r.includes(ownSideAgent) ? 1 : 0;
+  };
+  roles.sort((a, b) => offSideAgent(a) - offSideAgent(b)); // stable: field order otherwise
+
+  const keys = new Map<string, string>();
+  const used = new Set<string>();
+  for (const role of roles) {
+    const base = normalizeParticipant(role);
+    let key = base;
+    for (let n = 2; used.has(key); n++) key = `${base}${n}`;
+    used.add(key);
+    keys.set(role, key);
+  }
+  return keys;
 }
 
 export type SignersConfig = {
@@ -174,17 +213,16 @@ export type SignersConfig = {
 };
 
 // The "derive" half of derive-then-confirm: a by-role signers config inferred
-// from the roles assigned to the form's fields. The admin can override it at
-// approval. Falls back to one role keyed off the form's side.
+// from the roles assigned to the form's fields — one entry per DISTINCT
+// template role (see participantKeys). The admin can override it at approval.
+// Falls back to one role keyed off the form's side.
 export function deriveSigners(fields: ApprovedFieldRow[], side: FormSide): SignersConfig {
-  const roles: string[] = [];
-  for (const f of fields) {
-    const role = effective(f).role;
-    if (role && !roles.includes(role)) roles.push(role);
-  }
-  if (roles.length === 0) roles.push(side === "sell" ? "Seller" : "Buyer");
   const roleMapping: Record<string, string> = {};
-  for (const role of roles) roleMapping[normalizeParticipant(role)] = role;
+  for (const [role, key] of participantKeys(fields, side)) roleMapping[key] = role;
+  if (Object.keys(roleMapping).length === 0) {
+    const fallback = side === "sell" ? "Seller" : "Buyer";
+    roleMapping[normalizeParticipant(fallback)] = fallback;
+  }
   return { roleMapping, routing: "by-role", consumerRoles: [] };
 }
 
@@ -208,13 +246,20 @@ const TAB_BUCKET: Record<string, TabBucket> = {
  * each field's PDF rectangle (bottom-left origin) to DocuSign tab coordinates
  * (points from the page top-left) and grouping tabs under the signer that owns
  * them. Text/checkbox tabs are labeled with the core key (so prefill matches);
- * unmapped fillables keep the detected name. Fields with no role land on the
+ * unmapped fillables keep the detected name.
+ *
+ * One signer per DISTINCT template role (#192): each field's role resolves
+ * through the same participant-key derivation as deriveSigners and then the
+ * (possibly admin-renamed) roleMapping, so Buyer2/BuyerAgent tabs land on their
+ * own recipients. A field role the mapping doesn't cover gets its OWN signer —
+ * never silently dumped on the first one. Only role-LESS fields land on the
  * first role. This is what makes uploaded-form placement match a hand-built one.
  */
 export async function buildTemplateSigners(input: {
   pdfBytes: Uint8Array;
   fields: ApprovedFieldRow[];
   roleMapping: Record<string, string>;
+  side: FormSide;
 }): Promise<TemplateSignerSpec[]> {
   const doc = await PDFDocument.load(input.pdfBytes, { ignoreEncryption: true });
   const heights = doc.getPages().map((p) => p.getHeight());
@@ -223,17 +268,31 @@ export async function buildTemplateSigners(input: {
   const roleNames = Array.from(new Set(Object.values(input.roleMapping)));
   if (roleNames.length === 0) roleNames.push("Signer");
   const signers = new Map<string, TemplateSignerSpec>();
-  roleNames.forEach((roleName, i) =>
-    signers.set(roleName, { roleName, recipientId: String(i + 1), routingOrder: i + 1 })
-  );
+  const addSigner = (roleName: string): TemplateSignerSpec => {
+    const spec: TemplateSignerSpec = {
+      roleName,
+      recipientId: String(signers.size + 1),
+      routingOrder: signers.size + 1,
+    };
+    signers.set(roleName, spec);
+    return spec;
+  };
+  roleNames.forEach(addSigner);
   const defaultRole = roleNames[0];
+  const keys = participantKeys(input.fields, input.side);
   const num = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
 
   for (const f of input.fields) {
     const eff = effective(f);
     const bucket = TAB_BUCKET[eff.type] ?? "textTabs";
-    const roleName = eff.role && signers.has(eff.role) ? eff.role : defaultRole;
-    const signer = signers.get(roleName)!;
+    // field role → participant key → mapped (possibly renamed) template role;
+    // an unmapped role keeps its own name as a distinct signer.
+    let roleName = defaultRole;
+    if (eff.role) {
+      const key = keys.get(eff.role);
+      roleName = (key ? input.roleMapping[key] : undefined) ?? eff.role;
+    }
+    const signer = signers.get(roleName) ?? addSigner(roleName);
 
     const page = f.page_number || 1;
     const pageHeight = heights[page - 1] ?? fallbackHeight;
@@ -250,7 +309,7 @@ export async function buildTemplateSigners(input: {
     (signer[bucket] ??= []).push(tab);
   }
 
-  return roleNames.map((r) => signers.get(r)!);
+  return Array.from(signers.values());
 }
 
 /** Serializes a detected-field row to the API shape (Decimals → numbers). */
