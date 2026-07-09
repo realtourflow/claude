@@ -13,7 +13,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { env, resetEnvForTesting } from "@/lib/env";
 
-const ENV_KEYS = ["OAUTH_STATE_SECRET", "VERCEL_ENV"] as const;
+const ENV_KEYS = [
+  "OAUTH_STATE_SECRET",
+  "VERCEL_ENV",
+  "DOCUSIGN_CONNECT_HMAC_KEY",
+] as const;
 
 // Must match the committed fallback in lib/env.ts.
 const DEV_FALLBACK = "rtf-dev-oauth-state-secret-change-in-prod";
@@ -95,12 +99,49 @@ describe("env() OAUTH_STATE_SECRET", () => {
 
     it("accepts a 32+ character secret", () => {
       process.env.OAUTH_STATE_SECRET = STRONG_SECRET;
+      // Production also fail-closes on the DocuSign webhook HMAC key (#176) —
+      // satisfy that guard so this case isolates OAUTH_STATE_SECRET.
+      process.env.DOCUSIGN_CONNECT_HMAC_KEY = "docusign-connect-hmac-key";
       expect(env().OAUTH_STATE_SECRET).toBe(STRONG_SECRET);
     });
 
     it("keeps throwing on every call — a failed parse is never cached", () => {
       expect(() => env()).toThrowError(/OAUTH_STATE_SECRET/);
       expect(() => env()).toThrowError(/OAUTH_STATE_SECRET/);
+    });
+  });
+});
+
+describe("env() DOCUSIGN_CONNECT_HMAC_KEY (#176 fail-closed webhook)", () => {
+  it("stays optional locally (no VERCEL_ENV) — dev/CI need zero config", () => {
+    expect(env().DOCUSIGN_CONNECT_HMAC_KEY).toBe("");
+  });
+
+  it("stays optional on previews (VERCEL_ENV=preview)", () => {
+    process.env.VERCEL_ENV = "preview";
+    expect(env().DOCUSIGN_CONNECT_HMAC_KEY).toBe("");
+  });
+
+  describe("in Vercel production (VERCEL_ENV=production)", () => {
+    beforeEach(() => {
+      process.env.VERCEL_ENV = "production";
+      // Satisfy the independent OAUTH_STATE_SECRET prod guard so these cases
+      // isolate the DocuSign key.
+      process.env.OAUTH_STATE_SECRET = STRONG_SECRET;
+    });
+
+    it("throws when unset, with a message naming DOCUSIGN_CONNECT_HMAC_KEY", () => {
+      expect(() => env()).toThrowError(/DOCUSIGN_CONNECT_HMAC_KEY/);
+    });
+
+    it("throws when explicitly empty", () => {
+      process.env.DOCUSIGN_CONNECT_HMAC_KEY = "";
+      expect(() => env()).toThrowError(/DOCUSIGN_CONNECT_HMAC_KEY/);
+    });
+
+    it("accepts a configured key", () => {
+      process.env.DOCUSIGN_CONNECT_HMAC_KEY = "prod-connect-hmac-key";
+      expect(env().DOCUSIGN_CONNECT_HMAC_KEY).toBe("prod-connect-hmac-key");
     });
   });
 });

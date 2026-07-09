@@ -48,8 +48,12 @@ const shape = z.object({
   DOCUSIGN_BASE_URL: z.string().default(""),
   // HMAC key configured in DocuSign Admin → Connect. When set, the public
   // /api/docusign/webhook handler requires a valid X-DocuSign-Signature-* header
-  // (HMAC-SHA256 over the raw body) and rejects anything else with 401. Empty =
-  // signature verification disabled (legacy/demo — the handler trusts the POST).
+  // (HMAC-SHA256 over the raw body) and rejects anything else with 401.
+  // Fail-closed (#176): REQUIRED in Vercel production (superRefine below makes
+  // env() throw), and the webhook route rejects every POST with 401 whenever
+  // the webhook is live (DOCUSIGN_WEBHOOK_URL set) or VERCEL_ENV=production
+  // and no key is configured. Empty only disables verification in local
+  // dev/CI/previews where the webhook isn't live (legacy/demo).
   DOCUSIGN_CONNECT_HMAC_KEY: z.string().default(""),
   // JSON map of formKey → {templateId, label, roleMapping, purpose?} for ad-hoc
   // / override forms defined entirely in env (lib/docusign-templates.ts). The
@@ -143,6 +147,28 @@ const schema = shape
           `${MIN_OAUTH_STATE_SECRET_LENGTH} characters when ` +
           `VERCEL_ENV=production — refusing to fall back to the committed ` +
           `dev secret. Set OAUTH_STATE_SECRET in the Vercel project ` +
+          `environment variables.`,
+      });
+    }
+
+    // Fail closed in production for the public DocuSign webhook (#176): with
+    // no HMAC key the handler would trust any POST — an attacker who learns
+    // an envelopeId could forge "completed" status, BAA-signed state, and
+    // archival. Mirror the OAUTH_STATE_SECRET guard: require the key whenever
+    // VERCEL_ENV=production. (Outside production the webhook route itself
+    // rejects unsigned POSTs with 401 when DOCUSIGN_WEBHOOK_URL is set.)
+    if (
+      vals.VERCEL_ENV === "production" &&
+      vals.DOCUSIGN_CONNECT_HMAC_KEY.length === 0
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["DOCUSIGN_CONNECT_HMAC_KEY"],
+        message:
+          `DOCUSIGN_CONNECT_HMAC_KEY must be set when VERCEL_ENV=production ` +
+          `— without it the public /api/docusign/webhook would trust ` +
+          `unsigned POSTs (forged envelope completion). Generate the HMAC ` +
+          `key in DocuSign Admin → Connect and set it in the Vercel project ` +
           `environment variables.`,
       });
     }
