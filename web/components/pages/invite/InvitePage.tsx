@@ -21,7 +21,7 @@ type InviteDetails = {
 
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>();
-  const { loginWithRedirect, isAuthenticated, isLoading: auth0Loading } = useAuth0();
+  const { loginWithRedirect, isAuthenticated, isLoading: auth0Loading, user } = useAuth0();
 
   const query = useQuery({
     queryKey: ['invite', token],
@@ -96,6 +96,14 @@ export default function InvitePage() {
   const RoleIcon = invite.role === 'buyer' ? Home : UserPlus;
   const roleColor = invite.role === 'buyer' ? 'bg-green-100 text-green-700' : 'bg-purple-100 text-purple-700';
 
+  // #174 — an authenticated user opening someone else's invite (usually the
+  // inviting agent previewing the link) gets a clear warning. The server
+  // rejects the claim for agent/admin/TC accounts either way; this is UX.
+  const loggedInEmail = isAuthenticated ? user?.email ?? null : null;
+  const emailMismatch = Boolean(
+    loggedInEmail && loggedInEmail.toLowerCase() !== invite.email.toLowerCase()
+  );
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-bg p-6">
       <div className="w-full max-w-sm">
@@ -136,6 +144,21 @@ export default function InvitePage() {
                 <span className="text-sm text-gray-700">{invite.email}</span>
               </div>
             </div>
+
+            {emailMismatch && (
+              <div
+                data-testid="invite-email-mismatch"
+                className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+              >
+                <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+                <p className="text-xs leading-relaxed text-amber-800">
+                  You&apos;re signed in as <span className="font-semibold">{loggedInEmail}</span>,
+                  but this invite was sent to <span className="font-semibold">{invite.email}</span>.
+                  Accepting from this account won&apos;t work — send the link to your client so
+                  they can accept it themselves.
+                </p>
+              </div>
+            )}
 
             <p className="text-xs text-gray-400 text-center leading-relaxed">
               By accepting, you&apos;ll get access to your deal file, tasks, messages, and documents through the client portal.

@@ -1,3 +1,4 @@
+import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "./db";
 import { AuthError } from "./auth";
 import type { Role } from "./roles";
@@ -25,7 +26,18 @@ export async function upsertUser(input: {
   email: string;
   name: string;
   role: Role;
+  /**
+   * When true, an existing row KEEPS its current role — `input.role` only
+   * applies on first insert. Invite claims use this so claiming can never
+   * demote an existing account (#174: an agent opening their own client
+   * invite must not become a buyer). Default (false) preserves the
+   * historical overwrite for /users/sync, whose role comes from the JWT.
+   */
+  keepExistingRole?: boolean;
 }): Promise<SyncedUser> {
+  const roleOnConflict = input.keepExistingRole
+    ? Prisma.sql`users.role`
+    : Prisma.sql`EXCLUDED.role`;
   // Raw SQL keeps the CASE-WHEN name-preserve logic exactly as the Go side.
   const rows = await prisma.$queryRaw<SyncedUser[]>`
     INSERT INTO users (auth0_id, email, name, role)
@@ -37,7 +49,7 @@ export async function upsertUser(input: {
                        THEN EXCLUDED.name
                        ELSE users.name
                      END,
-        role       = EXCLUDED.role,
+        role       = ${roleOnConflict},
         updated_at = NOW()
     RETURNING id, auth0_id, email, name, role, phone, onboarding_complete, created_at, updated_at
   `;
