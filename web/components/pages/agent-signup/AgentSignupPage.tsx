@@ -18,7 +18,7 @@ type AgentInviteDetails = {
 
 export default function AgentSignupPage() {
   const { token } = useParams<{ token: string }>();
-  const { loginWithRedirect, isAuthenticated, isLoading: auth0Loading } = useAuth0();
+  const { loginWithRedirect, isAuthenticated, isLoading: auth0Loading, user } = useAuth0();
 
   const query = useQuery({
     queryKey: ['agent-invite', token],
@@ -98,6 +98,15 @@ export default function AgentSignupPage() {
     );
   }
 
+  // #224 — an authenticated user opening someone else's agent invite (a
+  // forwarded link, or the admin previewing it) gets a clear warning. The
+  // server rejects the claim for existing non-agent accounts either way;
+  // this is UX.
+  const loggedInEmail = isAuthenticated ? user?.email ?? null : null;
+  const emailMismatch = Boolean(
+    invite && loggedInEmail && loggedInEmail.toLowerCase() !== invite.email.toLowerCase()
+  );
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-bg p-6">
       <div className="w-full max-w-sm">
@@ -137,6 +146,21 @@ export default function AgentSignupPage() {
                 </span>
               </div>
             </div>
+
+            {emailMismatch && (
+              <div
+                data-testid="agent-invite-email-mismatch"
+                className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3"
+              >
+                <AlertCircle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+                <p className="text-xs leading-relaxed text-amber-800">
+                  You&apos;re signed in as <span className="font-semibold">{loggedInEmail}</span>,
+                  but this invite was sent to <span className="font-semibold">{invite?.email}</span>.
+                  Accepting from this account won&apos;t work — sign out and accept the invite
+                  with the invited email.
+                </p>
+              </div>
+            )}
 
             <p className="text-xs text-gray-400 text-center leading-relaxed">
               Create your account to access the agent dashboard, manage deals, and get started with onboarding.

@@ -6,6 +6,8 @@ import { POST as claimRoute } from "@/app/api/agent-invites/[token]/claim/route"
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setEmailForTesting } from "@/lib/email";
 import { prisma } from "@/lib/db";
+import { upsertUser } from "@/lib/users";
+import type { Role } from "@/lib/roles";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
@@ -347,6 +349,169 @@ describe("DELETE /api/admin/agent-invites/[inviteId] — revoke", () => {
     const req = await deleteReq(seeded.id, "auth0|agent", ["agent"]);
     const res = await deleteRoute(req, inviteIdCtx(seeded.id));
     expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #224 — claiming an agent invite must never rewrite an existing
+// account's role (mirror of #174 for client invites): a buyer/seller must not
+// be promoted to agent, an admin/tc must not be demoted to agent, and a
+// non-agent opening the link must not burn the invite for the real invitee.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/agent-invites/[token]/claim — existing accounts (#224)", () => {
+  it("18. an existing buyer claiming an agent invite → 409, role unchanged, invite not burned", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const seeded = await seedInvite(admin.id, { email: "newagent@example.com" });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|existing-buyer",
+      email: "buyer@example.com",
+      name: "Betty Buyer",
+    });
+
+    const req = await claimReq(seeded.token, "auth0|existing-buyer", ["buyer"], {
+      email: "newagent@example.com",
+      name: "Betty Buyer",
+    });
+    const res = await claimRoute(req, tokenCtx(seeded.token));
+    expect(res.status).toBe(409);
+
+    // The buyer was NOT promoted to agent, and the account was not rewritten.
+    const row = await prisma.users.findUnique({
+      where: { id: buyer.id },
+      select: { role: true, email: true, name: true },
+    });
+    expect(row?.role).toBe("buyer");
+    expect(row?.email).toBe("buyer@example.com");
+    expect(row?.name).toBe("Betty Buyer");
+
+    // The invite is still claimable by the real invitee.
+    const invite = await prisma.agent_invites.findUnique({
+      where: { id: seeded.id },
+      select: { claimed_at: true, claimed_by: true },
+    });
+    expect(invite?.claimed_at).toBeNull();
+    expect(invite?.claimed_by).toBeNull();
+  });
+
+  it.each(["seller", "admin", "tc", "lending_partner"] as const)(
+    "19. an existing %s claiming an agent invite → 409, role unchanged, invite unclaimed",
+    async (role) => {
+      const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+      const seeded = await seedInvite(admin.id, { email: "newagent@example.com" });
+      const existing = await createUser({ role, auth0_id: `auth0|existing-${role}` });
+
+      const req = await claimReq(seeded.token, `auth0|existing-${role}`, [role], {
+        email: "newagent@example.com",
+        name: "Existing User",
+      });
+      const res = await claimRoute(req, tokenCtx(seeded.token));
+      expect(res.status).toBe(409);
+
+      const row = await prisma.users.findUnique({
+        where: { id: existing.id },
+        select: { role: true },
+      });
+      expect(row?.role).toBe(role);
+
+      const invite = await prisma.agent_invites.findUnique({
+        where: { id: seeded.id },
+        select: { claimed_at: true },
+      });
+      expect(invite?.claimed_at).toBeNull();
+    }
+  );
+
+  it("20. an existing agent claims → 200, invite claimed by them, account untouched", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const seeded = await seedInvite(admin.id, { email: "invited@example.com" });
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|existing-agent",
+      email: "personal@example.com",
+      name: "Alice Agent",
+    });
+
+    const req = await claimReq(seeded.token, "auth0|existing-agent", ["agent"], {
+      email: "invited@example.com",
+      name: "Different Name",
+    });
+    const res = await claimRoute(req, tokenCtx(seeded.token));
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as { id: string; role: string };
+    expect(out.id).toBe(agent.id);
+    expect(out.role).toBe("agent");
+
+    // Account untouched: role, email and name all preserved.
+    const row = await prisma.users.findUnique({
+      where: { id: agent.id },
+      select: { role: true, email: true, name: true },
+    });
+    expect(row?.role).toBe("agent");
+    expect(row?.email).toBe("personal@example.com");
+    expect(row?.name).toBe("Alice Agent");
+
+    const invite = await prisma.agent_invites.findUnique({
+      where: { id: seeded.id },
+      select: { claimed_at: true, claimed_by: true },
+    });
+    expect(invite?.claimed_at).not.toBeNull();
+    expect(invite?.claimed_by).toBe(agent.id);
+  });
+
+  it("21. a brand-new user claims → 200, agent account created (happy path intact)", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const seeded = await seedInvite(admin.id, { email: "brandnew@example.com" });
+
+    const req = await claimReq(seeded.token, "auth0|brand-new", [], {
+      email: "brandnew@example.com",
+      name: "Nina New",
+    });
+    const res = await claimRoute(req, tokenCtx(seeded.token));
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as { id: string; role: string; email: string };
+    expect(out.role).toBe("agent");
+    expect(out.email).toBe("brandnew@example.com");
+
+    const invite = await prisma.agent_invites.findUnique({
+      where: { id: seeded.id },
+      select: { claimed_at: true, claimed_by: true },
+    });
+    expect(invite?.claimed_at).not.toBeNull();
+    expect(invite?.claimed_by).toBe(out.id);
+  });
+});
+
+describe("upsertUser — keepExistingRole (#224, mirrors #174)", () => {
+  it("does not overwrite an existing row's role when keepExistingRole is set", async () => {
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|keep-role-buyer" });
+
+    const user = await upsertUser({
+      auth0Id: "auth0|keep-role-buyer",
+      email: buyer.email,
+      name: buyer.name,
+      role: "agent" as Role,
+      keepExistingRole: true,
+    });
+    expect(user.role).toBe("buyer");
+
+    const row = await prisma.users.findUnique({
+      where: { id: buyer.id },
+      select: { role: true },
+    });
+    expect(row?.role).toBe("buyer");
+  });
+
+  it("still sets the role on first insert when keepExistingRole is set", async () => {
+    const user = await upsertUser({
+      auth0Id: "auth0|fresh-agent-insert",
+      email: "fresh@example.com",
+      name: "Fresh Agent",
+      role: "agent" as Role,
+      keepExistingRole: true,
+    });
+    expect(user.role).toBe("agent");
   });
 });
 
