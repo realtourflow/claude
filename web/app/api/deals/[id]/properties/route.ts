@@ -5,17 +5,36 @@ import { hasDealAccess } from "@/lib/deals";
 
 type Ctx = { params: Promise<{ id: string }> };
 
+type PropertyRow = Awaited<
+  ReturnType<typeof prisma.tracked_properties.findMany>
+>[number];
+
+/**
+ * Wire serializer for tracked_properties. `agent_private_note` is labeled
+ * "only you see this" in the agent UI — it must never reach non-owner
+ * callers (buyers/sellers are deal participants and pass hasDealAccess).
+ */
+function serializeProperty(row: PropertyRow, includeAgentPrivate: boolean) {
+  const { agent_private_note, ...shared } = row;
+  return includeAgentPrivate ? { ...shared, agent_private_note } : shared;
+}
+
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
     if (!(await hasDealAccess(dealId, userId))) return error("deal not found", 404);
+    const deal = await prisma.deals.findUnique({
+      where: { id: dealId },
+      select: { agent_id: true },
+    });
+    const isOwningAgent = deal?.agent_id === userId;
     const rows = await prisma.tracked_properties.findMany({
       where: { deal_id: dealId },
       orderBy: { created_at: "desc" },
     });
-    return json(rows);
+    return json(rows.map((row) => serializeProperty(row, isOwningAgent)));
   })) as Response;
 }
 

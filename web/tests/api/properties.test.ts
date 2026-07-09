@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import { POST as createPropRoute } from "@/app/api/deals/[id]/properties/route";
+import {
+  GET as listPropsRoute,
+  POST as createPropRoute,
+} from "@/app/api/deals/[id]/properties/route";
 import {
   PATCH as patchPropRoute,
   DELETE as deletePropRoute,
@@ -59,6 +62,95 @@ async function patchProp(
   );
   return patchPropRoute(req, propCtx(dealId, propId));
 }
+
+describe("GET /api/deals/[id]/properties — agent_private_note privacy", () => {
+  const PRIVATE_NOTE = "seller is desperate, lowball them";
+
+  async function seedDealWithPrivateNote() {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const prop = await seedProperty(deal.id, "auth0|agent");
+    await prisma.tracked_properties.update({
+      where: { id: prop.id },
+      data: {
+        agent_private_note: PRIVATE_NOTE,
+        agent_note: "shared agent note",
+        buyer_note: "buyer's own note",
+        status: "toured",
+      },
+    });
+    return { agent, buyer, deal, prop };
+  }
+
+  async function listProps(
+    dealId: string,
+    auth0: string,
+    roles: string[]
+  ): Promise<Response> {
+    const req = new Request(`http://localhost/api/deals/${dealId}/properties`, {
+      headers: { authorization: await authHeader(auth0, roles) },
+    });
+    return listPropsRoute(req, dealCtx(dealId));
+  }
+
+  it("never sends agent_private_note to a buyer participant", async () => {
+    const { deal } = await seedDealWithPrivateNote();
+
+    const res = await listProps(deal.id, "auth0|buyer", ["buyer"]);
+    expect(res.status).toBe(200);
+    const rows = (await res.json()) as Record<string, unknown>[];
+    expect(rows).toHaveLength(1);
+    // The key must be absent from the wire payload entirely, not just null.
+    expect("agent_private_note" in rows[0]).toBe(false);
+    expect(JSON.stringify(rows)).not.toContain(PRIVATE_NOTE);
+  });
+
+  it("still returns agent_private_note to the owning agent", async () => {
+    const { deal } = await seedDealWithPrivateNote();
+
+    const res = await listProps(deal.id, "auth0|agent", ["agent"]);
+    expect(res.status).toBe(200);
+    const rows = (await res.json()) as Record<string, unknown>[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].agent_private_note).toBe(PRIVATE_NOTE);
+  });
+
+  it("leaves all buyer-visible fields intact for the buyer", async () => {
+    const { deal, prop } = await seedDealWithPrivateNote();
+
+    const res = await listProps(deal.id, "auth0|buyer", ["buyer"]);
+    expect(res.status).toBe(200);
+    const rows = (await res.json()) as Record<string, unknown>[];
+    const row = rows[0];
+
+    expect(row.id).toBe(prop.id);
+    expect(row.deal_id).toBe(deal.id);
+    expect(row.address).toBe("123 Test St");
+    expect(row.status).toBe("toured");
+    expect(row.agent_note).toBe("shared agent note");
+    expect(row.buyer_note).toBe("buyer's own note");
+    expect(row.offer_requested).toBe(false);
+    for (const key of [
+      "city",
+      "state",
+      "price",
+      "beds",
+      "baths",
+      "sqft",
+      "thumbnail_url",
+      "source_url",
+      "added_by",
+      "created_at",
+      "updated_at",
+    ]) {
+      expect(row).toHaveProperty(key);
+    }
+  });
+});
 
 describe("PATCH /api/deals/[id]/properties/[propId]", () => {
   it("persists status, buyer_note, agent_private_note, and offer_requested", async () => {
