@@ -40,12 +40,44 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     if (inv.claimed_at !== null) return error("invite already claimed", 409);
     if (inv.expires_at.getTime() < Date.now()) return error("invite expired", 410);
 
-    const user = await upsertUser({
-      auth0Id: claims.sub,
-      email: body.email,
-      name: body.name,
-      role: inv.role,
+    // #174 — a claim must never rewrite an existing account. Look the caller
+    // up BEFORE any write: an agent/admin/TC "previewing" the invite link
+    // must neither demote themselves to buyer nor burn the invite for the
+    // real client.
+    const caller = await prisma.users.findUnique({
+      where: { auth0_id: claims.sub },
+      select: {
+        id: true,
+        auth0_id: true,
+        email: true,
+        name: true,
+        role: true,
+        phone: true,
+        onboarding_complete: true,
+        created_at: true,
+        updated_at: true,
+      },
     });
+    if (caller && caller.role !== "buyer" && caller.role !== "seller") {
+      return error(
+        "this invite is for your client — it can't be accepted from your account",
+        409
+      );
+    }
+
+    // Existing buyer/seller: keep the account exactly as-is (role, email,
+    // name untouched) and just link them to the deal below. Brand-new
+    // caller: create the account with the invite's role. keepExistingRole
+    // makes the insert race-safe — a concurrent sync can't be demoted.
+    const user =
+      caller ??
+      (await upsertUser({
+        auth0Id: claims.sub,
+        email: body.email,
+        name: body.name,
+        role: inv.role,
+        keepExistingRole: true,
+      }));
 
     await prisma.deal_invites.update({
       where: { id: inv.id },
