@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { AuthError } from "./auth";
 import type { Role } from "./roles";
 
 export type SyncedUser = {
@@ -44,13 +45,36 @@ export async function upsertUser(input: {
 }
 
 /**
+ * Throws AuthError(403) when the auth0 subject maps to a deactivated user
+ * row (users.deactivated_at set). A missing row passes — brand-new users
+ * (first /users/sync, invite claims) have no row yet and must not be blocked.
+ *
+ * Called by withAuth (lib/http.ts) so a valid JWT alone is never enough:
+ * deactivation revokes access on every protected route immediately (#173).
+ */
+export async function assertNotDeactivated(auth0Id: string): Promise<void> {
+  const row = await prisma.users.findUnique({
+    where: { auth0_id: auth0Id },
+    select: { deactivated_at: true },
+  });
+  if (row?.deactivated_at) {
+    throw new AuthError("account deactivated", 403);
+  }
+}
+
+/**
  * Looks up the DB user id for a given auth0 subject. Returns null if no row.
+ * Throws AuthError(403) for a deactivated user — defense in depth on top of
+ * the withAuth choke point (#173).
  */
 export async function resolveUserId(auth0Id: string): Promise<string | null> {
   const row = await prisma.users.findUnique({
     where: { auth0_id: auth0Id },
-    select: { id: true },
+    select: { id: true, deactivated_at: true },
   });
+  if (row?.deactivated_at) {
+    throw new AuthError("account deactivated", 403);
+  }
   return row?.id ?? null;
 }
 
@@ -58,11 +82,15 @@ export async function resolveUserId(auth0Id: string): Promise<string | null> {
  * Looks up just the persisted role for an auth0 subject. Returns null if no
  * row exists. Used when the JWT has no roles claim (e.g. brand-new agent
  * who claimed an invite before the Auth0 action fired).
+ * Throws AuthError(403) for a deactivated user (#173).
  */
 export async function getPersistedRole(auth0Id: string): Promise<Role | null> {
   const row = await prisma.users.findUnique({
     where: { auth0_id: auth0Id },
-    select: { role: true },
+    select: { role: true, deactivated_at: true },
   });
+  if (row?.deactivated_at) {
+    throw new AuthError("account deactivated", 403);
+  }
   return (row?.role as Role | undefined) ?? null;
 }
