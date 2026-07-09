@@ -29,7 +29,8 @@ export async function GET(req: Request): Promise<Response> {
     const filter = hasRole(claims.roles, ["admin"])
       ? Prisma.sql``
       : hasRole(claims.roles, ["tc"])
-        ? Prisma.sql`WHERE d.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid)`
+        ? // Linked agents' deals, plus the caller's own (covers dual-role users).
+          Prisma.sql`WHERE (d.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid) OR d.agent_id = ${userId}::uuid)`
         : Prisma.sql`WHERE d.agent_id = ${userId}::uuid`;
 
     const tasks = await prisma.$queryRaw<TaskRow[]>`

@@ -91,7 +91,8 @@ export async function listDealsForUser(
   const filter = opts.isAdmin
     ? Prisma.sql``
     : opts.isTC
-      ? Prisma.sql`WHERE deals.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid)`
+      ? // Linked agents' deals, plus the caller's own (covers dual-role users).
+        Prisma.sql`WHERE (deals.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid) OR deals.agent_id = ${userId}::uuid)`
       : Prisma.sql`WHERE deals.agent_id = ${userId}::uuid`;
 
   return prisma.$queryRaw<DealWithStats[]>`
