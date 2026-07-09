@@ -3,6 +3,7 @@ import { POST as syncRoute } from "@/app/api/users/sync/route";
 import { GET as listRoute } from "@/app/api/users/route";
 import { PATCH as activateRoute } from "@/app/api/users/[id]/activate/route";
 import { PATCH as deactivateRoute } from "@/app/api/users/[id]/deactivate/route";
+import { GET as listDealsRoute } from "@/app/api/deals/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -249,6 +250,103 @@ describe("PATCH /api/users/[id]/deactivate", () => {
   it("returns 404 for unknown user id", async () => {
     const res = await call("00000000-0000-0000-0000-000000000000");
     expect(res.status).toBe(404);
+  });
+});
+
+describe("deactivated user enforcement (#173)", () => {
+  async function deactivate(userId: string): Promise<void> {
+    await prisma.users.update({
+      where: { id: userId },
+      data: { deactivated_at: new Date() },
+    });
+  }
+
+  async function syncAs(auth: string): Promise<Response> {
+    return syncRoute(
+      new Request("http://localhost/api/users/sync", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: auth },
+        body: JSON.stringify({ email: "who@example.com", name: "Who" }),
+      })
+    );
+  }
+
+  it("returns 403 on a protected route once the user is deactivated", async () => {
+    const u = await createUser({ auth0_id: "auth0|fired-agent", role: "agent" });
+    const auth = await authHeader("auth0|fired-agent", ["agent"]);
+
+    // Sanity: while active, the agent can list deals.
+    const before = await listDealsRoute(
+      makeRequest("http://localhost/api/deals", { auth })
+    );
+    expect(before.status).toBe(200);
+
+    await deactivate(u.id);
+
+    const after = await listDealsRoute(
+      makeRequest("http://localhost/api/deals", { auth })
+    );
+    expect(after.status).toBe(403);
+  });
+
+  it("returns 403 on /api/users/sync for a deactivated user", async () => {
+    const u = await createUser({ auth0_id: "auth0|fired-sync", role: "agent" });
+    await deactivate(u.id);
+    const res = await syncAs(await authHeader("auth0|fired-sync", ["agent"]));
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 403 even on routes that never call resolveUserId (GET /api/users)", async () => {
+    const admin = await createUser({ auth0_id: "auth0|fired-admin", role: "admin" });
+    await deactivate(admin.id);
+    const res = await listRoute(
+      makeRequest("http://localhost/api/users", {
+        auth: await authHeader("auth0|fired-admin", ["admin"]),
+      })
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("restores access after reactivation", async () => {
+    const u = await createUser({ auth0_id: "auth0|rehired", role: "agent" });
+    await deactivate(u.id);
+    const auth = await authHeader("auth0|rehired", ["agent"]);
+
+    // Blocked while deactivated.
+    const blocked = await listDealsRoute(
+      makeRequest("http://localhost/api/deals", { auth })
+    );
+    expect(blocked.status).toBe(403);
+
+    // Admin reactivates through the real route.
+    const adminAuth = await authHeader("auth0|admin", ["admin"]);
+    const actRes = await activateRoute(
+      makeRequest(`http://localhost/api/users/${u.id}/activate`, {
+        method: "PATCH",
+        auth: adminAuth,
+      }),
+      { params: Promise.resolve({ id: u.id }) }
+    );
+    expect(actRes.status).toBe(200);
+
+    // Access restored on sync and on a protected route.
+    const syncRes = await syncAs(auth);
+    expect(syncRes.status).toBe(200);
+    const deals = await listDealsRoute(
+      makeRequest("http://localhost/api/deals", { auth })
+    );
+    expect(deals.status).toBe(200);
+  });
+
+  it("leaves active users unaffected", async () => {
+    await createUser({ auth0_id: "auth0|still-here", role: "agent" });
+    const auth = await authHeader("auth0|still-here", ["agent"]);
+    const deals = await listDealsRoute(
+      makeRequest("http://localhost/api/deals", { auth })
+    );
+    expect(deals.status).toBe(200);
+    const syncRes = await syncAs(auth);
+    expect(syncRes.status).toBe(200);
   });
 });
 

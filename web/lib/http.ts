@@ -5,10 +5,12 @@
  * - `error(message, status)` — return a plain-text error matching the Go
  *   backend's `http.Error` semantics.
  * - `withAuth(req, handler, allowedRoles?)` — verifies JWT, optionally checks
- *   role overlap, and translates AuthError to the right HTTP status.
+ *   role overlap, rejects deactivated users, and translates AuthError to the
+ *   right HTTP status.
  */
 import { AuthError, verifyAuth0Jwt, type AuthClaims, type VerifyOptions } from "./auth";
 import { requireRole } from "./roles";
+import { assertNotDeactivated } from "./users";
 
 export function json<T>(data: T, status = 200): Response {
   return Response.json(data as object, { status });
@@ -33,6 +35,9 @@ export async function withAuth<T>(
     if (opts?.allowedRoles) {
       requireRole(claims.roles, opts.allowedRoles);
     }
+    // A valid JWT is not enough: a deactivated user (users.deactivated_at
+    // set) is blocked on every protected route, including /users/sync (#173).
+    await assertNotDeactivated(claims.sub);
     return await handler(claims);
   } catch (err) {
     if (err instanceof AuthError) {
