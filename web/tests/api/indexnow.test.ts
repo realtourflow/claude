@@ -96,7 +96,7 @@ describe("submitRecentlyChanged", () => {
     setNotionForTesting(
       fakeNotion([
         page("fresh-post", "2026-07-08T11:30:00Z"), // 30 min ago → in window
-        page("stale-post", "2026-07-08T06:00:00Z"), // 6 h ago → outside 120 min
+        page("stale-post", "2026-07-06T12:00:00Z"), // 2 days ago → outside 26h
       ])
     );
 

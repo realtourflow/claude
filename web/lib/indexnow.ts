@@ -8,10 +8,15 @@
  * the endpoint when a post is published or edited.
  *
  * How it's driven (lib is the shared core):
- *  - GET  /api/indexnow  — hourly Vercel Cron sweep (submitRecentlyChanged).
+ *  - GET  /api/indexnow  — daily Vercel Cron sweep (submitRecentlyChanged).
+ *    Daily, not hourly, because the Vercel Hobby plan caps crons at one run
+ *    per day; a more frequent schedule makes the deployment fail. For same-day
+ *    indexing use the POST hook below (or move the site to a plan that allows
+ *    sub-daily crons and drop the schedule back to hourly).
  *  - POST /api/indexnow  — manual/ops trigger; with `{ urls: [...] }` it
  *    submits exactly those URLs (e.g. the auto-publish pipeline pinging the new
- *    post the moment it flips to Published, for true instant indexing).
+ *    post the moment it flips to Published, for true instant indexing — the way
+ *    to get a post to Bing within seconds rather than waiting for the sweep).
  *
  * Design note — this is intentionally stateless. Rather than persist "already
  * submitted" rows, the sweep re-submits whatever changed inside a lookback
@@ -35,10 +40,11 @@ const ENDPOINT = "https://api.indexnow.org/indexnow";
 // Notion "Publish To" tag for this site (see lib/notion publishedFilter).
 const SITE = "RealTourFlow";
 
-// Lookback for the periodic sweep. Kept larger than the cron interval (hourly)
-// so a missed run doesn't silently drop a change; the harmless cost is that a
-// just-changed URL may be submitted on two consecutive runs.
-export const DEFAULT_LOOKBACK_MINUTES = 120;
+// Lookback for the periodic sweep. Kept larger than the cron interval (daily,
+// 24h) so a change published just after a run — plus a couple hours of cron
+// jitter — is still caught by the next one; the harmless cost is that a URL
+// changed in the ~2h overlap may be submitted on two consecutive days.
+export const DEFAULT_LOOKBACK_MINUTES = 26 * 60;
 
 export type SubmitResult = { ok: boolean; status: number };
 type SubmitFn = (urls: string[]) => Promise<SubmitResult>;
