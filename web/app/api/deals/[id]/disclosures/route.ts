@@ -2,6 +2,7 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasRole } from "@/lib/roles";
+import { isLinkedTCForDeal } from "@/lib/deals";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -18,13 +19,20 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
 
-    // TC/admin may update any deal; agents only their own.
-    if (!hasRole(claims.roles, ["tc", "admin"])) {
+    // Admins may update any deal; agents only their own; a TC only deals
+    // whose agent has them assigned (users.tc_user_id = caller, #172).
+    if (!hasRole(claims.roles, ["admin"])) {
       const owned = await prisma.deals.findFirst({
         where: { id: dealId, agent_id: userId },
         select: { id: true },
       });
-      if (!owned) return error("deal not found or access denied", 404);
+      const linkedTC =
+        !owned &&
+        hasRole(claims.roles, ["tc"]) &&
+        (await isLinkedTCForDeal(dealId, userId));
+      if (!owned && !linkedTC) {
+        return error("deal not found or access denied", 404);
+      }
     }
 
     let body: { complete?: boolean };
