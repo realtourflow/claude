@@ -362,6 +362,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         pdfBytes: bytes,
         fields,
         roleMapping: signers.roleMapping,
+        side: form.side as FormSide,
       });
       templateId = await docusign.createTemplateFromDocument({
         name: `${form.label} — ${form.id}`,
