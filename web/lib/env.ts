@@ -115,6 +115,13 @@ const shape = z.object({
   // empty = blog feature disabled (the /blog routes render an empty state).
   NOTION_TOKEN: z.string().default(""),
   NOTION_BLOG_DATABASE_ID: z.string().default(""),
+
+  // Shared secret for the Notion "Send webhook" automation that pings IndexNow
+  // the instant a blog post flips to Published (/api/indexnow/notion?token=…).
+  // Empty = that webhook endpoint is disabled (503); the daily cron sweep is
+  // unaffected. Kept distinct from CRON_SECRET so a token that rides in a URL
+  // can't be replayed against the cron/ops endpoints.
+  INDEXNOW_WEBHOOK_SECRET: z.string().default(""),
 });
 
 const schema = shape
