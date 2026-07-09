@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { isLinkedTCForDeal } from "./deals";
 import { hasRole } from "./roles";
 
 export const CHECKLIST_ELIGIBLE_STAGES = new Set([
@@ -39,7 +40,11 @@ export async function checklistHasAccess(
   userId: string,
   roles: readonly string[]
 ): Promise<boolean> {
-  if (hasRole(roles, ["tc", "admin"])) return true;
+  if (hasRole(roles, ["admin"])) return true;
+  // A TC only has access when the deal's owning agent linked them (#172).
+  if (hasRole(roles, ["tc"]) && (await isLinkedTCForDeal(dealId, userId))) {
+    return true;
+  }
   const deal = await prisma.deals.findFirst({
     where: {
       id: dealId,
