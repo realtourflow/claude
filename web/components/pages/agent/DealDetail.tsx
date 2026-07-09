@@ -2624,7 +2624,8 @@ const DOC_TYPE_OPTIONS = [
   'Other',
 ];
 
-function UploadDocModal({
+// Exported for tests (tests/components/DealDetail.test.tsx).
+export function UploadDocModal({
   dealId,
   onClose,
   onUploaded,
@@ -2650,11 +2651,18 @@ function UploadDocModal({
     try {
       const mimeType = file.type || 'application/octet-stream';
       const { upload_url, s3_key } = await requestUploadUrl(dealId, file.name, mimeType);
-      await fetch(upload_url, {
+      const put = await fetch(upload_url, {
         method: 'PUT',
         body: file,
         headers: { 'Content-Type': mimeType },
       });
+      // fetch does not throw on HTTP errors — a 413/403/500 here means the blob
+      // was never written. Confirming anyway would create a phantom documents
+      // row that 404s on download (#190).
+      if (!put.ok) {
+        setError(put.status === 413 ? 'File too large (max 25MB).' : 'Upload failed. Please try again.');
+        return;
+      }
       await confirmUpload(dealId, effectiveName, s3_key, mimeType, file.size);
       setDone(true);
       onUploaded();
