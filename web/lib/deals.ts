@@ -163,6 +163,27 @@ export async function loadDealPeople(dealId: string): Promise<
 }
 
 /**
+ * Whether the given user is the linked transaction coordinator for the
+ * deal's agent (users.tc_user_id = tcUserId). Used to tenant-scope
+ * TC-initiated mutations (e.g. fee waive) to the agents that actually
+ * assigned them — a TC must never touch another agent's deals (#180).
+ */
+export async function isLinkedTCForDeal(
+  dealId: string,
+  tcUserId: string
+): Promise<boolean> {
+  const rows = await prisma.$queryRaw<{ ok: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM deals
+      JOIN users agent ON agent.id = deals.agent_id
+      WHERE deals.id = ${dealId}::uuid
+        AND agent.tc_user_id = ${tcUserId}::uuid
+    ) AS ok
+  `;
+  return rows[0]?.ok ?? false;
+}
+
+/**
  * Resolve whether a user has access to a deal — agent owner or participant.
  */
 export async function hasDealAccess(
