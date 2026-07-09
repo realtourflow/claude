@@ -4,6 +4,10 @@
     {
       "path": "/api/jobs/process",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/indexnow",
+      "schedule": "0 * * * *"
     }
   ]
 }
