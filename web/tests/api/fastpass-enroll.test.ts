@@ -146,6 +146,11 @@ describe("POST /api/deals/[id]/fastpass", () => {
       deal_id: deal.id,
       type: "fast_pass",
     });
+    // Owner keeps the agent-facing return URLs (role-aware URLs, #169).
+    expect(captured!.success_url).toBe(
+      `http://localhost/agent/deals/${deal.id}?fastpass=paid`
+    );
+    expect(captured!.cancel_url).toBe(`http://localhost/agent/deals/${deal.id}`);
 
     // The JSONB stores the SERVER-computed total, not the client's 1 cent.
     const rows = await prisma.$queryRaw<
@@ -247,7 +252,164 @@ describe("POST /api/deals/[id]/fastpass", () => {
     expect(rows[0].enrolled_at).toBe("2026-01-01T00:00:00.000Z");
   });
 
-  it("403 when caller is not the deal owner", async () => {
+  it("buyer participant enrolls with 'now' → 200 {checkout_url}; Stripe gets buyer-facing success/cancel URLs (#169)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer" });
+    const deal = await createDeal({ agent_id: agent.id, title: "789 Elm St" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    let captured: Stripe.Checkout.SessionCreateParams | undefined;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async (params: Stripe.Checkout.SessionCreateParams) => {
+            captured = params;
+            return {
+              id: "cs_fastpass_buyer",
+              url: "https://stripe.test/checkout/cs_fastpass_buyer",
+            };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/fastpass`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|buyer", ["buyer"]),
+      },
+      body: JSON.stringify({
+        payment_option: "now",
+        selected_upsells: ["utility_setup", "staging_consult"],
+        survey_answers: { currentSituation: "renting" },
+      }),
+    });
+    const res = await fastPassRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok?: boolean; checkout_url?: string };
+    expect(json.ok).toBe(true);
+    expect(json.checkout_url).toBe("https://stripe.test/checkout/cs_fastpass_buyer");
+
+    // Role-aware return URLs: a buyer lands back on THEIR portal, not the
+    // agent's deal page; cancel returns to the survey's deal_id entry point
+    // so a resubmit works (FastPassSurvey keeps its handoff for exactly this).
+    expect(captured).toBeDefined();
+    expect(captured!.success_url).toBe(
+      `http://localhost/buyer/${buyer.id}?fastpass=paid`
+    );
+    expect(captured!.cancel_url).toBe(
+      `http://localhost/fast-pass/survey?deal_id=${deal.id}`
+    );
+
+    // Enrollment persisted on the deal.
+    const rows = await prisma.$queryRaw<
+      { status: string; payment_option: string }[]
+    >`
+      SELECT fast_pass->>'status' AS status,
+             fast_pass->>'payment_option' AS payment_option
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].status).toBe("active");
+    expect(rows[0].payment_option).toBe("now");
+  });
+
+  it("buyer participant's tampered total_cents is ignored — Stripe charges the server catalog amount (#169)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    let captured: Stripe.Checkout.SessionCreateParams | undefined;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async (params: Stripe.Checkout.SessionCreateParams) => {
+            captured = params;
+            return { id: "cs_tamper", url: "https://stripe.test/checkout/cs_tamper" };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/fastpass`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|buyer", ["buyer"]),
+      },
+      body: JSON.stringify({
+        payment_option: "now",
+        selected_upsells: ["utility_setup", "staging_consult"],
+        // Hostile buyer client claims the whole thing costs 1 cent.
+        total_cents: 1,
+      }),
+    });
+    const res = await fastPassRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+
+    expect(captured!.line_items?.[0]?.price_data?.unit_amount).toBe(EXPECTED_TOTAL);
+
+    const rows = await prisma.$queryRaw<{ total_cents: string }[]>`
+      SELECT fast_pass->>'total_cents' AS total_cents
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].total_cents).toBe(String(EXPECTED_TOTAL));
+  });
+
+  it("403 when a buyer is NOT a participant on the deal — nothing persisted, no Stripe call", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await createUser({ role: "buyer", auth0_id: "auth0|stranger" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    let stripeCalled = false;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async () => {
+            stripeCalled = true;
+            return { id: "cs_nope", url: "https://stripe.test/nope" };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/fastpass`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|stranger", ["buyer"]),
+      },
+      body: JSON.stringify({ payment_option: "now", selected_upsells: [] }),
+    });
+    const res = await fastPassRoute(r, ctx(deal.id));
+    expect(res.status).toBe(403);
+    expect(stripeCalled).toBe(false);
+
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fast_pass).toBeNull();
+  });
+
+  it("403 when caller is neither the owner nor a participant", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|owner" });
     await createUser({ role: "agent", auth0_id: "auth0|other" });
     const deal = await createDeal({ agent_id: agent.id });

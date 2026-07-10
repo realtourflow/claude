@@ -1,5 +1,6 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
+import { hasDealAccess } from "@/lib/deals";
 import { resolveUserId } from "@/lib/users";
 import {
   computeFastPassTotalCents,
@@ -19,7 +20,9 @@ type EnrollBody = {
 
 const PAYMENT_OPTIONS = ["now", "at_closing", "seller_concession"] as const;
 
-// POST /deals/:dealId/fastpass — owner-only.
+// POST /deals/:dealId/fastpass — owning agent or any deal participant (#169:
+// buyers enroll their own deal from the portal pitch; the price is computed
+// server-side, so opening the route to participants stays tamper-safe).
 // Stores Fast Pass enrollment JSONB on the deal. If payment_option === "now"
 // and Stripe is configured, charges the full enrollment (base + add-ons)
 // upfront via Stripe Checkout and returns a checkout_url. Ports EnrollFastPass
@@ -37,7 +40,13 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       select: { agent_id: true, title: true },
     });
     if (!deal) return error("deal not found", 404);
-    if (deal.agent_id !== userId) return error("forbidden", 403);
+    // Owner short-circuits; anyone else must be a deal participant (buyer,
+    // seller, …) — hasDealAccess covers both, but the owner check avoids the
+    // extra query on the common agent path.
+    const isOwner = deal.agent_id === userId;
+    if (!isOwner && !(await hasDealAccess(dealId, userId))) {
+      return error("forbidden", 403);
+    }
 
     let body: EnrollBody;
     try {
@@ -94,13 +103,23 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     if (paymentOption === "now") {
       const url = new URL(req.url);
       const origin = `${url.protocol}//${url.host}`;
+      // Role-aware return URLs (#169): the owning agent lands back on the
+      // deal page; a participant (buyer) returns to their own portal on
+      // success, and to the survey's ?deal_id entry point on cancel so a
+      // resubmit works (FastPassSurvey keeps its handoff for exactly this).
+      const successUrl = isOwner
+        ? `${origin}/agent/deals/${dealId}?fastpass=paid`
+        : `${origin}/buyer/${userId}?fastpass=paid`;
+      const cancelUrl = isOwner
+        ? `${origin}/agent/deals/${dealId}`
+        : `${origin}/fast-pass/survey?deal_id=${dealId}`;
       try {
         const session = await createFastPassCheckout({
           dealId,
           dealTitle: deal.title,
           amountCents: totalCents,
-          successUrl: `${origin}/agent/deals/${dealId}?fastpass=paid`,
-          cancelUrl: `${origin}/agent/deals/${dealId}`,
+          successUrl,
+          cancelUrl,
         });
         if (session.url) {
           return json({ ok: true, checkout_url: session.url });
