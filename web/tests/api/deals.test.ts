@@ -5,6 +5,7 @@ import { PATCH as advanceStageRoute } from "@/app/api/deals/[id]/stage/route";
 import { PATCH as notesRoute } from "@/app/api/deals/[id]/notes/route";
 import { PATCH as commissionRoute } from "@/app/api/deals/[id]/commission/route";
 import { PATCH as flagsRoute } from "@/app/api/deals/[id]/flags/route";
+import { GET as myDealsRoute } from "@/app/api/me/deals/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -427,6 +428,122 @@ describe("PATCH /api/deals/[id]/commission", () => {
     });
     const res = await commissionRoute(req, ctx(deal.id));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/me/deals — full portal payload (#171)", () => {
+  const trackers = [
+    {
+      name: "APPRAISAL",
+      currentTrackerStatus: { status: "COMPLETED" },
+    },
+  ];
+  const keyDates = { closingDate: "2026-08-15" };
+
+  it("includes pre_approved, baa_signed, disclosures_complete and arive_* fields", async () => {
+    const agent = await createUser({ role: "agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer-1" });
+    const deal = await createDeal({ agent_id: agent.id, title: "Portal Deal" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: {
+        pre_approved: true,
+        baa_signed: true,
+        disclosures_complete: true,
+        arive_linked: true,
+        arive_milestones: trackers,
+        arive_key_dates: keyDates,
+        arive_loan_status: "Approved with Conditions",
+      },
+    });
+
+    const req = new Request("http://localhost/api/me/deals", {
+      headers: { authorization: await authHeader("auth0|buyer-1", ["buyer"]) },
+    });
+    const res = await myDealsRoute(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>[];
+    expect(body.length).toBe(1);
+    expect(body[0].pre_approved).toBe(true);
+    expect(body[0].baa_signed).toBe(true);
+    expect(body[0].disclosures_complete).toBe(true);
+    expect(body[0].arive_linked).toBe(true);
+    expect(body[0].arive_milestones).toEqual(trackers);
+    expect(body[0].arive_key_dates).toEqual(keyDates);
+    expect(body[0].arive_loan_status).toBe("Approved with Conditions");
+  });
+
+  it("includes fast_pass and smooth_exit JSON when set", async () => {
+    const agent = await createUser({ role: "agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer-2" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const fastPass = {
+      status: "active",
+      payment_option: "now",
+      total_cents: 178700,
+      enrolled_at: "2026-07-01T00:00:00.000Z",
+    };
+    const smoothExit = {
+      status: "active",
+      payment_option: "from_proceeds",
+      estimated_sale_price: 400000,
+      fee_cents: 4000,
+    };
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: { fast_pass: fastPass, smooth_exit: smoothExit },
+    });
+
+    const req = new Request("http://localhost/api/me/deals", {
+      headers: { authorization: await authHeader("auth0|buyer-2", ["buyer"]) },
+    });
+    const res = await myDealsRoute(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>[];
+    expect(body.length).toBe(1);
+    expect(body[0].fast_pass).toEqual(fastPass);
+    expect(body[0].smooth_exit).toEqual(smoothExit);
+  });
+
+  it("does not leak deals (or their data) the caller does not participate in", async () => {
+    const agent = await createUser({ role: "agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer-3" });
+    const mine = await createDeal({ agent_id: agent.id, title: "My Deal" });
+    await prisma.deal_participants.create({
+      data: { deal_id: mine.id, user_id: buyer.id, role: "buyer" },
+    });
+    // A stranger's deal loaded with sensitive data that must never surface.
+    const foreign = await createDeal({
+      agent_id: agent.id,
+      title: "SECRET-FOREIGN-DEAL",
+    });
+    await prisma.deals.update({
+      where: { id: foreign.id },
+      data: {
+        pre_approved: true,
+        arive_loan_status: "SECRET-LOAN-STATUS",
+        fast_pass: { status: "active", payment_option: "now", marker: "SECRET-FP" },
+      },
+    });
+
+    const req = new Request("http://localhost/api/me/deals", {
+      headers: { authorization: await authHeader("auth0|buyer-3", ["buyer"]) },
+    });
+    const res = await myDealsRoute(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; title: string }[];
+    expect(body.length).toBe(1);
+    expect(body[0].id).toBe(mine.id);
+    const raw = JSON.stringify(body);
+    expect(raw).not.toContain("SECRET-FOREIGN-DEAL");
+    expect(raw).not.toContain("SECRET-LOAN-STATUS");
+    expect(raw).not.toContain("SECRET-FP");
   });
 });
 
