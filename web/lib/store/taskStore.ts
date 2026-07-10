@@ -3,18 +3,19 @@
 import { create } from 'zustand';
 import { Task } from "@/lib/data/mockTasks";
 
+// NOTE: real task creation persists via POST /api/deals/:id/tasks (see
+// TasksTab in DealDetail). The old client-only addTask/addedTasks/dismissTask
+// were dead code and were removed in #187. Assignee overrides remain
+// client-side until reassignment persistence ships with the portal/handoff
+// work.
 type TaskStore = {
   assigneeOverrides: Record<string, Task['assignedTo']>;
-  addedTasks: Task[];
   reassign: (taskId: string, assignee: Task['assignedTo']) => void;
   effectiveAssignee: (task: Task) => Task['assignedTo'];
-  addTask: (task: Task) => void;
-  dismissTask: (taskId: string) => void;
 };
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
   assigneeOverrides: {},
-  addedTasks: [],
 
   reassign: (taskId, assignee) =>
     set((state) => ({
@@ -23,14 +24,4 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
 
   effectiveAssignee: (task) =>
     get().assigneeOverrides[task.id] ?? task.assignedTo,
-
-  addTask: (task) =>
-    set((state) => ({
-      addedTasks: [...state.addedTasks, task],
-    })),
-
-  dismissTask: (taskId) =>
-    set((state) => ({
-      addedTasks: state.addedTasks.filter((t) => t.id !== taskId),
-    })),
 }));
