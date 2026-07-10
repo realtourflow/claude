@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
+import { extractClosingDate } from "@/lib/arive-dates";
 import { AriveTracker, AriveKeyDates, Deal, DealStage, LoanMilestones, FastPassEnrollment, SmoothExitEnrollment } from "@/lib/data/mockDeals";
 
 export type ApiDeal = {
@@ -147,9 +148,9 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     );
   }
 
-  const closingDate = d.arive_key_dates?.estimatedFundingDate
-    ?? d.arive_key_dates?.closingContingency
-    ?? undefined;
+  // Same key selection as the calendar push (lib/jobs.ts) and the iCal feed —
+  // see lib/arive-dates.ts (#196).
+  const closingDate = extractClosingDate(d.arive_key_dates) ?? undefined;
 
   return {
     id: d.id,

@@ -9,6 +9,7 @@ import {
 import { PATCH as stageRoute } from "@/app/api/deals/[id]/stage/route";
 import { POST as createTaskRoute } from "@/app/api/deals/[id]/tasks/route";
 import { PATCH as taskStatusRoute } from "@/app/api/tasks/[id]/status/route";
+import { GET as feedRoute } from "@/app/api/calendar/[token]/feed.ics/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setCalendarHttpForTesting } from "@/lib/calendar";
 import { prisma } from "@/lib/db";
@@ -335,5 +336,84 @@ describe("dual-provider fan-out (T5b)", () => {
     });
     expect(gMap?.external_event_id).toBe("g-evt");
     expect(mMap?.external_event_id).toBe("ms-evt");
+  });
+});
+
+// ── #196: the iCal feed must read the same ARIVE key-date keys as the push ─
+
+const FEED_TOKEN = "a".repeat(48);
+
+describe("iCal feed closing dates (#196)", () => {
+  async function agentWithKeyDates(
+    keyDates: Record<string, string> | null
+  ): Promise<{ agentId: string; dealId: string }> {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|feed" });
+    const deal = await createDeal({ agent_id: agent.id, title: "Elm St" });
+    if (keyDates) {
+      await prisma.deals.update({
+        where: { id: deal.id },
+        data: { arive_key_dates: keyDates },
+      });
+    }
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { calendar_token: FEED_TOKEN },
+    });
+    return { agentId: agent.id, dealId: deal.id };
+  }
+
+  async function fetchFeed(): Promise<string> {
+    const req = new Request(
+      `http://localhost/api/calendar/${FEED_TOKEN}/feed.ics`
+    );
+    const res = await feedRoute(req, {
+      params: Promise.resolve({ token: FEED_TOKEN }),
+    });
+    expect(res.status).toBe(200);
+    return res.text();
+  }
+
+  it("case 1: a deal with estimatedFundingDate emits a closing VEVENT", async () => {
+    const { dealId } = await agentWithKeyDates({
+      estimatedFundingDate: "2026-09-15",
+    });
+
+    const body = await fetchFeed();
+
+    expect(body).toContain(`UID:close-${dealId}@realtourflow`);
+    expect(body).toContain("SUMMARY:Closing: Elm St");
+    expect(body).toContain("DTSTART;VALUE=DATE:20260915");
+  });
+
+  it("case 2: falls back to closingContingency when there is no funding date", async () => {
+    const { dealId } = await agentWithKeyDates({
+      closingContingency: "2026-10-01",
+    });
+
+    const body = await fetchFeed();
+
+    expect(body).toContain(`UID:close-${dealId}@realtourflow`);
+    expect(body).toContain("DTSTART;VALUE=DATE:20261001");
+  });
+
+  it("prefers estimatedFundingDate when both keys are present (matches push/serializer)", async () => {
+    await agentWithKeyDates({
+      estimatedFundingDate: "2026-09-15",
+      closingContingency: "2026-10-01",
+    });
+
+    const body = await fetchFeed();
+
+    expect(body).toContain("DTSTART;VALUE=DATE:20260915");
+    expect(body).not.toContain("DTSTART;VALUE=DATE:20261001");
+  });
+
+  it("case 3: a deal with no key dates emits no closing event", async () => {
+    await agentWithKeyDates(null);
+
+    const body = await fetchFeed();
+
+    expect(body).toContain("BEGIN:VCALENDAR");
+    expect(body).not.toContain("UID:close-");
   });
 });
