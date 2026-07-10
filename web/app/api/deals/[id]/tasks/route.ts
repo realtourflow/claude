@@ -3,6 +3,10 @@ import { error, json, withAuth } from "@/lib/http";
 import { resolveUserId } from "@/lib/users";
 import { enqueuePushTaskDueEvent } from "@/lib/jobs";
 import { emailTaskAssigned } from "@/lib/notification-email";
+import { isValidDueDateString } from "@/lib/task-due-dates";
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -81,6 +85,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const description = body.description ?? null;
     const stageContext = body.stage_context ?? null;
     const dueDate = body.due_date ?? null;
+    if (dueDate !== null && !(typeof dueDate === "string" && isValidDueDateString(dueDate))) {
+      return error("invalid due_date (expected YYYY-MM-DD)", 400);
+    }
 
     // Optional assignee. Only accept a user who actually belongs to this deal
     // (the agent owner or a participant) — guards the FK and prevents emailing
@@ -88,7 +95,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     let assignedTo: string | null = null;
     const requestedAssignee =
       typeof body.assigned_to === "string" ? body.assigned_to.trim() : "";
-    if (requestedAssignee) {
+    if (requestedAssignee && UUID_RE.test(requestedAssignee)) {
       const member = await prisma.$queryRaw<{ ok: boolean }[]>`
         SELECT EXISTS (
           SELECT 1 FROM deals

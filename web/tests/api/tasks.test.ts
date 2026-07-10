@@ -174,6 +174,222 @@ describe("POST /api/deals/[id]/tasks", () => {
   });
 });
 
+describe("POST /api/deals/[id]/tasks — due dates + assignees (#187)", () => {
+  it("persists due_date and a deal-member assignee", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        title: "Order appraisal",
+        due_date: "2026-08-01",
+        assigned_to: agent.id,
+      }),
+    });
+    const res = await createTaskRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      id: string;
+      due_date: string | null;
+      assigned_to: string | null;
+    };
+    expect(body.due_date).toBe("2026-08-01");
+    expect(body.assigned_to).toBe(agent.id);
+
+    const row = await prisma.tasks.findUnique({ where: { id: body.id } });
+    expect(row?.due_date?.toISOString().slice(0, 10)).toBe("2026-08-01");
+    expect(row?.assigned_to).toBe(agent.id);
+  });
+
+  it("400 on a malformed due_date", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ title: "x", due_date: "not-a-date" }),
+    });
+    const res = await createTaskRoute(req, ctx(deal.id));
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("PATCH /api/tasks/[id]/status — due_date + assignee edits (#187)", () => {
+  it("agent can set a task's due_date", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ due_date: "2026-08-15" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { due_date: string | null; status: string };
+    expect(body.due_date).toBe("2026-08-15");
+    expect(body.status).toBe("pending"); // untouched
+
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.due_date?.toISOString().slice(0, 10)).toBe("2026-08-15");
+  });
+
+  it("agent can clear a task's due_date with null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({
+      deal_id: deal.id,
+      due_date: new Date("2026-08-15"),
+    });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ due_date: null }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.due_date).toBeNull();
+  });
+
+  it("agent can reassign a task to a deal participant", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ assigned_to: buyer.id }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.assigned_to).toBe(buyer.id);
+  });
+
+  it("400 when the assignee is not a member of the deal", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const stranger = await createUser({ role: "buyer" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ assigned_to: stranger.id }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(400);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.assigned_to).toBeNull();
+  });
+
+  it("400 on a malformed due_date", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    for (const bad of ["not-a-date", "2026-13-40", 123]) {
+      const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({ due_date: bad }),
+      });
+      const res = await updateStatusRoute(req, ctx(task.id));
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("400 when the body has no recognized fields", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({}),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(400);
+  });
+
+  it("403 when a participant (not the deal agent) tries to edit due_date", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|b" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|b", ["buyer"]),
+      },
+      body: JSON.stringify({ due_date: "2026-08-15" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(403);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.due_date).toBeNull();
+  });
+
+  it("status and due_date can change together in one PATCH", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ status: "in_progress", due_date: "2026-09-01" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.status).toBe("in_progress");
+    expect(row?.due_date?.toISOString().slice(0, 10)).toBe("2026-09-01");
+  });
+});
+
 describe("PATCH /api/tasks/[id]/status", () => {
   it("updates status when the user owns the parent deal", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
