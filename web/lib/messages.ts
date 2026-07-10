@@ -3,6 +3,14 @@ import { prisma } from "./db";
 export type DealMessageAccess = {
   isAgent: boolean;
   hasAccess: boolean;
+  /**
+   * The caller is the deal agent's linked transaction coordinator
+   * (users.tc_user_id) — internal-channel-eligible (#178). Same predicate as
+   * lib/deals.ts#isLinkedTCForDeal, folded into this query to keep access
+   * resolution a single round-trip. NOTE: this is a DB fact only — routes must
+   * still require the `tc` role claim before granting anything on it.
+   */
+  isLinkedTC: boolean;
   agentId: string | null;
 };
 
@@ -15,7 +23,12 @@ export async function getMessageAccess(
   userId: string
 ): Promise<DealMessageAccess> {
   const rows = await prisma.$queryRaw<
-    { agent_id: string; is_agent: boolean; has_access: boolean }[]
+    {
+      agent_id: string;
+      is_agent: boolean;
+      has_access: boolean;
+      is_linked_tc: boolean;
+    }[]
   >`
     SELECT
       agent_id,
@@ -23,14 +36,22 @@ export async function getMessageAccess(
       (agent_id = ${userId}::uuid OR EXISTS (
         SELECT 1 FROM deal_participants dp
         WHERE dp.deal_id = ${dealId}::uuid AND dp.user_id = ${userId}::uuid
-      )) AS has_access
+      )) AS has_access,
+      EXISTS (
+        SELECT 1 FROM users agent
+        WHERE agent.id = deals.agent_id
+          AND agent.tc_user_id = ${userId}::uuid
+      ) AS is_linked_tc
     FROM deals WHERE id = ${dealId}::uuid
   `;
   const row = rows[0];
-  if (!row) return { isAgent: false, hasAccess: false, agentId: null };
+  if (!row) {
+    return { isAgent: false, hasAccess: false, isLinkedTC: false, agentId: null };
+  }
   return {
     isAgent: row.is_agent,
     hasAccess: row.has_access,
+    isLinkedTC: row.is_linked_tc,
     agentId: row.agent_id,
   };
 }

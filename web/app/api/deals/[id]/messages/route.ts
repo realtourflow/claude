@@ -1,7 +1,6 @@
 import { error, json, withAuth } from "@/lib/http";
 import { resolveUserId } from "@/lib/users";
 import { hasRole } from "@/lib/roles";
-import { isLinkedTCForDeal } from "@/lib/deals";
 import {
   createMessage,
   getMessageAccess,
@@ -27,12 +26,10 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     const access = await getMessageAccess(dealId, userId);
 
     // Read access beyond agent/participant (#167): admins are global; a TC
-    // linked by the deal's agent (users.tc_user_id) may read too. Both are
-    // read-only here — POST below still requires agent/participant access.
+    // linked by the deal's agent (users.tc_user_id) may read too.
     const privilegedReader =
       hasRole(claims.roles, ["admin"]) ||
-      (hasRole(claims.roles, ["tc"]) &&
-        (await isLinkedTCForDeal(dealId, userId)));
+      (hasRole(claims.roles, ["tc"]) && access.isLinkedTC);
 
     if (!access.hasAccess && !privilegedReader) {
       return error("deal not found", 404);
@@ -60,7 +57,12 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
     const access = await getMessageAccess(dealId, userId);
-    if (!access.hasAccess) return error("deal not found", 404);
+
+    // The agent's linked TC (users.tc_user_id) is internal-channel-eligible
+    // (#178): they may post to the internal thread even without a
+    // deal_participants row. Role claim required — defense in depth.
+    const linkedTC = hasRole(claims.roles, ["tc"]) && access.isLinkedTC;
+    if (!access.hasAccess && !linkedTC) return error("deal not found", 404);
 
     let body: CreateBody;
     try {
@@ -71,10 +73,19 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const text = typeof body.body === "string" ? body.body : "";
     if (!text) return error("body is required", 400);
 
-    // Default to client_thread. Non-agents posting to `internal` are quietly
-    // demoted — matches the Go behavior.
+    // Default to client_thread. The internal thread is "Agent + TC only"
+    // (#177): the agent and the linked TC post to it as-is (#178); client
+    // participants posting to `internal` are quietly demoted — matches the
+    // Go behavior.
     let channel: Channel = parseChannel(body.channel ?? null);
-    if (!access.isAgent && channel === "internal") channel = "client_thread";
+    const internalEligible = access.isAgent || linkedTC;
+    if (!internalEligible && channel === "internal") channel = "client_thread";
+
+    // A linked TC without a participant row has internal-only posting rights —
+    // never let their message land on the client-visible thread (#178).
+    if (!access.hasAccess && channel !== "internal") {
+      return error("forbidden", 403);
+    }
 
     const message = await createMessage({
       dealId,
@@ -92,8 +103,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     // Channel guard (#177): the internal thread is "Agent + TC only — not
     // visible to clients", so internal posts must NEVER create notifications
     // for client participants (the snippet leaks agent/TC-only content).
-    // Internal fan-out goes only to TC participants; client_thread fan-out
-    // is unchanged (all participants).
+    // Internal fan-out goes to TC participants AND the agent's linked TC
+    // (users.tc_user_id, #178) — deduped; client_thread fan-out is unchanged
+    // (all participants).
     try {
       const title = "New message on your deal";
       const snippet = text.length > 80 ? text.slice(0, 80) + "…" : text;
@@ -105,9 +117,20 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
               : { deal_id: dealId },
           select: { user_id: true },
         });
-        for (const p of participants) {
+        const recipientIds = new Set(participants.map((p) => p.user_id));
+        if (channel === "internal") {
+          // The poster IS the deal agent here, so their own tc_user_id is the
+          // deal's linked TC.
+          const agentRow = await prisma.users.findUnique({
+            where: { id: userId },
+            select: { tc_user_id: true },
+          });
+          if (agentRow?.tc_user_id) recipientIds.add(agentRow.tc_user_id);
+        }
+        recipientIds.delete(userId); // never notify the sender
+        for (const recipientId of recipientIds) {
           await createNotification({
-            userId: p.user_id,
+            userId: recipientId,
             title,
             body: snippet,
             kind: "new_message",
@@ -127,21 +150,21 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       console.error("message notification fan-out failed", err);
     }
 
-    // Best-effort email to the other party — only on the client thread. Awaited
-    // (not detached) so it actually sends on Vercel; a throw must never block
-    // the response.
-    if (channel === "client_thread") {
-      try {
-        await emailNewMessage({
-          req,
-          dealId,
-          senderId: userId,
-          senderIsAgent: access.isAgent,
-          body: text,
-        });
-      } catch (err) {
-        console.error("message notification email failed", err);
-      }
+    // Best-effort email to the other party — the lib resolves recipients per
+    // channel (client thread → the other side; internal → agent ↔ TC only,
+    // #178). Awaited (not detached) so it actually sends on Vercel; a throw
+    // must never block the response.
+    try {
+      await emailNewMessage({
+        req,
+        dealId,
+        senderId: userId,
+        senderIsAgent: access.isAgent,
+        channel,
+        body: text,
+      });
+    } catch (err) {
+      console.error("message notification email failed", err);
     }
 
     return json(message, 201);

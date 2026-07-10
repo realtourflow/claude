@@ -67,6 +67,27 @@ async function clientParticipants(dealId: string): Promise<Participant[]> {
   `;
 }
 
+/**
+ * The internal-thread TC recipients (#178): the deal agent's linked TC
+ * (users.tc_user_id) plus any TC deal participants. UNION dedupes a linked TC
+ * who is also a participant. Never returns buyers/sellers — the internal
+ * thread is "Agent + TC only" (#177).
+ */
+async function internalTCs(dealId: string): Promise<Participant[]> {
+  return prisma.$queryRaw<Participant[]>`
+    SELECT tc.id AS user_id, tc.email, 'tc'::text AS role
+    FROM deals d
+    JOIN users agent ON agent.id = d.agent_id
+    JOIN users tc ON tc.id = agent.tc_user_id
+    WHERE d.id = ${dealId}::uuid
+    UNION
+    SELECT dp.user_id, u.email, 'tc'::text AS role
+    FROM deal_participants dp
+    JOIN users u ON u.id = dp.user_id
+    WHERE dp.deal_id = ${dealId}::uuid AND dp.role = 'tc'
+  `;
+}
+
 /** The deal's agent (id + email). */
 async function dealAgent(
   dealId: string
@@ -100,22 +121,37 @@ async function fanOut(
 }
 
 /**
- * New client-thread message: email the OTHER party. Agent sender → email the
- * client participant(s); client sender → email the agent. Never the sender.
+ * New message: email the OTHER party. Never the sender.
+ *
+ * client_thread — agent sender → email the client participant(s); client
+ * sender → email the agent.
+ *
+ * internal (#178) — the thread is "Agent + TC only" (#177), so clients are
+ * NEVER emailed. Agent sender → email the TC(s) (the agent's linked TC +
+ * any TC participants); TC sender → email the agent.
  */
 export async function emailNewMessage(input: {
   req: Request;
   dealId: string;
   senderId: string;
   senderIsAgent: boolean;
+  channel: "client_thread" | "internal";
   body: string;
 }): Promise<void> {
-  const { req, dealId, senderId, senderIsAgent, body } = input;
+  const { req, dealId, senderId, senderIsAgent, channel, body } = input;
   const origin = originFromRequest(req);
   const snippet = body.length > 140 ? body.slice(0, 140) + "…" : body;
 
   let recipients: Recipient[] = [];
-  if (senderIsAgent) {
+  if (senderIsAgent && channel === "internal") {
+    const tcs = await internalTCs(dealId);
+    recipients = tcs
+      .filter((tc) => tc.user_id !== senderId)
+      .map((tc) => ({
+        email: tc.email,
+        url: recipientUrl(origin, tc.role, tc.user_id, dealId),
+      }));
+  } else if (senderIsAgent) {
     const clients = await clientParticipants(dealId);
     recipients = clients
       .filter((c) => c.user_id !== senderId)
