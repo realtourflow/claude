@@ -13,7 +13,8 @@ import { PERMISSIONS } from "@/permissions/permissions";
 import { useTaskStore } from "@/lib/store/taskStore";
 import { useNotificationStore } from "@/lib/store/notificationStore";
 import { Task } from "@/lib/data/mockTasks";
-import { useTasks, patchTaskStatus, postTask } from "@/hooks/useTasks";
+import { useTasks, patchTaskStatus, patchTask, postTask } from "@/hooks/useTasks";
+import { autoTaskDueDate } from "@/lib/task-due-dates";
 import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, refreshDocuSignStatus, setDisclosuresComplete, Document as ApiDocument } from "@/hooks/useDocuments";
 import SendTemplateModal from "./SendTemplateModal";
 import { useMessages, postMessage, MessageChannel } from "@/hooks/useMessages";
@@ -4249,6 +4250,9 @@ export default function DealDetail() {
             source: 'ai',
             stage_context: nextStage,
             role: taskDef.assignedTo,
+            // Default relative due date so overdue/health/calendar have
+            // real data from day one (#187).
+            due_date: autoTaskDueDate(nextStage, taskDef.priority),
           }),
         ),
       );
