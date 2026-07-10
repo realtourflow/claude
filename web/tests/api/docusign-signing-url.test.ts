@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { POST as signingUrlRoute } from "@/app/api/deals/[id]/documents/[documentId]/docusign/signing-url/route";
+import { POST as refreshRoute } from "@/app/api/deals/[id]/documents/[documentId]/docusign/refresh/route";
 import { GET as listDocumentsRoute } from "@/app/api/deals/[id]/documents/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import {
@@ -207,6 +208,140 @@ describe("POST .../docusign/signing-url", () => {
       ctx(deal.id, doc.id)
     );
     expect(res.status).toBe(503);
+  });
+});
+
+// ── Issue #165: the OWNING AGENT as an embedded signer ──────────────────────
+// Several committed templates route the agent as a REQUIRED embedded
+// recipient (buyer_agency_agreement → Agent, listing agreements → Listing
+// Agent, form_300_birmingham → BuyerAgent): assignTemplateRoles gives every
+// matched deal person — the agent included — a clientUserId, so DocuSign
+// never emails them. The same signing-url route must mint the agent's
+// recipient view, and the documents list must surface the agent's own
+// pending status so DealDetail's Documents tab can show its Sign button.
+
+async function seedAgentSigner(
+  opts: { recipientRow?: boolean; status?: string } = {}
+) {
+  const agent = await createUser({
+    role: "agent",
+    auth0_id: "auth0|agent",
+    name: "Paula Agent",
+    email: "live-agent@example.com", // live profile differs from snapshot
+  });
+  const deal = await createDeal({ agent_id: agent.id });
+  const doc = await prisma.documents.create({
+    data: {
+      deal_id: deal.id,
+      uploaded_by: agent.id,
+      name: "Buyer Agency Agreement",
+      s3_key: "",
+      docusign_envelope_id: "env-agent",
+      docusign_status: "sent",
+    },
+  });
+  if (opts.recipientRow !== false) {
+    await prisma.docusign_recipients.create({
+      data: {
+        document_id: doc.id,
+        envelope_id: "env-agent",
+        user_id: agent.id,
+        // SNAPSHOT identity at send time.
+        email: "paula@example.com",
+        name: "Paula Agent (snapshot)",
+        role: "Agent",
+        recipient_id: "2",
+        routing_order: 2,
+        client_user_id: agent.id,
+        status: opts.status ?? "sent",
+      },
+    });
+  }
+  return { agent, deal, doc };
+}
+
+describe("agent embedded signing (#165)", () => {
+  it("mints the agent's recipient view with the agent deal-page return URL", async () => {
+    const { agent, deal, doc } = await seedAgentSigner();
+    const res = await signingUrlRoute(
+      req(deal.id, doc.id, await authHeader("auth0|agent", ["agent"])),
+      ctx(deal.id, doc.id)
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    expect(body.url).toBe("https://demo.docusign.net/signing/session-1");
+
+    expect(fakeDocusign.lastView).toEqual({
+      envelopeId: "env-agent",
+      clientUserId: agent.id,
+      // Snapshot, NOT the live profile values.
+      email: "paula@example.com",
+      userName: "Paula Agent (snapshot)",
+      // Agents return to the deal page (not a portal).
+      returnUrl: `https://app.example.com/agent/deals/${deal.id}?signed_doc=${doc.id}`,
+    });
+  });
+
+  it("documents list surfaces the agent's own pending status (drives the Sign button)", async () => {
+    const { deal } = await seedAgentSigner();
+    const res = await listDocumentsRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+        headers: { authorization: await authHeader("auth0|agent", ["agent"]) },
+      }),
+      { params: Promise.resolve({ id: deal.id }) }
+    );
+    expect(res.status).toBe(200);
+    const rows = (await res.json()) as { my_recipient_status: string | null }[];
+    expect(rows[0].my_recipient_status).toBe("sent");
+  });
+
+  it("after signing, refresh flips the agent recipient to completed and signing-url 409s", async () => {
+    const { deal, doc } = await seedAgentSigner();
+    const auth = await authHeader("auth0|agent", ["agent"]);
+
+    // DocuSign now reports the agent's recipient completed (envelope itself
+    // still in flight — other signers pending).
+    fakeDocusign.listRecipients = async () => [
+      {
+        email: "paula@example.com",
+        name: "Paula Agent (snapshot)",
+        status: "completed",
+        recipientId: "2",
+      },
+    ];
+    const refreshRes = await refreshRoute(
+      new Request(
+        `https://app.example.com/api/deals/${deal.id}/documents/${doc.id}/docusign/refresh`,
+        { method: "POST", headers: { authorization: auth } }
+      ),
+      ctx(deal.id, doc.id)
+    );
+    expect(refreshRes.status).toBe(200);
+
+    // The list now shows the terminal status (the Sign button disappears)…
+    const listRes = await listDocumentsRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+        headers: { authorization: auth },
+      }),
+      { params: Promise.resolve({ id: deal.id }) }
+    );
+    const rows = (await listRes.json()) as { my_recipient_status: string | null }[];
+    expect(rows[0].my_recipient_status).toBe("completed");
+
+    // …and a repeat mint is refused.
+    const again = await signingUrlRoute(req(deal.id, doc.id, auth), ctx(deal.id, doc.id));
+    expect(again.status).toBe(409);
+    expect(await again.text()).toMatch(/already completed/i);
+  });
+
+  it("404s for an agent with no recipient row on the document (no button, no URL)", async () => {
+    const { deal, doc } = await seedAgentSigner({ recipientRow: false });
+    const res = await signingUrlRoute(
+      req(deal.id, doc.id, await authHeader("auth0|agent", ["agent"])),
+      ctx(deal.id, doc.id)
+    );
+    expect(res.status).toBe(404);
+    expect(await res.text()).toMatch(/not a signer/i);
   });
 });
 

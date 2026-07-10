@@ -15,7 +15,7 @@ import { useNotificationStore } from "@/lib/store/notificationStore";
 import { Task } from "@/lib/data/mockTasks";
 import { useTasks, patchTaskStatus, patchTask, postTask } from "@/hooks/useTasks";
 import { autoTaskDueDate } from "@/lib/task-due-dates";
-import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, refreshDocuSignStatus, setDisclosuresComplete, Document as ApiDocument } from "@/hooks/useDocuments";
+import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, getSigningUrl, refreshDocuSignStatus, setDisclosuresComplete, Document as ApiDocument } from "@/hooks/useDocuments";
 import SendTemplateModal from "./SendTemplateModal";
 import { useMessages, postMessage, MessageChannel } from "@/hooks/useMessages";
 import { useVendors } from "@/hooks/useVendors";
@@ -2964,6 +2964,22 @@ const DOCUSIGN_STATUS_META: Record<string, { label: string; cls: string }> = {
   voided:    { label: 'Voided',             cls: 'bg-gray-100 text-gray-500' },
 };
 
+// The viewer's own recipient statuses that still allow embedded signing —
+// mirrors the portal (PortalDealDocuments). Templates route the owning agent
+// as an embedded recipient (clientUserId, no DocuSign email), so the agent
+// signs from here, exactly like buyers/sellers sign from their portal (#165).
+const MY_SIGNABLE_STATUSES = ['sent', 'delivered'];
+
+// DocuSign returns the agent to /agent/deals/[dealId]?signed_doc=<id>&
+// event=signing_complete (the signing-url route's returnUrl).
+function cameFromSigning(): { docId: string } | null {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const docId = params.get('signed_doc');
+  if (docId && params.get('event') === 'signing_complete') return { docId };
+  return null;
+}
+
 function SendForSignatureModal({
   doc,
   dealId,
@@ -3096,7 +3112,8 @@ function SendForSignatureModal({
   );
 }
 
-function DocumentsTab({
+// Exported for tests (tests/components/deal-detail-documents-sign.test.tsx).
+export function DocumentsTab({
   deal,
   docs,
   loading,
@@ -3113,12 +3130,43 @@ function DocumentsTab({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [signingDoc, setSigningDoc] = useState<ApiDocument | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  // The agent's OWN embedded signing (they're a routed recipient on the
+  // envelope — e.g. BAA / listing agreements). Mirrors PortalDealDocuments.
+  const [mintingSignId, setMintingSignId] = useState<string | null>(null);
+  const [signErr, setSignErr] = useState('');
+  // Lazy initializer (not an effect) so the banner shows on the first render
+  // after returning from DocuSign without a set-state-in-effect.
+  const [signedReturn] = useState(cameFromSigning);
   // Agent info previews the agent's own role row in the template modal.
   const activeUser = useAuthStore((s) => s.activeUser);
   // Disclosures are tracked, never sent from RTF — the lender delivers them
   // out-of-band (ARIVE will feed this in v2). Manual toggle for now.
   const [disclosuresDone, setDisclosuresDone] = useState(deal.disclosuresComplete ?? false);
   const [disclosuresSaving, setDisclosuresSaving] = useState(false);
+
+  useEffect(() => {
+    if (!signedReturn) return;
+    // Instant feedback ahead of the webhook: pull the latest status, then
+    // refetch the list. Best-effort — the webhook/self-heal also covers it.
+    refreshDocuSignStatus(deal.id ?? '', signedReturn.docId)
+      .catch(() => {})
+      .finally(() => onRefresh());
+    // Strip the params so reloads don't repeat this.
+    window.history.replaceState(null, '', window.location.pathname);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot on mount
+  }, []);
+
+  async function handleSelfSign(doc: ApiDocument) {
+    setMintingSignId(doc.id);
+    setSignErr('');
+    try {
+      const url = await getSigningUrl(deal.id ?? '', doc.id);
+      window.location.assign(url);
+    } catch (e: unknown) {
+      setSignErr(e instanceof Error ? e.message : 'Could not start signing — try again.');
+      setMintingSignId(null);
+    }
+  }
 
   async function toggleDisclosures(next: boolean) {
     setDisclosuresSaving(true);
@@ -3189,6 +3237,16 @@ function DocumentsTab({
         </div>
       )}
 
+      {signedReturn && (
+        <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
+          <CheckCircle2 size={15} className="text-green-500 flex-shrink-0" />
+          <p className="text-sm font-semibold text-green-800">
+            Signature recorded — status updates below as everyone signs.
+          </p>
+        </div>
+      )}
+      {signErr && <p className="text-xs text-red-500">{signErr}</p>}
+
       <div className="rounded-xl bg-white shadow-sm overflow-hidden">
         <div className="divide-y">
           {loading ? (
@@ -3227,6 +3285,21 @@ function DocumentsTab({
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
+                    {/* The agent is a routed embedded signer on this envelope
+                        and hasn't signed yet — mint their recipient view */}
+                    {!!doc.myRecipientStatus && MY_SIGNABLE_STATUSES.includes(doc.myRecipientStatus) && (
+                      <button
+                        onClick={() => handleSelfSign(doc)}
+                        disabled={mintingSignId === doc.id}
+                        title="Sign this document"
+                        className="flex items-center gap-1.5 rounded-lg bg-brand-navy px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-navy/90 disabled:opacity-50 transition-colors"
+                      >
+                        {mintingSignId === doc.id
+                          ? <Loader2 size={11} className="animate-spin" />
+                          : <PenLine size={11} />}
+                        Sign
+                      </button>
+                    )}
                     {/* Send for Signature — only if not already sent or completed */}
                     {(!dsStatus || dsStatus === 'declined' || dsStatus === 'voided') && (
                       <button
@@ -4299,6 +4372,9 @@ export default function DealDetail() {
   const searchParams = useSearchParams();
   const activeUser = useAuthStore((s) => s.activeUser);
   const initialTab = (() => {
+    // Returning from an embedded DocuSign session (?signed_doc=<id>) lands on
+    // the Documents tab, where the return banner + refreshed statuses live.
+    if (searchParams.get('signed_doc')) return 'documents';
     const t = searchParams.get('tab');
     const valid: TabId[] = ['overview', 'tasks', 'messages', 'documents', 'timeline', 'vendors'];
     return (valid as string[]).includes(t ?? '') ? (t as TabId) : 'overview';
