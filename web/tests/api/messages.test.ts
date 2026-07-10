@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import {
   GET as listRoute,
   POST as createRoute,
 } from "@/app/api/deals/[id]/messages/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
+import { setEmailForTesting } from "@/lib/email";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
@@ -155,6 +156,22 @@ describe("GET /api/deals/[id]/messages", () => {
     const req = new Request(`http://localhost/api/deals/${deal.id}/messages`, {
       headers: { authorization: await authHeader("auth0|tc-unlinked", ["tc"]) },
     });
+    const res = await listRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
+  });
+
+  it("404 for an unlinked TC requesting the internal channel (#178)", async () => {
+    await createUser({ role: "tc", auth0_id: "auth0|tc-unlinked" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/messages?channel=internal`,
+      {
+        headers: {
+          authorization: await authHeader("auth0|tc-unlinked", ["tc"]),
+        },
+      }
+    );
     const res = await listRoute(req, ctx(deal.id));
     expect(res.status).toBe(404);
   });
@@ -317,5 +334,228 @@ describe("POST /api/deals/[id]/messages", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as { channel: string };
     expect(body.channel).toBe("client_thread");
+  });
+});
+
+// #178 — the agent's linked TC (users.tc_user_id) is internal-channel-eligible:
+// they can post to the internal thread (never demoted to the client-visible
+// thread) and are included in the internal notification fan-out + email.
+describe("POST /api/deals/[id]/messages — linked TC internal thread (#178)", () => {
+  afterEach(() => {
+    // Reset the seam so a stub from one test never leaks into the next.
+    setEmailForTesting(undefined);
+  });
+
+  type SentEmail = {
+    from: string;
+    to: string | string[];
+    subject: string;
+    html: string;
+  };
+
+  /** Records every send — mirrors the fake in notification-email.test.ts. */
+  function fakeEmail() {
+    const sent: SentEmail[] = [];
+    const client = {
+      emails: {
+        send: async (payload: SentEmail) => {
+          sent.push(payload);
+          return { data: { id: "email_test_1" }, error: null };
+        },
+      },
+    };
+    return { client, sent };
+  }
+
+  /** An agent with a linked TC (users.tc_user_id) and one deal. */
+  async function linkedTCSetup() {
+    const tc = await createUser({
+      role: "tc",
+      auth0_id: "auth0|tc-linked",
+      email: "tc@example.com",
+    });
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    return { tc, agent, deal };
+  }
+
+  async function postMessage(
+    dealId: string,
+    sub: string,
+    roles: string[],
+    body: unknown
+  ) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader(sub, roles),
+      },
+      body: JSON.stringify(body),
+    });
+    return createRoute(req, ctx(dealId));
+  }
+
+  it("linked TC (no participant row) posts to internal → 201, stays internal", async () => {
+    const { deal } = await linkedTCSetup();
+    const res = await postMessage(deal.id, "auth0|tc-linked", ["tc"], {
+      channel: "internal",
+      body: "title ordered",
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { channel: string; sender_role: string };
+    expect(body.channel).toBe("internal");
+    expect(body.sender_role).toBe("tc");
+
+    // Persisted on the internal thread — never visible on the client thread.
+    const rows = await prisma.messages.findMany({
+      where: { deal_id: deal.id },
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].channel).toBe("internal");
+  });
+
+  it("linked TC who IS a participant posting internal is NOT demoted to client_thread", async () => {
+    const { tc, deal } = await linkedTCSetup();
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: tc.id, role: "tc" },
+    });
+    const res = await postMessage(deal.id, "auth0|tc-linked", ["tc"], {
+      channel: "internal",
+      body: "internal note from TC",
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { channel: string };
+    expect(body.channel).toBe("internal");
+  });
+
+  it("linked TC without a participant row cannot post to the client thread → 403", async () => {
+    const { deal } = await linkedTCSetup();
+    const res = await postMessage(deal.id, "auth0|tc-linked", ["tc"], {
+      channel: "client_thread",
+      body: "should not reach clients",
+    });
+    expect(res.status).toBe(403);
+    const count = await prisma.messages.count({ where: { deal_id: deal.id } });
+    expect(count).toBe(0);
+  });
+
+  it("unlinked TC posting to internal → 404, nothing persisted", async () => {
+    await createUser({ role: "tc", auth0_id: "auth0|tc-unlinked" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const res = await postMessage(deal.id, "auth0|tc-unlinked", ["tc"], {
+      channel: "internal",
+      body: "should be rejected",
+    });
+    expect(res.status).toBe(404);
+    const count = await prisma.messages.count({ where: { deal_id: deal.id } });
+    expect(count).toBe(0);
+  });
+
+  it("agent internal post notifies the linked TC (no participant row) — never clients", async () => {
+    const { tc, deal } = await linkedTCSetup();
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const res = await postMessage(deal.id, "auth0|agent", ["agent"], {
+      channel: "internal",
+      body: "TC: order the title",
+    });
+    expect(res.status).toBe(201);
+
+    const tcNotifications = await prisma.notifications.findMany({
+      where: { user_id: tc.id },
+    });
+    expect(tcNotifications.length).toBe(1);
+    expect(tcNotifications[0].type).toBe("new_message");
+
+    const buyerNotifications = await prisma.notifications.findMany({
+      where: { user_id: buyer.id },
+    });
+    expect(buyerNotifications).toEqual([]);
+  });
+
+  it("agent internal post notifies a linked TC who is ALSO a participant exactly once", async () => {
+    const { tc, deal } = await linkedTCSetup();
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: tc.id, role: "tc" },
+    });
+    const res = await postMessage(deal.id, "auth0|agent", ["agent"], {
+      channel: "internal",
+      body: "no double notification",
+    });
+    expect(res.status).toBe(201);
+
+    const tcNotifications = await prisma.notifications.findMany({
+      where: { user_id: tc.id },
+    });
+    expect(tcNotifications.length).toBe(1);
+  });
+
+  it("linked TC internal post notifies the agent", async () => {
+    const { agent, deal } = await linkedTCSetup();
+    const res = await postMessage(deal.id, "auth0|tc-linked", ["tc"], {
+      channel: "internal",
+      body: "done — title ordered",
+    });
+    expect(res.status).toBe(201);
+
+    const agentNotifications = await prisma.notifications.findMany({
+      where: { user_id: agent.id },
+    });
+    expect(agentNotifications.length).toBe(1);
+    expect(agentNotifications[0].type).toBe("new_message");
+  });
+
+  it("agent internal post emails the linked TC — never the buyer", async () => {
+    const { deal } = await linkedTCSetup();
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const res = await postMessage(deal.id, "auth0|agent", ["agent"], {
+      channel: "internal",
+      body: "internal: inspection moved to Friday",
+    });
+    expect(res.status).toBe(201);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("tc@example.com");
+    // TC recipients link to the TC deals dashboard, never a client portal.
+    expect(sent[0].html).toContain("/tc/deals");
+  });
+
+  it("linked TC internal post emails the agent", async () => {
+    const { deal } = await linkedTCSetup();
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const res = await postMessage(deal.id, "auth0|tc-linked", ["tc"], {
+      channel: "internal",
+      body: "heads up — appraisal is in",
+    });
+    expect(res.status).toBe(201);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("agent@example.com");
+    expect(sent[0].html).toContain(`/agent/deals/${deal.id}`);
   });
 });
