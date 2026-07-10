@@ -12,8 +12,10 @@ export async function GET(req: Request): Promise<Response> {
     void Prisma; // ensure import remains for $queryRaw types
 
     // Full portal payload (#171): the buyer/seller portals read pre-approval,
-    // BAA, Fast Pass / Smooth Exit, and ARIVE loan state from this endpoint —
-    // same column set as listDealsForUser (lib/deals.ts).
+    // BAA, Fast Pass / Smooth Exit, and ARIVE loan state from this endpoint.
+    // Deal-state columns mirror listDealsForUser (lib/deals.ts), deliberately
+    // MINUS the agent-facing ones (fee_*, commission_pct, notes) — this
+    // endpoint serves clients, so don't add those here.
     const rows = await prisma.$queryRaw<
       {
         id: string;
