@@ -488,6 +488,206 @@ describe("deal-data alias auto-fill", () => {
   });
 });
 
+// Approved agent-uploaded forms (uploaded_forms rows with status "ready" and a
+// DocuSign template) must prep + save terms exactly like committed forms — the
+// prep GET and terms PUT fall back to the agent-forms resolver the same way
+// the send-template route does (#195).
+async function seedUploadedForm(
+  agentId: string,
+  o: {
+    label?: string;
+    board?: string;
+    fieldMap?: Record<string, { label: string; type: string; role?: string }>;
+  } = {}
+): Promise<string> {
+  const row = await prisma.uploaded_forms.create({
+    data: {
+      agent_id: agentId,
+      label: o.label ?? "ARC Purchase Agreement",
+      side: "buy",
+      board: o.board ?? "",
+      status: "ready",
+      docusign_template_id: "tmpl-up-1",
+      role_mapping: { buyer: "Buyer", agent: "Agent" },
+      field_map:
+        o.fieldMap ?? {
+          purchase_price: { label: "PurchasePrice", type: "text" },
+          inspection_days: { label: "InspectionDays", type: "text" },
+          home_warranty: { label: "HomeWarranty", type: "checkbox" },
+        },
+      source_s3_key: "k",
+      source_file_name: "form.pdf",
+      attested_by: agentId,
+      attestation_statement: "x",
+    },
+    select: { id: true },
+  });
+  return row.id;
+}
+
+describe("agent-uploaded forms (prep + terms)", () => {
+  it("GET prep resolves an approved uploaded form like a committed one", async () => {
+    const { agent, deal } = await seedBhamDeal();
+    const formId = await seedUploadedForm(agent.id);
+    const auth = await authHeader("auth0|agent", ["agent"]);
+
+    const res = await prepRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contracts/${formId}/prep`, {
+        headers: { authorization: auth },
+      }),
+      formCtx(deal.id, formId)
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      form: { key: string; label: string; board: string };
+      core: { key: string; value: unknown }[];
+      board_fields: { key: string; label: string; type: string; value: unknown }[];
+    };
+    expect(body.form).toMatchObject({ key: formId, label: "ARC Purchase Agreement" });
+    // Core facts prefill identically to committed forms (deal-price fallback).
+    expect(body.core.find((f) => f.key === "purchase_price")?.value).toBe("410000");
+    // Non-core fieldMap keys ride along as board fields.
+    expect(body.board_fields.map((f) => f.key).sort()).toEqual([
+      "home_warranty",
+      "inspection_days",
+    ]);
+  });
+
+  it("PUT terms persists for an uploaded form and prep serves the saved values", async () => {
+    const { agent, deal } = await seedBhamDeal();
+    const formId = await seedUploadedForm(agent.id);
+    const auth = await authHeader("auth0|agent", ["agent"]);
+
+    const put = await putTermsRoute(
+      authedJson(
+        "PUT",
+        `http://localhost/api/deals/${deal.id}/contracts/${formId}/terms`,
+        { terms: { inspection_days: 12, home_warranty: true } },
+        auth
+      ),
+      formCtx(deal.id, formId)
+    );
+    expect(put.status).toBe(200);
+    const row = await prisma.deal_contract_terms.findFirst({
+      where: { deal_id: deal.id, form_key: formId },
+    });
+    expect(row?.terms).toEqual({ inspection_days: 12, home_warranty: true });
+
+    const prep = await prepRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contracts/${formId}/prep`, {
+        headers: { authorization: auth },
+      }),
+      formCtx(deal.id, formId)
+    );
+    const body = (await prep.json()) as {
+      board_fields: { key: string; value: unknown }[];
+    };
+    expect(body.board_fields.find((f) => f.key === "inspection_days")?.value).toBe("12");
+    expect(body.board_fields.find((f) => f.key === "home_warranty")?.value).toBe(true);
+  });
+
+  it("terms are still validated against the uploaded form's fieldMap", async () => {
+    const { agent, deal } = await seedBhamDeal();
+    const formId = await seedUploadedForm(agent.id);
+    const res = await putTermsRoute(
+      authedJson(
+        "PUT",
+        `http://localhost/api/deals/${deal.id}/contracts/${formId}/terms`,
+        { terms: { mystery_field: 1 } },
+        await authHeader("auth0|agent", ["agent"])
+      ),
+      formCtx(deal.id, formId)
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/mystery_field/);
+  });
+
+  it("another agent's non-promoted uploaded form stays hidden from prep and terms", async () => {
+    const { deal } = await seedBhamDeal();
+    const other = await createUser({ role: "agent", auth0_id: "auth0|other" });
+    const formId = await seedUploadedForm(other.id);
+    const auth = await authHeader("auth0|agent", ["agent"]);
+
+    const prep = await prepRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contracts/${formId}/prep`, {
+        headers: { authorization: auth },
+      }),
+      formCtx(deal.id, formId)
+    );
+    expect(prep.status).toBe(400);
+
+    const terms = await putTermsRoute(
+      authedJson(
+        "PUT",
+        `http://localhost/api/deals/${deal.id}/contracts/${formId}/terms`,
+        { terms: { inspection_days: 5 } },
+        auth
+      ),
+      formCtx(deal.id, formId)
+    );
+    expect(terms.status).toBe(400);
+  });
+
+  it("blocks a cross-board uploaded form at prep unless a promotion covers the deal's market", async () => {
+    const { agent, deal } = await seedBhamDeal(); // deal market: BIRMINGHAM_AAR
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { brokerage: "ARC Realty" },
+    });
+    const formId = await seedUploadedForm(agent.id, { board: "BALDWIN_GULF_COAST" });
+    const auth = await authHeader("auth0|agent", ["agent"]);
+
+    let res = await prepRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contracts/${formId}/prep`, {
+        headers: { authorization: auth },
+      }),
+      formCtx(deal.id, formId)
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/board|market/i);
+
+    // The admin promoting the form to the agent's company + the DEAL's market
+    // covers it — same escape hatch the send-template route honors.
+    await prisma.form_promotions.create({
+      data: {
+        form_id: formId,
+        brokerage: "ARC Realty",
+        market: "BIRMINGHAM_AAR",
+        created_by: agent.id,
+      },
+    });
+    res = await prepRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contracts/${formId}/prep`, {
+        headers: { authorization: auth },
+      }),
+      formCtx(deal.id, formId)
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("unknown non-uuid form keys still 400 cleanly on both routes", async () => {
+    const { deal } = await seedBhamDeal();
+    const auth = await authHeader("auth0|agent", ["agent"]);
+    const prep = await prepRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contracts/mystery_form/prep`, {
+        headers: { authorization: auth },
+      }),
+      formCtx(deal.id, "mystery_form")
+    );
+    expect(prep.status).toBe(400);
+    const terms = await putTermsRoute(
+      authedJson(
+        "PUT",
+        `http://localhost/api/deals/${deal.id}/contracts/mystery_form/terms`,
+        { terms: { anything: 1 } },
+        auth
+      ),
+      formCtx(deal.id, "mystery_form")
+    );
+    expect(terms.status).toBe(400);
+  });
+});
+
 describe("deal market default", () => {
   it("a new deal inherits the agent's market", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|mkt" });
