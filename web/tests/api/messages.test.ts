@@ -85,6 +85,79 @@ describe("GET /api/deals/[id]/messages", () => {
     const res = await listRoute(req, ctx(deal.id));
     expect(res.status).toBe(403);
   });
+
+  it("200 for a TC linked to the deal's owning agent — client thread (#167)", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-linked" });
+    const agent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.messages.create({
+      data: {
+        deal_id: deal.id,
+        sender_id: agent.id,
+        channel: "client_thread",
+        body: "hello client",
+      },
+    });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/messages`, {
+      headers: { authorization: await authHeader("auth0|tc-linked", ["tc"]) },
+    });
+    const res = await listRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { body: string }[];
+    expect(body.map((m) => m.body)).toEqual(["hello client"]);
+  });
+
+  it("linked TC can read the internal channel — Agent + TC only (#177, #167)", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-linked" });
+    const agent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.messages.create({
+      data: {
+        deal_id: deal.id,
+        sender_id: agent.id,
+        channel: "internal",
+        body: "internal note",
+      },
+    });
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/messages?channel=internal`,
+      { headers: { authorization: await authHeader("auth0|tc-linked", ["tc"]) } }
+    );
+    const res = await listRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { body: string }[];
+    expect(body.map((m) => m.body)).toEqual(["internal note"]);
+  });
+
+  it("200 for admin (#167)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/messages`, {
+      headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+    });
+    const res = await listRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+  });
+
+  it("404 for a TC NOT linked to the deal's agent (#167)", async () => {
+    await createUser({ role: "tc", auth0_id: "auth0|tc-unlinked" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/messages`, {
+      headers: { authorization: await authHeader("auth0|tc-unlinked", ["tc"]) },
+    });
+    const res = await listRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("POST /api/deals/[id]/messages", () => {
