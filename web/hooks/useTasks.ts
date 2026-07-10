@@ -5,7 +5,7 @@ import { api } from "@/lib/api-client";
 import { Task } from "@/lib/data/mockTasks";
 import { DealStage } from "@/lib/data/mockDeals";
 
-type ApiTask = {
+export type ApiTask = {
   id: string;
   deal_id: string;
   assigned_to: string | null;
@@ -21,7 +21,9 @@ type ApiTask = {
   updated_at: string;
 };
 
-function apiTaskToFrontend(t: ApiTask): Task {
+// Exported: this mapping is what the dashboard's "Tasks Due" / overdue
+// counts are built on (a pending task past its due_date renders as overdue).
+export function apiTaskToFrontend(t: ApiTask): Task {
   let status: Task['status'] = t.status === 'skipped' ? 'pending' : t.status;
   if (status === 'pending' && t.due_date && new Date(t.due_date) < new Date()) {
     status = 'overdue';
@@ -78,6 +80,14 @@ export async function patchTaskStatus(taskId: string, status: string): Promise<v
   await api.patch(`/tasks/${taskId}/status`, { status });
 }
 
+/** Edit a task's due date and/or assignee (agent-only server-side). */
+export async function patchTask(
+  taskId: string,
+  fields: { status?: string; due_date?: string | null; assigned_to?: string | null },
+): Promise<void> {
+  await api.patch(`/tasks/${taskId}/status`, fields);
+}
+
 export async function postTask(
   dealId: string,
   task: {
@@ -88,6 +98,7 @@ export async function postTask(
     stage_context?: string;
     role?: string;
     due_date?: string;
+    assigned_to?: string;
   },
 ): Promise<void> {
   await api.post(`/deals/${dealId}/tasks`, task);

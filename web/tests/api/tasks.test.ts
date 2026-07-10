@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { GET as listAllRoute } from "@/app/api/tasks/route";
+import { GET as listDealsRoute } from "@/app/api/deals/route";
 import {
   GET as listByDealRoute,
   POST as createTaskRoute,
@@ -7,6 +8,7 @@ import {
 import { PATCH as updateStatusRoute } from "@/app/api/tasks/[id]/status/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { apiTaskToFrontend } from "@/hooks/useTasks";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal, createTask } from "../helpers/factories";
@@ -486,5 +488,68 @@ describe("PATCH /api/tasks/[id]/status", () => {
     });
     const res = await updateStatusRoute(req, ctx(task.id));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("overdue + deal health from real due dates (#187)", () => {
+  it("a pending task with a past due_date turns the deal red with an overdue count", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await createTask({
+      deal_id: deal.id,
+      title: "Was due yesterday",
+      due_date: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+
+    const req = new Request("http://localhost/api/deals", {
+      headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+    });
+    const res = await listDealsRoute(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      health: string;
+      overdue_task_count: number;
+    }[];
+    const row = body.find((d) => d.id === deal.id);
+    expect(row?.health).toBe("red");
+    expect(row?.overdue_task_count).toBe(1);
+  });
+
+  it("apiTaskToFrontend maps a past-due pending task to overdue (dashboard counts)", () => {
+    const base = {
+      id: "t1",
+      deal_id: "d1",
+      assigned_to: null,
+      title: "x",
+      description: null,
+      priority: "medium",
+      source: "manual",
+      stage_context: null,
+      role: "agent",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    } as const;
+
+    const overdue = apiTaskToFrontend({
+      ...base,
+      status: "pending",
+      due_date: "2020-01-01",
+    });
+    expect(overdue.status).toBe("overdue");
+
+    // A future due date stays pending; completed tasks never flip to overdue.
+    const future = apiTaskToFrontend({
+      ...base,
+      status: "pending",
+      due_date: "2099-01-01",
+    });
+    expect(future.status).toBe("pending");
+    const done = apiTaskToFrontend({
+      ...base,
+      status: "completed",
+      due_date: "2020-01-01",
+    });
+    expect(done.status).toBe("completed");
   });
 });
