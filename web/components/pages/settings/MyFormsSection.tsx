@@ -19,13 +19,24 @@ const STATUS_STYLES: Record<FormStatus, { label: string; cls: string }> = {
   detecting: { label: "Detecting fields…", cls: "bg-blue-50 text-blue-700 border-blue-200" },
   pending_review: { label: "Pending review", cls: "bg-amber-50 text-amber-700 border-amber-200" },
   pending_split: { label: "Awaiting split", cls: "bg-purple-50 text-purple-700 border-purple-200" },
+  split: { label: "Split into separate forms", cls: "bg-gray-100 text-gray-500 border-gray-200" },
   ready: { label: "Ready", cls: "bg-green-50 text-green-700 border-green-200" },
   rejected: { label: "Rejected", cls: "bg-red-50 text-red-700 border-red-200" },
   archived: { label: "Archived", cls: "bg-gray-100 text-gray-500 border-gray-200" },
 };
 
 function StatusChip({ status }: { status: FormStatus }) {
-  const s = STATUS_STYLES[status];
+  // The API can return statuses this build doesn't know yet (`fromApi` casts
+  // the raw string). One unknown status must never crash the whole section —
+  // fall back to a neutral chip showing the humanized raw value (issue #194).
+  const s: { label: string; cls: string } | undefined = STATUS_STYLES[status];
+  if (!s) {
+    return (
+      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold bg-gray-100 text-gray-500 border-gray-200">
+        {String(status).replace(/_/g, " ")}
+      </span>
+    );
+  }
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${s.cls}`}

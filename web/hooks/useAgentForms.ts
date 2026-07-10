@@ -8,6 +8,8 @@ export type FormStatus =
   | "detecting"
   | "pending_review"
   | "pending_split"
+  // Archive parent of a bundle the admin split into individual forms.
+  | "split"
   | "ready"
   | "rejected"
   | "archived";
