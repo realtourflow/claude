@@ -189,7 +189,7 @@ describe("Offers", () => {
 });
 
 describe("Net sheet", () => {
-  it("GET auto-creates an empty net sheet; PUT updates; POST ready marks ready", async () => {
+  it("GET auto-creates a seeded net sheet; PUT updates; POST ready marks ready", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const deal = await createDeal({ agent_id: agent.id });
 
@@ -199,13 +199,16 @@ describe("Net sheet", () => {
       }),
       ctx({ id: deal.id })
     );
-    expect(getRes.status).toBe(200);
+    // 201: auto-created, seeded with the default deduction lines (#181).
+    expect(getRes.status).toBe(201);
     const initial = (await getRes.json()) as {
       sale_price: number;
       status: string;
+      lines: unknown[];
     };
-    expect(initial.sale_price).toBe(0);
+    expect(initial.sale_price).toBe(0); // factory deal has no price set
     expect(initial.status).toBe("draft");
+    expect(initial.lines.length).toBeGreaterThan(0);
 
     const putRes = await putNetSheetRoute(
       new Request(`http://localhost/api/deals/${deal.id}/net-sheet`, {

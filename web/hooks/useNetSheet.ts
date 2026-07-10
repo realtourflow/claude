@@ -94,6 +94,25 @@ function fromApi(ns: ApiNetSheet): NetSheet {
   };
 }
 
+// Builds an agent-added custom deduction line (#181). Custom lines are
+// optional (required: false) so the existing editor renders them in the
+// optional-lines section with the enable toggle and amount editing for free;
+// they persist through PUT /deals/:id/net-sheet like any other line.
+export function createCustomLine(label: string, amount: number): NetSheetLine {
+  return {
+    id: `custom_${crypto.randomUUID()}`,
+    label,
+    category: 'custom',
+    amount: Number.isFinite(amount) && amount > 0 ? Math.round(amount) : 0,
+    pct: null,
+    isPct: false,
+    required: false,
+    enabled: true,
+    editable: true,
+    autoPopulated: false,
+  };
+}
+
 // Recalculates percentage-based line amounts against the current sale price.
 // Pure function — call whenever salePrice or lines change in the UI.
 export function recalcLines(lines: NetSheetLine[], salePrice: number, annualTaxes: number, closingDate: string | null): NetSheetLine[] {
