@@ -284,6 +284,53 @@ describe("GET /api/deals/[id]/documents", () => {
     expect(body.length).toBe(1);
     expect(body[0].name).toBe("doc.pdf");
   });
+
+  it("200 for a TC linked to the deal's owning agent (#167)", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-linked" });
+    const agent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.documents.create({
+      data: {
+        deal_id: deal.id,
+        uploaded_by: agent.id,
+        name: "contract.pdf",
+        s3_key: "k2",
+      },
+    });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+      headers: { authorization: await authHeader("auth0|tc-linked", ["tc"]) },
+    });
+    const res = await listDocsRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { name: string }[];
+    expect(body.map((d) => d.name)).toEqual(["contract.pdf"]);
+  });
+
+  it("200 for admin (#167)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+      headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+    });
+    const res = await listDocsRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+  });
+
+  it("404 for a TC NOT linked to the deal's agent (#167)", async () => {
+    await createUser({ role: "tc", auth0_id: "auth0|tc-unlinked" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+      headers: { authorization: await authHeader("auth0|tc-unlinked", ["tc"]) },
+    });
+    const res = await listDocsRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("GET /api/documents/[id]/download-url", () => {

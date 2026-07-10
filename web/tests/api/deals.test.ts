@@ -182,6 +182,70 @@ describe("GET /api/deals/[id]", () => {
   });
 });
 
+describe("GET /api/deals/[id] — TC/admin/participant read access (#167)", () => {
+  it("200 for a TC linked to the deal's owning agent", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-linked" });
+    const agent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}`, {
+      headers: { authorization: await authHeader("auth0|tc-linked", ["tc"]) },
+    });
+    const res = await getDealRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; health: string };
+    expect(body.id).toBe(deal.id);
+    expect(body.health).toBe("green");
+  });
+
+  it("200 for admin on any deal", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin-1" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}`, {
+      headers: { authorization: await authHeader("auth0|admin-1", ["admin"]) },
+    });
+    const res = await getDealRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string };
+    expect(body.id).toBe(deal.id);
+  });
+
+  it("404 for a TC NOT linked to the deal's agent (no cross-tenant read)", async () => {
+    await createUser({ role: "tc", auth0_id: "auth0|tc-unlinked" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}`, {
+      headers: { authorization: await authHeader("auth0|tc-unlinked", ["tc"]) },
+    });
+    const res = await getDealRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
+  });
+
+  it("200 for a deal participant (buyer)", async () => {
+    const agent = await createUser({ role: "agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer-1" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}`, {
+      headers: { authorization: await authHeader("auth0|buyer-1", ["buyer"]) },
+    });
+    const res = await getDealRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string };
+    expect(body.id).toBe(deal.id);
+  });
+});
+
 describe("PATCH /api/deals/[id]/stage", () => {
   it("advances the stage and writes deal_stage_history", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
@@ -271,6 +335,30 @@ describe("PATCH /api/deals/[id]/stage", () => {
     });
     const res = await advanceStageRoute(req, ctx(deal.id));
     expect(res.status).toBe(404);
+  });
+
+  it("404 for a linked TC — stage changes stay agent-only (#167 policy)", async () => {
+    // Decided in #167: read access for a linked TC does NOT extend to
+    // advancing/retreating the stage. Only the owning agent moves a deal.
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-linked" });
+    const agent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/stage`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|tc-linked", ["tc"]),
+      },
+      body: JSON.stringify({ stage: "active_search" }),
+    });
+    const res = await advanceStageRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.stage).toBe("intake");
   });
 });
 

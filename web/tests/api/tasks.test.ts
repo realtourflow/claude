@@ -113,6 +113,52 @@ describe("GET /api/deals/[id]/tasks", () => {
     const res = await listByDealRoute(req, ctx(deal.id));
     expect(res.status).toBe(404);
   });
+
+  it("200 for a TC linked to the deal's owning agent (#167)", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-linked" });
+    const agent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await createTask({ deal_id: deal.id, title: "TC-visible task" });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}/tasks`, {
+      headers: { authorization: await authHeader("auth0|tc-linked", ["tc"]) },
+    });
+    const res = await listByDealRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string }[];
+    expect(body.map((t) => t.title)).toEqual(["TC-visible task"]);
+  });
+
+  it("200 for admin (#167)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await createTask({ deal_id: deal.id, title: "Any task" });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}/tasks`, {
+      headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+    });
+    const res = await listByDealRoute(req, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string }[];
+    expect(body.length).toBe(1);
+  });
+
+  it("404 for a TC NOT linked to the deal's agent (#167)", async () => {
+    await createUser({ role: "tc", auth0_id: "auth0|tc-unlinked" });
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}/tasks`, {
+      headers: { authorization: await authHeader("auth0|tc-unlinked", ["tc"]) },
+    });
+    const res = await listByDealRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("POST /api/deals/[id]/tasks", () => {
@@ -170,6 +216,26 @@ describe("POST /api/deals/[id]/tasks", () => {
         authorization: await authHeader("auth0|a", ["agent"]),
       },
       body: JSON.stringify({ title: "x" }),
+    });
+    const res = await createTaskRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
+  });
+
+  it("404 for a linked TC — task creation stays agent-only (#167 policy)", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-linked" });
+    const agent = await createUser({ role: "agent" });
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|tc-linked", ["tc"]),
+      },
+      body: JSON.stringify({ title: "TC-created task" }),
     });
     const res = await createTaskRoute(req, ctx(deal.id));
     expect(res.status).toBe(404);

@@ -1,5 +1,6 @@
 import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "./db";
+import { hasRole } from "./roles";
 
 /**
  * Health CASE expression. Ported verbatim from the legacy Go backend.
@@ -137,6 +138,50 @@ export async function getDealForAgent(
     WHERE id = ${dealId}::uuid AND agent_id = ${agentId}::uuid
   `;
   return rows[0] ?? null;
+}
+
+/**
+ * Get a single deal by id with no caller scoping. Callers MUST check access
+ * first (see `canReadDeal`) — this never filters by agent/participant.
+ * Same SELECT as `getDealForAgent` so both paths return an identical shape.
+ */
+export async function getDealById(dealId: string): Promise<DealRow | null> {
+  const rows = await prisma.$queryRaw<DealRow[]>`
+    SELECT id, agent_id, type::text AS type, stage::text AS stage,
+           ${healthExpr} AS health,
+           title, address, price::text AS price, arive_linked,
+           arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
+           notes, fee_status, fee_amount_cents, fee_paid_at,
+           fast_pass, smooth_exit, pre_approved, baa_signed, disclosures_complete,
+           commission_pct::text AS commission_pct,
+           created_at, updated_at
+    FROM deals
+    WHERE id = ${dealId}::uuid
+  `;
+  return rows[0] ?? null;
+}
+
+/**
+ * READ access to a deal (#167). Matches the visibility model of
+ * `listDealsForUser`:
+ *   - admin            → any deal
+ *   - tc (role)        → deals of agents who linked them (users.tc_user_id)
+ *   - anyone           → deals they own (agent) or participate in
+ * Unlinked TCs and strangers get nothing — no cross-tenant reads.
+ *
+ * Read-only by design: TC stage changes and other writes remain agent-only
+ * (decided in #167); do not reuse this helper to gate mutations.
+ */
+export async function canReadDeal(
+  dealId: string,
+  userId: string,
+  roles: readonly string[]
+): Promise<boolean> {
+  if (hasRole(roles, ["admin"])) return true;
+  if (hasRole(roles, ["tc"]) && (await isLinkedTCForDeal(dealId, userId))) {
+    return true;
+  }
+  return hasDealAccess(dealId, userId);
 }
 
 /**
