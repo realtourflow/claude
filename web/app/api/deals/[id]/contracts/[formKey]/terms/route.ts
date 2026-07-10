@@ -6,6 +6,7 @@ import {
   TemplateConfigError,
   UnknownFormError,
 } from "@/lib/docusign-templates";
+import { getAgentFormConfig, agentFormViewer } from "@/lib/agent-forms";
 import { ContractDataError, upsertTerms } from "@/lib/contract-facts";
 
 type Ctx = { params: Promise<{ id: string; formKey: string }> };
@@ -29,9 +30,23 @@ export async function PUT(req: Request, ctx: Ctx): Promise<Response> {
     try {
       template = getTemplateConfig(formKey);
     } catch (err) {
-      if (err instanceof UnknownFormError) return error(err.message, 400);
-      if (err instanceof TemplateConfigError) return error(err.message, 500);
-      throw err;
+      if (err instanceof UnknownFormError) {
+        // Fall back to an approved agent-uploaded form — same TemplateConfig
+        // shape, so the fieldMap validation below is reused unchanged. Mirrors
+        // the send-template route's resolution (#195). No board check here:
+        // committed forms save terms without one too (the deal-scope gate
+        // lives on prep and send).
+        const agentForm = await getAgentFormConfig(
+          formKey,
+          await agentFormViewer(userId)
+        );
+        if (!agentForm) return error(err.message, 400);
+        template = agentForm;
+      } else if (err instanceof TemplateConfigError) {
+        return error(err.message, 500);
+      } else {
+        throw err;
+      }
     }
 
     let body: { terms?: Record<string, unknown> };
