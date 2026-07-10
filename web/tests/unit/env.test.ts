@@ -17,10 +17,12 @@ const ENV_KEYS = [
   "OAUTH_STATE_SECRET",
   "VERCEL_ENV",
   "DOCUSIGN_CONNECT_HMAC_KEY",
+  "BLOB_CAP_SECRET",
 ] as const;
 
-// Must match the committed fallback in lib/env.ts.
+// Must match the committed fallbacks in lib/env.ts.
 const DEV_FALLBACK = "rtf-dev-oauth-state-secret-change-in-prod";
+const DEV_BLOB_CAP_FALLBACK = "rtf-dev-blob-cap-secret-change-in-prod";
 const STRONG_SECRET = "0123456789abcdef0123456789abcdef"; // exactly 32 chars
 
 let saved: Record<string, string | undefined>;
@@ -99,9 +101,11 @@ describe("env() OAUTH_STATE_SECRET", () => {
 
     it("accepts a 32+ character secret", () => {
       process.env.OAUTH_STATE_SECRET = STRONG_SECRET;
-      // Production also fail-closes on the DocuSign webhook HMAC key (#176) —
-      // satisfy that guard so this case isolates OAUTH_STATE_SECRET.
+      // Production also fail-closes on the DocuSign webhook HMAC key (#176)
+      // and the Blob capability secret (#188) — satisfy those guards so this
+      // case isolates OAUTH_STATE_SECRET.
       process.env.DOCUSIGN_CONNECT_HMAC_KEY = "docusign-connect-hmac-key";
+      process.env.BLOB_CAP_SECRET = STRONG_SECRET;
       expect(env().OAUTH_STATE_SECRET).toBe(STRONG_SECRET);
     });
 
@@ -125,9 +129,10 @@ describe("env() DOCUSIGN_CONNECT_HMAC_KEY (#176 fail-closed webhook)", () => {
   describe("in Vercel production (VERCEL_ENV=production)", () => {
     beforeEach(() => {
       process.env.VERCEL_ENV = "production";
-      // Satisfy the independent OAUTH_STATE_SECRET prod guard so these cases
-      // isolate the DocuSign key.
+      // Satisfy the independent OAUTH_STATE_SECRET + BLOB_CAP_SECRET prod
+      // guards so these cases isolate the DocuSign key.
       process.env.OAUTH_STATE_SECRET = STRONG_SECRET;
+      process.env.BLOB_CAP_SECRET = STRONG_SECRET;
     });
 
     it("throws when unset, with a message naming DOCUSIGN_CONNECT_HMAC_KEY", () => {
@@ -142,6 +147,73 @@ describe("env() DOCUSIGN_CONNECT_HMAC_KEY (#176 fail-closed webhook)", () => {
     it("accepts a configured key", () => {
       process.env.DOCUSIGN_CONNECT_HMAC_KEY = "prod-connect-hmac-key";
       expect(env().DOCUSIGN_CONNECT_HMAC_KEY).toBe("prod-connect-hmac-key");
+    });
+  });
+});
+
+describe("env() BLOB_CAP_SECRET (#188 fail-closed Blob capability signing)", () => {
+  describe("without VERCEL_ENV (local dev, vitest, CI)", () => {
+    it("falls back to the dev secret when unset", () => {
+      expect(env().BLOB_CAP_SECRET).toBe(DEV_BLOB_CAP_FALLBACK);
+    });
+
+    it("falls back to the dev secret when explicitly empty", () => {
+      process.env.BLOB_CAP_SECRET = "";
+      expect(env().BLOB_CAP_SECRET).toBe(DEV_BLOB_CAP_FALLBACK);
+    });
+
+    it("uses the provided value when set", () => {
+      process.env.BLOB_CAP_SECRET = STRONG_SECRET;
+      expect(env().BLOB_CAP_SECRET).toBe(STRONG_SECRET);
+    });
+  });
+
+  describe("on a Vercel preview (VERCEL_ENV=preview)", () => {
+    it("keeps the dev fallback — previews stay zero-config", () => {
+      process.env.VERCEL_ENV = "preview";
+      expect(env().BLOB_CAP_SECRET).toBe(DEV_BLOB_CAP_FALLBACK);
+    });
+  });
+
+  describe("in Vercel production (VERCEL_ENV=production)", () => {
+    beforeEach(() => {
+      process.env.VERCEL_ENV = "production";
+      // Satisfy the independent prod guards so these cases isolate
+      // BLOB_CAP_SECRET.
+      process.env.OAUTH_STATE_SECRET = STRONG_SECRET;
+      process.env.DOCUSIGN_CONNECT_HMAC_KEY = "docusign-connect-hmac-key";
+    });
+
+    it("throws when unset, with a message naming BLOB_CAP_SECRET", () => {
+      expect(() => env()).toThrowError(/BLOB_CAP_SECRET/);
+    });
+
+    it("throws when explicitly empty", () => {
+      process.env.BLOB_CAP_SECRET = "";
+      expect(() => env()).toThrowError(/BLOB_CAP_SECRET/);
+    });
+
+    it("throws when shorter than 32 characters", () => {
+      process.env.BLOB_CAP_SECRET = "too-short-secret";
+      expect(() => env()).toThrowError(/BLOB_CAP_SECRET/);
+    });
+
+    it("never silently substitutes the committed dev fallback (or the store id)", () => {
+      // The fail-open bug this guards against (#188): unset secret + prod
+      // must throw — not resolve to the dev fallback, and hmacSecret() must
+      // never get a chance to degrade to BLOB_STORE_ID.
+      let leaked: string | undefined;
+      try {
+        leaked = env().BLOB_CAP_SECRET;
+      } catch {
+        // expected path
+      }
+      expect(leaked).toBeUndefined();
+    });
+
+    it("accepts a 32+ character secret", () => {
+      process.env.BLOB_CAP_SECRET = STRONG_SECRET;
+      expect(env().BLOB_CAP_SECRET).toBe(STRONG_SECRET);
     });
   });
 });
