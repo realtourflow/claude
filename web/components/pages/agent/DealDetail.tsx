@@ -13,7 +13,8 @@ import { PERMISSIONS } from "@/permissions/permissions";
 import { useTaskStore } from "@/lib/store/taskStore";
 import { useNotificationStore } from "@/lib/store/notificationStore";
 import { Task } from "@/lib/data/mockTasks";
-import { useTasks, patchTaskStatus, postTask } from "@/hooks/useTasks";
+import { useTasks, patchTaskStatus, patchTask, postTask } from "@/hooks/useTasks";
+import { autoTaskDueDate } from "@/lib/task-due-dates";
 import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, refreshDocuSignStatus, setDisclosuresComplete, Document as ApiDocument } from "@/hooks/useDocuments";
 import SendTemplateModal from "./SendTemplateModal";
 import { useMessages, postMessage, MessageChannel } from "@/hooks/useMessages";
@@ -2205,14 +2206,21 @@ type TaskItemCtx = {
   setAssigningTaskId: (id: string | null) => void;
   canAssign: boolean;
   reassign: (id: string, assignee: Task['assignedTo']) => void;
+  // Due-date editing (#187) — agent/TC only; persists via PATCH.
+  canEditDueDate: boolean;
+  editingDueDateId: string | null;
+  setEditingDueDateId: (id: string | null) => void;
+  saveDueDate: (id: string, due: string | null) => void;
 };
 
 function TaskItem({ task, ctx }: { task: Task; ctx: TaskItemCtx }) {
-  const { completedIds, toggleComplete, effectiveStatus, effectiveAssignee, assigningTaskId, setAssigningTaskId, canAssign, reassign } = ctx;
+  const { completedIds, toggleComplete, effectiveStatus, effectiveAssignee, assigningTaskId, setAssigningTaskId, canAssign, reassign, canEditDueDate, editingDueDateId, setEditingDueDateId, saveDueDate } = ctx;
   const isDone = completedIds.has(task.id);
   const status = effectiveStatus(task);
   const assignee = effectiveAssignee(task);
   const isAssigning = assigningTaskId === task.id;
+  const isEditingDue = editingDueDateId === task.id;
+  const [dueDraft, setDueDraft] = useState(task.dueDate ?? '');
 
   return (
     <div className={`flex items-start gap-3 rounded-lg px-3 py-3 transition-colors group ${isDone ? 'opacity-60' : 'hover:bg-brand-bg'}`}>
@@ -2248,11 +2256,45 @@ function TaskItem({ task, ctx }: { task: Task; ctx: TaskItemCtx }) {
           {task.priority === 'high' && !isDone && (
             <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-500 uppercase">High Priority</span>
           )}
-          {task.dueDate && !isDone && (
-            <span className="flex items-center gap-0.5 text-[11px] text-gray-400">
-              <Calendar size={10} /> {task.dueDate}
-            </span>
-          )}
+          {!isDone && (canEditDueDate ? (
+            isEditingDue ? (
+              <span className="flex items-center gap-1">
+                <input
+                  type="date"
+                  aria-label="New due date"
+                  value={dueDraft}
+                  onChange={(e) => setDueDraft(e.target.value)}
+                  className="rounded border border-gray-200 px-1.5 py-0.5 text-[11px] text-gray-600"
+                />
+                <button
+                  onClick={() => saveDueDate(task.id, dueDraft || null)}
+                  className="rounded bg-brand-navy px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-brand-navy/90 transition-colors"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => setEditingDueDateId(null)}
+                  className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+              </span>
+            ) : (
+              <button
+                aria-label={task.dueDate ? 'Edit due date' : 'Set due date'}
+                onClick={() => { setDueDraft(task.dueDate ?? ''); setEditingDueDateId(task.id); }}
+                className="flex items-center gap-0.5 text-[11px] text-gray-400 hover:text-brand-navy transition-colors"
+              >
+                <Calendar size={10} /> {task.dueDate ?? 'Set due date'}
+              </button>
+            )
+          ) : (
+            task.dueDate && (
+              <span className="flex items-center gap-0.5 text-[11px] text-gray-400">
+                <Calendar size={10} /> {task.dueDate}
+              </span>
+            )
+          ))}
 
           {/* Assign button — only for agent/admin */}
           {canAssign && !isDone && (
@@ -2341,15 +2383,72 @@ function OwnerSection({
   );
 }
 
-function TasksTab({ deal, tasks }: { deal: Deal; tasks: Task[]; onTasksChange: () => void }) {
+// Exported for tests (see tests/components/tasks-tab.test.tsx).
+export function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Task[]; onTasksChange: () => void }) {
   const { can } = usePermission();
   const canAssign = can(PERMISSIONS.TASK_ASSIGN_ANY);
+  const canCreate = can(PERMISSIONS.TASK_CREATE);
+  const canEditDueDate = can(PERMISSIONS.TASK_EDIT);
 
   const [completedIds, setCompletedIds] = useState<Set<string>>(
     new Set(tasks.filter((t) => t.status === 'completed').map((t) => t.id))
   );
   const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
   const { reassign: storeReassign, effectiveAssignee } = useTaskStore();
+
+  // Add-task form (#187)
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newRole, setNewRole] = useState<Task['assignedTo']>('agent');
+  const [newPriority, setNewPriority] = useState<'high' | 'medium' | 'low'>('medium');
+  const [newDueDate, setNewDueDate] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Due-date editing (#187)
+  const [editingDueDateId, setEditingDueDateId] = useState<string | null>(null);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const title = newTitle.trim();
+    if (!title) {
+      setCreateError('Title is required.');
+      return;
+    }
+    if (creating) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      await postTask(deal.id, {
+        title,
+        priority: newPriority,
+        role: newRole,
+        source: 'manual',
+        stage_context: deal.stage,
+        ...(newDueDate ? { due_date: newDueDate } : {}),
+      });
+      setNewTitle('');
+      setNewDueDate('');
+      setNewRole('agent');
+      setNewPriority('medium');
+      setShowAddForm(false);
+      onTasksChange();
+    } catch {
+      setCreateError("Couldn't add task. Please try again.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function saveDueDate(taskId: string, due: string | null) {
+    try {
+      await patchTask(taskId, { due_date: due });
+      setEditingDueDateId(null);
+      onTasksChange();
+    } catch {
+      // keep the editor open so the agent can retry
+    }
+  }
 
   async function toggleComplete(id: string) {
     const willBeCompleted = !completedIds.has(id);
@@ -2396,12 +2495,91 @@ function TasksTab({ deal, tasks }: { deal: Deal; tasks: Task[]; onTasksChange: (
     setAssigningTaskId,
     canAssign,
     reassign,
+    canEditDueDate,
+    editingDueDateId,
+    setEditingDueDateId,
+    saveDueDate,
   };
 
   const allDone = tasks.length > 0 && completedIds.size === tasks.length;
 
   return (
     <div className="space-y-3">
+      {/* Add task (#187) — agents/TCs create tasks with a due date so the
+          deadline/health/calendar machinery has real data. */}
+      {canCreate && (
+        <div className="rounded-xl bg-white shadow-sm">
+          {showAddForm ? (
+            <form onSubmit={handleCreate} className="p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-bold text-brand-navy">New task</p>
+                <button
+                  type="button"
+                  onClick={() => { setShowAddForm(false); setCreateError(null); }}
+                  className="text-xs font-semibold text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+              <input
+                type="text"
+                aria-label="Task title"
+                placeholder="Task title"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-brand-navy placeholder:text-gray-300 focus:border-brand-navy focus:outline-none"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  aria-label="Assignee"
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value as Task['assignedTo'])}
+                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-600 focus:border-brand-navy focus:outline-none"
+                >
+                  {ASSIGNEE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <select
+                  aria-label="Priority"
+                  value={newPriority}
+                  onChange={(e) => setNewPriority(e.target.value as 'high' | 'medium' | 'low')}
+                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-600 focus:border-brand-navy focus:outline-none"
+                >
+                  <option value="high">High priority</option>
+                  <option value="medium">Medium priority</option>
+                  <option value="low">Low priority</option>
+                </select>
+                <input
+                  type="date"
+                  aria-label="Due date"
+                  value={newDueDate}
+                  onChange={(e) => setNewDueDate(e.target.value)}
+                  className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-600 focus:border-brand-navy focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="ml-auto rounded-lg bg-brand-navy px-4 py-1.5 text-xs font-semibold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-50"
+                >
+                  {creating ? 'Adding…' : 'Add task'}
+                </button>
+              </div>
+              {createError && (
+                <p className="text-xs font-medium text-red-500">{createError}</p>
+              )}
+            </form>
+          ) : (
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="flex w-full items-center justify-center gap-1.5 px-4 py-3 text-sm font-semibold text-brand-navy hover:bg-brand-bg transition-colors rounded-xl"
+            >
+              <Plus size={14} /> Add Task
+            </button>
+          )}
+        </div>
+      )}
+
       {allDone ? (
         <div className="rounded-xl bg-white shadow-sm flex flex-col items-center py-10 gap-2">
           <CheckCircle2 size={36} className="text-green-400" />
@@ -4249,6 +4427,9 @@ export default function DealDetail() {
             source: 'ai',
             stage_context: nextStage,
             role: taskDef.assignedTo,
+            // Default relative due date so overdue/health/calendar have
+            // real data from day one (#187).
+            due_date: autoTaskDueDate(nextStage, taskDef.priority),
           }),
         ),
       );
