@@ -45,12 +45,44 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const claimEmail = body.email || invite.email;
     const claimName = body.name || invite.email;
 
-    const user = await upsertUser({
-      auth0Id: claims.sub,
-      email: claimEmail,
-      name: claimName,
-      role: "agent",
+    // #224 (mirror of #174) — a claim must never rewrite an existing account.
+    // Look the caller up BEFORE any write: a buyer/seller must not be
+    // promoted to agent, an admin/TC must not be demoted to agent, and a
+    // non-agent opening the link must not burn the invite for the invitee.
+    const caller = await prisma.users.findUnique({
+      where: { auth0_id: claims.sub },
+      select: {
+        id: true,
+        auth0_id: true,
+        email: true,
+        name: true,
+        role: true,
+        phone: true,
+        onboarding_complete: true,
+        created_at: true,
+        updated_at: true,
+      },
     });
+    if (caller && caller.role !== "agent") {
+      return error(
+        "this invite creates an agent account — it can't be accepted from your account",
+        409
+      );
+    }
+
+    // Existing agent: keep the account exactly as-is (role, email, name
+    // untouched) and just mark the invite claimed below. Brand-new caller:
+    // create the agent account. keepExistingRole makes the insert race-safe —
+    // a row created by a concurrent sync can't have its role rewritten.
+    const user =
+      caller ??
+      (await upsertUser({
+        auth0Id: claims.sub,
+        email: claimEmail,
+        name: claimName,
+        role: "agent",
+        keepExistingRole: true,
+      }));
 
     await prisma.$executeRaw`
       UPDATE agent_invites
@@ -63,9 +95,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       const origin = new URL(req.url).origin;
       await sendNotificationEmail({
         to: ADMIN_NOTIFY_EMAIL,
-        subject: `New agent joined: ${claimName}`,
+        subject: `New agent joined: ${user.name}`,
         heading: "A new agent joined RealTourFlow",
-        body: `${claimName} (${claimEmail}) accepted their agent invite and set up their account.`,
+        body: `${user.name} (${user.email}) accepted their agent invite and set up their account.`,
         dealUrl: `${origin}/admin/users`,
       });
     } catch (err) {
