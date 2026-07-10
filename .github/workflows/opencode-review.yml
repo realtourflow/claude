@@ -6,8 +6,11 @@ on:
   issue_comment:
     types: [created]
 
+# The group includes the event name so issue_comment runs (which usually get
+# skipped by the job-level `if`) can't cancel an in-flight pull_request review —
+# concurrency cancellation happens before job `if` conditions are evaluated.
 concurrency:
-  group: review-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  group: review-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -32,6 +35,21 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      # opencode auto-runs `git add . && git commit && git push` whenever the
+      # review session leaves the worktree dirty (running tests can do that),
+      # and with use_github_token it never configures a git identity — so the
+      # commit dies with exit 128 and the check goes red even on an approval.
+      # This job is review-only (contents: read): give git an identity so the
+      # commit succeeds, and point origin's push URL at a throwaway local bare
+      # repo so nothing is ever pushed to the PR branch. Fetches still use the
+      # real URL.
+      - name: Git identity + push sink
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git init --bare --quiet "$RUNNER_TEMP/push-sink.git"
+          git remote set-url --push origin "$RUNNER_TEMP/push-sink.git"
 
       - name: Resolve base ref
         id: refs
