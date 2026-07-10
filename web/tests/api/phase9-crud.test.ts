@@ -21,6 +21,11 @@ import {
   GET as getShowingRoute,
   PUT as putShowingRoute,
 } from "@/app/api/deals/[id]/showing-availability/route";
+import {
+  GET as listContingenciesRoute,
+  POST as createContingencyRoute,
+} from "@/app/api/deals/[id]/contingencies/route";
+import { PATCH as advanceStageRoute } from "@/app/api/deals/[id]/stage/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -277,5 +282,153 @@ describe("Showing availability", () => {
     );
     const body = await getRes.json();
     expect(body).toEqual(data);
+  });
+});
+
+describe("Contingencies (#186)", () => {
+  type ApiContingency = {
+    id: string;
+    label: string;
+    contingency_type: string;
+    deadline: string | null;
+    status: string;
+  };
+
+  it("POST with a deadline persists and appears for the agent and the linked TC", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc" });
+    // Link the TC to the agent (users.tc_user_id is what isLinkedTCForDeal checks).
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { tc_user_id: tc.id },
+    });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+
+    const createRes = await createContingencyRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contingencies`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({
+          label: "Inspection contingency",
+          contingency_type: "inspection",
+          deadline: "2026-07-17",
+        }),
+      }),
+      ctx({ id: deal.id })
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as ApiContingency;
+    expect(created.label).toBe("Inspection contingency");
+    expect(created.contingency_type).toBe("inspection");
+    expect(created.deadline).toBe("2026-07-17");
+    expect(created.status).toBe("active");
+
+    // Agent sees it.
+    const agentList = await listContingenciesRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contingencies`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx({ id: deal.id })
+    );
+    expect(agentList.status).toBe(200);
+    const agentItems = (await agentList.json()) as ApiContingency[];
+    expect(agentItems.length).toBe(1);
+    expect(agentItems[0].deadline).toBe("2026-07-17");
+
+    // Linked TC sees it too.
+    const tcList = await listContingenciesRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contingencies`, {
+        headers: { authorization: await authHeader("auth0|tc", ["tc"]) },
+      }),
+      ctx({ id: deal.id })
+    );
+    expect(tcList.status).toBe(200);
+    const tcItems = (await tcList.json()) as ApiContingency[];
+    expect(tcItems.length).toBe(1);
+    expect(tcItems[0].label).toBe("Inspection contingency");
+  });
+
+  it("advancing to under_contract auto-seeds standard contingencies once (idempotent)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "offer_active" });
+
+    async function advance() {
+      return advanceStageRoute(
+        new Request(`http://localhost/api/deals/${deal.id}/stage`, {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            authorization: await authHeader("auth0|a", ["agent"]),
+          },
+          body: JSON.stringify({ stage: "under_contract" }),
+        }),
+        ctx({ id: deal.id })
+      );
+    }
+
+    const res = await advance();
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.deal_contingencies.findMany({
+      where: { deal_id: deal.id },
+      orderBy: { sort_order: "asc" },
+    });
+    expect(rows.map((r) => r.contingency_type)).toEqual([
+      "inspection",
+      "financing",
+      "appraisal",
+    ]);
+    // Every seeded contingency carries a deadline so it lands in the TC
+    // deadline grid and calendar.
+    for (const r of rows) expect(r.deadline).not.toBeNull();
+
+    // Advancing into under_contract again must not duplicate the seed.
+    const res2 = await advance();
+    expect(res2.status).toBe(200);
+    const count = await prisma.deal_contingencies.count({
+      where: { deal_id: deal.id },
+    });
+    expect(count).toBe(3);
+  });
+
+  it("does not re-seed when the deal already has contingencies", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "offer_active" });
+
+    // Agent added one manually before going under contract.
+    const createRes = await createContingencyRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/contingencies`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({ label: "HOA docs review", contingency_type: "hoa" }),
+      }),
+      ctx({ id: deal.id })
+    );
+    expect(createRes.status).toBe(201);
+
+    const res = await advanceStageRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/stage`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({ stage: "under_contract" }),
+      }),
+      ctx({ id: deal.id })
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.deal_contingencies.findMany({
+      where: { deal_id: deal.id },
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].contingency_type).toBe("hoa");
   });
 });

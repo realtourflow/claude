@@ -59,6 +59,9 @@ import {
   Download,
   Trash2,
   Check,
+  Shield,
+  ShieldCheck,
+  ShieldOff,
 } from 'lucide-react';
 import MetroMap from "@/components/MetroMap";
 import { MOCK_USERS } from "@/lib/data/mockUsers";
@@ -69,6 +72,9 @@ import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/usePrope
 import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
 import { useOffers } from "@/hooks/useOffers";
 import { useNetSheet, NetSheetLine, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
+import { AddCustomLineControl } from "@/components/net-sheet/AddCustomLineControl";
+import { useContingencies, ContingencyStatus } from "@/hooks/useContingencies";
+import { AddContingencyForm } from "@/components/contingencies/AddContingencyForm";
 import {
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
@@ -759,6 +765,8 @@ function SellerNetSheetCard({ deal }: { deal: import("@/lib/data/mockDeals").Dea
                 <NetSheetLineRow key={line.id} line={line} salePrice={salePrice}
                   onChange={(patch) => updateLine(line.id, patch)} />
               ))}
+              {/* Custom deduction lines the defaults don't cover (#181) */}
+              <AddCustomLineControl onAdd={(line) => setLines((prev) => [...prev, line])} />
             </div>
           )}
         </div>
@@ -1779,6 +1787,105 @@ function SmoothExitCard({ deal }: { deal: Deal }) {
   );
 }
 
+// ─── Contingencies Card (#186) ───────────────────────────────────────────────
+
+const CONTINGENCY_BADGE: Record<ContingencyStatus, { style: string; label: string }> = {
+  active:  { style: 'bg-amber-100 text-amber-700', label: 'Active'  },
+  waived:  { style: 'bg-green-100 text-green-700', label: 'Waived'  },
+  removed: { style: 'bg-gray-100 text-gray-500',   label: 'Removed' },
+};
+
+function contingencyDaysUntil(dateStr: string): number {
+  return Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
+}
+
+// Exported for tests (tests/components/contingency-add-form.test.tsx).
+export function ContingenciesCard({ deal }: { deal: Deal }) {
+  const { items, loading, addItem, updateStatus } = useContingencies(deal.id);
+  const activeCount = items.filter((c) => c.status === 'active').length;
+
+  return (
+    <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <Shield size={14} className="text-brand-navy" />
+          <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Contingencies</h3>
+        </div>
+        {activeCount > 0 && <span className="text-xs text-gray-400">{activeCount} active</span>}
+      </div>
+
+      <div className="px-5 py-4 space-y-3">
+        {loading ? (
+          <p className="text-xs text-gray-300">Loading…</p>
+        ) : items.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">
+            No contingencies yet. Add the deadlines you need to protect this deal.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {items.map((c) => {
+              const badge = CONTINGENCY_BADGE[c.status];
+              const days = c.deadline ? contingencyDaysUntil(c.deadline) : null;
+              const isActive = c.status === 'active';
+              const isPast = isActive && days !== null && days < 0;
+              const isUrgent = isActive && days !== null && days >= 0 && days <= 5;
+              const BadgeIcon = c.status === 'waived' ? ShieldCheck : c.status === 'removed' ? ShieldOff : Shield;
+
+              return (
+                <div
+                  key={c.id}
+                  className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${isUrgent || isPast ? 'border-amber-200 bg-amber-50/50' : 'border-gray-100 bg-white'}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-sm font-semibold ${isActive ? 'text-brand-navy' : 'text-gray-400'}`}>
+                        {c.label}
+                      </span>
+                      <span className={`flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${badge.style}`}>
+                        <BadgeIcon size={9} className="inline" /> {badge.label}
+                      </span>
+                    </div>
+                    {c.deadline && (
+                      <div className={`text-xs mt-0.5 ${isPast ? 'text-red-600 font-semibold' : isUrgent ? 'text-amber-600 font-medium' : 'text-gray-400'}`}>
+                        {!isActive
+                          ? `Deadline was ${c.deadline}`
+                          : isPast
+                          ? `Expired ${Math.abs(days!)}d ago — ${c.deadline}`
+                          : days === 0
+                          ? `Expires today — ${c.deadline}`
+                          : `Expires in ${days}d — ${c.deadline}`}
+                      </div>
+                    )}
+                  </div>
+                  {isActive && (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => updateStatus(c.id, 'waived')}
+                        className="rounded-lg border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700 hover:bg-green-100 transition-colors"
+                      >
+                        Waive
+                      </button>
+                      <button
+                        onClick={() => updateStatus(c.id, 'removed')}
+                        className="rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add contingency (#186) — wired to useContingencies.addItem */}
+        <AddContingencyForm onAdd={addItem} />
+      </div>
+    </div>
+  );
+}
+
 function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; onRefresh?: () => void }) {
   const completedCount = tasks.filter((t) => t.status === 'completed').length;
   const { participants } = useParticipants(deal.id);
@@ -1895,6 +2002,11 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
 
       {/* Team & Participants — add co-agent / client by email, remove added participants */}
       <TeamParticipantsCard deal={deal} />
+
+      {/* Contingency deadlines — under_contract and beyond (#186) */}
+      {['under_contract', 'pre_close', 'closing', 'post_close'].includes(deal.stage) && (
+        <ContingenciesCard deal={deal} />
+      )}
 
       {/* Property Tracker — buy deals only */}
       {deal.type === 'buy' && <PropertyTrackingCard deal={deal} />}
