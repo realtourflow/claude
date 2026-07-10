@@ -397,9 +397,17 @@ export default function SellerOnboarding() {
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { name?: string } | null) => { if (d?.name) setAgentName(d.name); })
         .catch(() => {});
-    } else if (activeUser) {
-      api.get<{ agent_name: string }[]>('/me/deals')
-        .then((rows) => { if (rows[0]?.agent_name) setAgentName(rows[0].agent_name); })
+    }
+    if (activeUser) {
+      // Account-first flow: with no invite token the deal id must come from
+      // the seller's own participant deals. Thread it into the Smooth Exit
+      // links below so the survey has a deal to actually enroll (#183).
+      api.get<{ id: string; type: string; agent_name: string }[]>('/me/deals')
+        .then((rows) => {
+          if (!agentId && rows[0]?.agent_name) setAgentName(rows[0].agent_name);
+          const sellDeal = rows.find((r) => r.type === 'sell');
+          if (sellDeal) setDealId(sellDeal.id);
+        })
         .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
