@@ -3096,7 +3096,8 @@ function SendForSignatureModal({
   );
 }
 
-function DocumentsTab({
+// Exported for tests (tests/components/deal-detail-documents-sign.test.tsx).
+export function DocumentsTab({
   deal,
   docs,
   loading,
