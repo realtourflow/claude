@@ -1,5 +1,6 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
+import { hasDealAccess } from "@/lib/deals";
 import { resolveUserId } from "@/lib/users";
 import {
   SMOOTH_EXIT_UPSELL_PRICE_CENTS,
@@ -18,7 +19,9 @@ type EnrollBody = {
   upsell_total_cents?: number; // client-sent; deliberately ignored — the server prices upsells
 };
 
-// POST /deals/:dealId/smoothexit — owner-only.
+// POST /deals/:dealId/smoothexit — owning agent or any deal participant (#170:
+// sellers enroll their own deal from the portal pitch; upsells are priced
+// server-side, so opening the route to participants stays tamper-safe).
 // Stores Smooth Exit enrollment JSONB on the deal. If upsells were selected and
 // Stripe is configured, charges them upfront via Stripe Checkout and returns a
 // checkout_url. Ports EnrollSmoothExit (the legacy Go backend), except the
@@ -35,7 +38,13 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       select: { agent_id: true, title: true },
     });
     if (!deal) return error("deal not found", 404);
-    if (deal.agent_id !== userId) return error("forbidden", 403);
+    // Owner short-circuits; anyone else must be a deal participant (seller,
+    // buyer, …) — hasDealAccess covers both, but the owner check avoids the
+    // extra query on the common agent path. (Same pattern as fastpass, #169.)
+    const isOwner = deal.agent_id === userId;
+    if (!isOwner && !(await hasDealAccess(dealId, userId))) {
+      return error("forbidden", 403);
+    }
 
     let body: EnrollBody;
     try {
@@ -87,12 +96,19 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     if (upsellTotalCents > 0) {
       const url = new URL(req.url);
       const origin = `${url.protocol}//${url.host}`;
+      // Role-aware success URL (#170): a participant (seller) returns to their
+      // own portal after paying; the owning agent keeps the legacy completion
+      // URL. Cancel returns both to the survey's ?deal_id entry point so a
+      // resubmit works (SmoothExitSurvey keeps its handoff for exactly this).
+      const successUrl = isOwner
+        ? `${origin}/smooth-exit/complete?deal_id=${dealId}&upsells=paid`
+        : `${origin}/seller/${userId}?smoothexit=paid`;
       try {
         const session = await createSmoothExitUpsellCheckout({
           dealId,
           dealTitle: deal.title,
           amountCents: upsellTotalCents,
-          successUrl: `${origin}/smooth-exit/complete?deal_id=${dealId}&upsells=paid`,
+          successUrl,
           cancelUrl: `${origin}/smooth-exit/survey?deal_id=${dealId}&cancelled=1`,
         });
         if (session.url) {
