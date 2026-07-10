@@ -349,10 +349,12 @@ const PAYMENT_OPTIONS: { value: SmoothExitPaymentOption; title: string; badge: s
   },
 ];
 
+export type SubmitError = 'submit' | 'no_deal' | false;
+
 function ConfirmScreen({ data, submitting, submitError, onSubmit }: {
   data: SurveyData;
   submitting?: boolean;
-  submitError?: boolean;
+  submitError?: SubmitError;
   onSubmit: (paymentOption: SmoothExitPaymentOption) => void;
 }) {
   const [paymentOption, setPaymentOption] = useState<SmoothExitPaymentOption | null>(null);
@@ -449,7 +451,15 @@ function ConfirmScreen({ data, submitting, submitError, onSubmit }: {
           </div>
         </div>
 
-        {submitError && (
+        {submitError === 'no_deal' && (
+          <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+            <p className="text-sm font-semibold text-red-700">We couldn&apos;t find your sale to enroll.</p>
+            <p className="text-xs text-red-400">
+              Nothing was charged — please try again, or ask your agent to add you to your deal first.
+            </p>
+          </div>
+        )}
+        {submitError === 'submit' && (
           <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3">
             <p className="text-sm font-semibold text-red-700">We couldn&apos;t submit your enrollment.</p>
             <p className="text-xs text-red-400">Nothing was charged — please try again.</p>
@@ -533,7 +543,7 @@ export default function SmoothExitSurvey() {
   const [data, setData] = useState<SurveyData>(EMPTY);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState(false);
+  const [submitError, setSubmitError] = useState<SubmitError>(false);
   const [chosenPayment, setChosenPayment] = useState<SmoothExitPaymentOption>('from_proceeds');
 
   const progress = Math.min(((screen + 1) / TOTAL_SCREENS) * 100, 100);
@@ -592,36 +602,56 @@ export default function SmoothExitSurvey() {
             submitError={submitError}
             onSubmit={async (opt) => {
               setChosenPayment(opt);
-              if (dealId) {
-                setSubmitting(true);
-                setSubmitError(false);
+              setSubmitting(true);
+              setSubmitError(false);
+
+              // The default new-seller path (RootRedirect → /onboard/seller,
+              // no invite token) reaches this survey with no dealId at all.
+              // Resolve the seller's own sell deal from /me/deals rather than
+              // fabricating success without ever calling the API (#183).
+              let targetDealId = dealId;
+              if (!targetDealId) {
                 try {
-                  const price = parseFloat(data.estimatedSalePrice) || 0;
-                  const res = await api.post<{ ok?: boolean; checkout_url?: string }>(`/deals/${dealId}/smoothexit`, {
-                    payment_option: opt,
-                    estimated_sale_price: Math.round(price),
-                    fee_cents: Math.round(price * 0.01 * 100),
-                    survey_answers: data,
-                    selected_upsells: selectedUpsells,
-                    upsell_total_cents: Math.round(upsellTotal * 100),
-                  });
-                  if (res.checkout_url) {
-                    // Navigating to Stripe — stay disabled (page is unloading)
-                    // so a double-click can't double-post. Keep the handoff:
-                    // Stripe's cancel URL returns here for a resubmit.
-                    window.location.href = res.checkout_url;
-                    return;
-                  }
-                  sessionStorage.removeItem(HANDOFF_KEY);
+                  const rows = await api.get<{ id: string; type: string }[]>('/me/deals');
+                  // Rows are ordered updated_at DESC — take the freshest sale.
+                  targetDealId = rows.find((r) => r.type === 'sell')?.id ?? null;
                 } catch {
-                  // Enrollment did not persist — show the error, never the
-                  // success screen, and keep the handoff so retry works.
-                  setSubmitError(true);
-                  setSubmitting(false);
+                  targetDealId = null;
+                }
+              }
+              if (!targetDealId) {
+                // No deal to enroll — this is an error state, never success.
+                setSubmitError('no_deal');
+                setSubmitting(false);
+                return;
+              }
+
+              try {
+                const price = parseFloat(data.estimatedSalePrice) || 0;
+                const res = await api.post<{ ok?: boolean; checkout_url?: string }>(`/deals/${targetDealId}/smoothexit`, {
+                  payment_option: opt,
+                  estimated_sale_price: Math.round(price),
+                  fee_cents: Math.round(price * 0.01 * 100),
+                  survey_answers: data,
+                  selected_upsells: selectedUpsells,
+                  upsell_total_cents: Math.round(upsellTotal * 100),
+                });
+                if (res.checkout_url) {
+                  // Navigating to Stripe — stay disabled (page is unloading)
+                  // so a double-click can't double-post. Keep the handoff:
+                  // Stripe's cancel URL returns here for a resubmit.
+                  window.location.href = res.checkout_url;
                   return;
                 }
+                sessionStorage.removeItem(HANDOFF_KEY);
+              } catch {
+                // Enrollment did not persist — show the error, never the
+                // success screen, and keep the handoff so retry works.
+                setSubmitError('submit');
                 setSubmitting(false);
+                return;
               }
+              setSubmitting(false);
               setSubmitted(true);
             }}
           />

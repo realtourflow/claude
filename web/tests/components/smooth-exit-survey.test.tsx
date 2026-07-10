@@ -28,10 +28,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/lib/api-client", () => ({
-  api: { post: vi.fn() },
+  api: { post: vi.fn(), get: vi.fn() },
 }));
 
 const mockPost = api.post as Mock;
+const mockGet = api.get as Mock;
 
 const DEAL_ID = "5f0f6f6a-9b1c-4f6e-8a2d-3c4b5a697e01";
 
@@ -67,6 +68,7 @@ function driveToSubmit() {
 beforeEach(() => {
   sessionStorage.clear();
   mockPost.mockReset();
+  mockGet.mockReset();
   mockSearchParams = new URLSearchParams();
 });
 
@@ -124,5 +126,66 @@ describe("SmoothExitSurvey handoff", () => {
     expect(screen.queryByText("Smooth Exit activated!")).toBeNull();
     // Handoff is kept so the user can retry without losing the deal id.
     expect(sessionStorage.getItem(HANDOFF_KEY)).not.toBeNull();
+  });
+});
+
+/**
+ * #183 — the default new-seller path (RootRedirect → /onboard/seller with no
+ * invite token) reaches this survey with NO dealId: no ?dealId= query param
+ * and no sessionStorage handoff. The old code only called the API
+ * `if (dealId)` and then unconditionally setSubmitted(true) — fabricating
+ * "Smooth Exit activated!" while recording nothing. The survey must instead
+ * resolve the seller's sell deal from /me/deals, and if none resolves show an
+ * error — never the success screen.
+ */
+describe("SmoothExitSurvey with no dealId (default new-seller path)", () => {
+  it("never fabricates success: no resolvable sell deal → error, no enrollment POST", async () => {
+    mockGet.mockResolvedValue([]); // seller has no deals at all
+    render(<SmoothExitSurvey />);
+    driveToSubmit();
+
+    await screen.findByText(/couldn[’']t find your sale/i);
+    expect(screen.queryByText("Smooth Exit activated!")).toBeNull();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("resolves the seller's sell deal from /me/deals and enrolls it — success only after the POST", async () => {
+    const SELL_DEAL = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    mockGet.mockResolvedValue([
+      { id: "99999999-8888-7777-6666-555555555555", type: "buy" },
+      { id: SELL_DEAL, type: "sell" },
+    ]);
+    mockPost.mockResolvedValue({ ok: true });
+    render(<SmoothExitSurvey />);
+    driveToSubmit();
+
+    await screen.findByText("Smooth Exit activated!");
+    expect(mockGet).toHaveBeenCalledWith("/me/deals");
+    expect(mockPost).toHaveBeenCalledTimes(1);
+    const [path, body] = mockPost.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe(`/deals/${SELL_DEAL}/smoothexit`);
+    // No handoff stash on this path — no add-ons may be charged.
+    expect(body.selected_upsells).toEqual([]);
+    expect(body.upsell_total_cents).toBe(0);
+  });
+
+  it("shows an error — never success — when the /me/deals lookup itself fails", async () => {
+    mockGet.mockRejectedValue(new Error("401 — no session"));
+    render(<SmoothExitSurvey />);
+    driveToSubmit();
+
+    await screen.findByText(/couldn[’']t find your sale/i);
+    expect(screen.queryByText("Smooth Exit activated!")).toBeNull();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("shows an error — never success — when the fallback-resolved enrollment POST fails", async () => {
+    mockGet.mockResolvedValue([{ id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", type: "sell" }]);
+    mockPost.mockRejectedValue(new Error("403 — sellers cannot enroll"));
+    render(<SmoothExitSurvey />);
+    driveToSubmit();
+
+    await screen.findByText(/couldn[’']t submit/i);
+    expect(screen.queryByText("Smooth Exit activated!")).toBeNull();
   });
 });
