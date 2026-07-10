@@ -11,6 +11,9 @@ export async function GET(req: Request): Promise<Response> {
     if (!userId) return error("user not found", 404);
     void Prisma; // ensure import remains for $queryRaw types
 
+    // Full portal payload (#171): the buyer/seller portals read pre-approval,
+    // BAA, Fast Pass / Smooth Exit, and ARIVE loan state from this endpoint —
+    // same column set as listDealsForUser (lib/deals.ts).
     const rows = await prisma.$queryRaw<
       {
         id: string;
@@ -22,6 +25,14 @@ export async function GET(req: Request): Promise<Response> {
         address: string | null;
         price: string | null;
         arive_linked: boolean;
+        arive_milestones: unknown;
+        arive_key_dates: unknown;
+        arive_loan_status: string | null;
+        fast_pass: unknown;
+        smooth_exit: unknown;
+        pre_approved: boolean;
+        baa_signed: boolean;
+        disclosures_complete: boolean;
         created_at: Date;
         updated_at: Date;
         agent_name: string;
@@ -32,7 +43,11 @@ export async function GET(req: Request): Promise<Response> {
       SELECT deals.id, deals.agent_id, deals.type::text AS type, deals.stage::text AS stage,
              ${healthExpr} AS health,
              deals.title, deals.address, deals.price::text AS price,
-             deals.arive_linked, deals.created_at, deals.updated_at,
+             deals.arive_linked,
+             deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
+             deals.fast_pass, deals.smooth_exit,
+             deals.pre_approved, deals.baa_signed, deals.disclosures_complete,
+             deals.created_at, deals.updated_at,
              u.name AS agent_name, u.email AS agent_email, u.phone AS agent_phone
       FROM deals
       JOIN deal_participants dp ON dp.deal_id = deals.id AND dp.user_id = ${userId}::uuid
