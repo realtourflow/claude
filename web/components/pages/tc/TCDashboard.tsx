@@ -7,6 +7,7 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, LoanMilestones } from "@/lib/data/mockDeals";
 import { useDeals } from "@/hooks/useDeals";
 import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType } from "@/hooks/useContingencies";
+import { AddContingencyForm } from "@/components/contingencies/AddContingencyForm";
 import { useChecklist, ChecklistAssignee } from "@/hooks/useChecklist";
 import { useAgentTasks } from "@/hooks/useTasks";
 import { usePermission } from "@/permissions/usePermission";
@@ -425,8 +426,9 @@ const CONTINGENCY_STATUS: Record<ContingencyStatus, { badge: string; label: stri
   removed: { badge: 'bg-gray-100 text-gray-500',   label: 'Removed', Icon: ShieldOff   },
 };
 
-function DealContingenciesCard({ deal }: { deal: Deal }) {
-  const { items, updateStatus, loading } = useContingencies(deal.id);
+// Exported for tests (tests/components/contingency-add-form.test.tsx).
+export function DealContingenciesCard({ deal }: { deal: Deal }) {
+  const { items, updateStatus, addItem, loading } = useContingencies(deal.id);
 
   const activeCount = items.filter((c) => c.status === 'active').length;
   const urgentCount = items.filter((c) => c.status === 'active' && c.deadline && daysUntil(c.deadline) <= 5).length;
@@ -516,6 +518,11 @@ function DealContingenciesCard({ deal }: { deal: Deal }) {
           })}
         </div>
       )}
+
+      {/* Add contingency (#186) — wired to useContingencies.addItem */}
+      <div className="px-5 py-3 border-t border-gray-50">
+        <AddContingencyForm onAdd={addItem} />
+      </div>
     </div>
   );
 }

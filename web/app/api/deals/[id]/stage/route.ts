@@ -10,6 +10,7 @@ import {
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
 import { enqueuePushDealClosingEvent } from "@/lib/jobs";
+import { seedStandardContingencies } from "@/lib/contingency-seed";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -74,6 +75,18 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
         },
       }),
     ]);
+
+    // Auto-seed the standard inspection/financing/appraisal contingencies the
+    // first time a deal goes under contract (#186). Best-effort: idempotent in
+    // the lib (only when the deal has zero contingencies), and a failure here
+    // must never fail the stage change.
+    if (newStage === "under_contract") {
+      try {
+        await seedStandardContingencies(dealId);
+      } catch (err) {
+        console.error("contingency auto-seed failed", err);
+      }
+    }
 
     // Side-effect fan-out (audit + notifications + calendar push) is AWAITED,
     // not detached: on Vercel the function can freeze once the response is
