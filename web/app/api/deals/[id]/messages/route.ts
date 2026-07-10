@@ -1,5 +1,7 @@
 import { error, json, withAuth } from "@/lib/http";
 import { resolveUserId } from "@/lib/users";
+import { hasRole } from "@/lib/roles";
+import { isLinkedTCForDeal } from "@/lib/deals";
 import {
   createMessage,
   getMessageAccess,
@@ -23,12 +25,26 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
     const access = await getMessageAccess(dealId, userId);
-    if (!access.hasAccess) return error("deal not found", 404);
+
+    // Read access beyond agent/participant (#167): admins are global; a TC
+    // linked by the deal's agent (users.tc_user_id) may read too. Both are
+    // read-only here — POST below still requires agent/participant access.
+    const privilegedReader =
+      hasRole(claims.roles, ["admin"]) ||
+      (hasRole(claims.roles, ["tc"]) &&
+        (await isLinkedTCForDeal(dealId, userId)));
+
+    if (!access.hasAccess && !privilegedReader) {
+      return error("deal not found", 404);
+    }
 
     const url = new URL(req.url);
     const channel = parseChannel(url.searchParams.get("channel"));
 
-    if (!access.isAgent && channel === "internal") {
+    // Internal thread is "Agent + TC only — not visible to clients" (#177):
+    // client participants stay blocked; the owning agent, admins, and the
+    // linked TC may read it.
+    if (!access.isAgent && !privilegedReader && channel === "internal") {
       return error("forbidden", 403);
     }
     const messages = await listMessages(dealId, channel);

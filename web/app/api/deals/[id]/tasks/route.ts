@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { error, json, withAuth } from "@/lib/http";
 import { resolveUserId } from "@/lib/users";
+import { canReadDeal } from "@/lib/deals";
 import { enqueuePushTaskDueEvent } from "@/lib/jobs";
 import { emailTaskAssigned } from "@/lib/notification-email";
 import { isValidDueDateString } from "@/lib/task-due-dates";
@@ -31,11 +32,11 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
-    const owned = await prisma.deals.findFirst({
-      where: { id: dealId, agent_id: userId },
-      select: { id: true },
-    });
-    if (!owned) return error("deal not found", 404);
+    // Read access (#167): agent owner, participant, linked TC, or admin.
+    // Task writes below (POST) stay agent-owner-only.
+    if (!(await canReadDeal(dealId, userId, claims.roles))) {
+      return error("deal not found", 404);
+    }
 
     const tasks = await prisma.$queryRaw<TaskRow[]>`
       SELECT id, deal_id, assigned_to, title, description,

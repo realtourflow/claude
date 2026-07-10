@@ -1,7 +1,7 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
-import { hasDealAccess } from "@/lib/deals";
+import { canReadDeal, hasDealAccess } from "@/lib/deals";
 import { emailDocumentUploaded } from "@/lib/notification-email";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -28,7 +28,9 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
-    const access = await hasDealAccess(dealId, userId);
+    // Read access (#167): agent owner, participant, linked TC, or admin.
+    // Uploads (POST below) stay agent/participant-only.
+    const access = await canReadDeal(dealId, userId, claims.roles);
     if (!access) return error("deal not found", 404);
 
     const rows = await prisma.$queryRaw<DocumentRow[]>`
