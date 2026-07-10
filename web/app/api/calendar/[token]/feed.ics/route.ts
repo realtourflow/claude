@@ -1,3 +1,4 @@
+import { extractClosingDate, parseDateOnly } from "@/lib/arive-dates";
 import { prisma } from "@/lib/db";
 import { renderICal, type ICalEvent } from "@/lib/ical";
 
@@ -33,13 +34,12 @@ export async function GET(_req: Request, ctx: Ctx): Promise<Response> {
   const events: ICalEvent[] = [];
 
   for (const d of deals) {
-    const keyDates = d.arive_key_dates as
-      | { closing?: string; closing_date?: string }
-      | null;
-    const closingStr = keyDates?.closing ?? keyDates?.closing_date;
+    // Same key selection as the calendar push (lib/jobs.ts) and the deal
+    // serializer (hooks/useDeals.ts) — see lib/arive-dates.ts (#196).
+    const closingStr = extractClosingDate(d.arive_key_dates);
     if (closingStr) {
-      const day = new Date(closingStr);
-      if (!isNaN(day.getTime())) {
+      const day = parseDateOnly(closingStr);
+      if (day) {
         events.push({
           uid: `close-${d.id}@realtourflow`,
           summary: `Closing: ${d.title}`,

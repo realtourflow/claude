@@ -23,6 +23,7 @@
  * Mirrors pushDealClosingEvent / pushTaskDueEvent in
  * the legacy Go backend.
  */
+import { extractClosingDate, parseDateOnly } from "./arive-dates";
 import { prisma } from "./db";
 import { fanOutUpsert, fanOutDelete, type CalendarEvent } from "./calendar";
 import {
@@ -162,21 +163,8 @@ async function enqueueThenAttemptInline(
   }
 }
 
-// The closing date comes from ARIVE: prefer the estimated funding date, fall
-// back to the closing contingency — same COALESCE the Go handler uses.
-function extractClosingDate(keyDates: unknown): string | null {
-  if (!keyDates || typeof keyDates !== "object") return null;
-  const kd = keyDates as Record<string, unknown>;
-  const v = kd.estimatedFundingDate ?? kd.closingContingency;
-  return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
-}
-
-// Accepts "2026-09-15" (treated as UTC midnight to avoid TZ drift) or RFC3339.
-function parseDateOnly(s: string): Date | null {
-  const iso = /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00Z` : s;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
+// extractClosingDate / parseDateOnly moved to ./arive-dates so the calendar
+// push, the iCal feed, and the deal serializer share one key selection (#196).
 
 // Normalizes a DateTime (task.due_date is @db.Date) to UTC midnight of that day.
 function dateOnly(d: Date): Date {
