@@ -238,3 +238,35 @@ export async function emailTaskAssigned(input: {
     dealUrl: recipientUrl(origin, row.role, assigneeId, dealId),
   });
 }
+
+/**
+ * Offer requested on a tracked property (#168): email the deal's agent.
+ * Never the requester — if the agent flips the flag themselves, no email.
+ * Invoked best-effort by the property PATCH route (a throw must never block
+ * the mutation).
+ */
+export async function emailOfferRequested(input: {
+  req: Request;
+  dealId: string;
+  requesterId: string;
+  propertyAddress: string;
+}): Promise<void> {
+  const { req, dealId, requesterId, propertyAddress } = input;
+  const agent = await dealAgent(dealId);
+  if (!agent || agent.id === requesterId) return;
+
+  const origin = originFromRequest(req);
+  await fanOut(
+    [
+      {
+        email: agent.email,
+        url: recipientUrl(origin, "agent", agent.id, dealId),
+      },
+    ],
+    {
+      subject: "Offer request on your RealTourFlow deal",
+      heading: "Your client wants to make an offer",
+      body: `Your client requested to make an offer on "${propertyAddress}". Reach out to discuss next steps.`,
+    }
+  );
+}

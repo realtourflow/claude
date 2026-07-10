@@ -477,17 +477,22 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
   onStatusChange: (status: PropertyStatus) => void;
   onRemove: () => void;
   onBuyerNote: (note: string) => void;
-  onOfferRequest: () => void;
+  onOfferRequest: () => Promise<void>;
   canOffer?: boolean;
 }) {
   const [imgError, setImgError] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewDraft, setReviewDraft] = useState(property.buyerNote ?? '');
   const [offerSent, setOfferSent] = useState(property.offerRequested ?? false);
+  const [offerSending, setOfferSending] = useState(false);
+  const [offerError, setOfferError] = useState<string | null>(null);
 
   const cfg = STATUS_CONFIG[property.status];
   const dimmed = property.status === 'not_for_me';
   const showReviewPrompt = property.status === 'toured' && !property.buyerNote && !reviewOpen;
+  // Buyers can only remove their own additions — the agent's picks stay
+  // (the server enforces this too; cycle to "Not for me" to pass on a pick).
+  const canRemove = property.addedBy !== 'agent';
 
   function submitReview() {
     const note = reviewDraft.trim();
@@ -496,9 +501,19 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
     setReviewOpen(false);
   }
 
-  function handleOfferRequest() {
-    setOfferSent(true);
-    onOfferRequest();
+  // No fake success (#168): the confirmation only renders after the API call
+  // actually resolves; a failure surfaces a real inline error.
+  async function handleOfferRequest() {
+    setOfferError(null);
+    setOfferSending(true);
+    try {
+      await onOfferRequest();
+      setOfferSent(true);
+    } catch {
+      setOfferError("Couldn't send your offer request — please try again.");
+    } finally {
+      setOfferSending(false);
+    }
   }
 
   return (
@@ -530,9 +545,11 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
               <p className="text-sm font-bold text-brand-navy leading-tight truncate">{property.address}</p>
               <p className="text-xs text-gray-400">{property.city}{property.state ? `, ${property.state}` : ''}</p>
             </div>
-            <button onClick={onRemove} className="flex-shrink-0 text-gray-300 hover:text-gray-500 transition-colors mt-0.5">
-              <X size={13} />
-            </button>
+            {canRemove && (
+              <button onClick={onRemove} aria-label="Remove property" className="flex-shrink-0 text-gray-300 hover:text-gray-500 transition-colors mt-0.5">
+                <X size={13} />
+              </button>
+            )}
           </div>
 
           {property.price > 0 && (
@@ -605,12 +622,18 @@ function PropertyCard({ property, onStatusChange, onRemove, onBuyerNote, onOffer
                   </p>
                 </div>
               ) : (
-                <button
-                  onClick={handleOfferRequest}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-gold/90 py-2 text-xs font-bold text-brand-navy hover:bg-brand-gold transition-colors"
-                >
-                  <Send size={11} /> Make an Offer
-                </button>
+                <>
+                  <button
+                    onClick={handleOfferRequest}
+                    disabled={offerSending}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-gold/90 py-2 text-xs font-bold text-brand-navy hover:bg-brand-gold transition-colors disabled:opacity-50"
+                  >
+                    <Send size={11} /> {offerSending ? 'Sending…' : 'Make an Offer'}
+                  </button>
+                  {offerError && (
+                    <p className="mt-1.5 text-[11px] font-medium text-red-500">{offerError}</p>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -719,7 +742,7 @@ function MLSListingCard({ listing, onAdd }: { listing: MLSListing; onAdd: (l: ML
 
 function MLSBrowser({ deal, onAddProperty }: {
   deal: Deal;
-  onAddProperty: (address: string, city: string, price: number, sourceUrl?: string) => void;
+  onAddProperty: (address: string, city: string, price: number, sourceUrl?: string) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [cityInput, setCityInput] = useState(deal.property.city ?? '');
@@ -727,6 +750,7 @@ function MLSBrowser({ deal, onAddProperty }: {
   const [maxPrice, setMaxPrice] = useState('');
   const [minBeds, setMinBeds] = useState('');
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const [addError, setAddError] = useState<string | null>(null);
   const { listings, loading, error, search } = useMLSListings(deal.id);
 
   function handleSearch() {
@@ -738,9 +762,15 @@ function MLSBrowser({ deal, onAddProperty }: {
     });
   }
 
-  function handleAdd(l: MLSListing) {
-    onAddProperty(l.address.full, l.address.city, l.listPrice);
-    setAddedIds((prev) => new Set(prev).add(l.mlsId));
+  // The "Added" chip only appears once the API call actually succeeds (#168).
+  async function handleAdd(l: MLSListing) {
+    setAddError(null);
+    try {
+      await onAddProperty(l.address.full, l.address.city, l.listPrice);
+      setAddedIds((prev) => new Set(prev).add(l.mlsId));
+    } catch {
+      setAddError("Couldn't add that listing — please try again.");
+    }
   }
 
   return (
@@ -805,6 +835,10 @@ function MLSBrowser({ deal, onAddProperty }: {
             <p className="mt-3 text-xs text-red-500">{error === 'agent has not connected MLS' ? 'Your agent hasn\'t connected their MLS yet.' : error}</p>
           )}
 
+          {addError && (
+            <p className="mt-3 text-xs text-red-500">{addError}</p>
+          )}
+
           {listings.length > 0 && (
             <div className="mt-4">
               <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">
@@ -866,32 +900,46 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
     }
   }
 
-  async function handleOfferInterest(propertyId: string, _address: string) {
-    await setOfferRequested(propertyId, true).catch(() => {});
-  }
   const isMountainMortgage = deal.flags.includes('mountain_mortgage');
 
   const [showForm, setShowForm] = useState(false);
   const [urlInput, setUrlInput] = useState('');
   const [addressInput, setAddressInput] = useState('');
   const [priceInput, setPriceInput] = useState('');
+  const [addError, setAddError] = useState<string | null>(null);
+  // Real errors, not fake success (#168): failed writes used to be swallowed
+  // with .catch(() => {}) while the UI reported success.
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  function runAction(promise: Promise<unknown>) {
+    setActionError(null);
+    promise.catch(() =>
+      setActionError("Couldn't update your home search — please try again.")
+    );
+  }
 
   async function handleAdd() {
     const addr = addressInput.trim() || (urlInput.trim() ? 'Property from link' : '');
     if (!addr) return;
-    await addProperty({
-      dealId: deal.id,
-      address: addr,
-      city: '', state: '',
-      price: priceInput ? parseInt(priceInput.replace(/\D/g, ''), 10) : 0,
-      beds: 0, baths: 0, sqft: 0,
-      thumbnailUrl: '',
-      sourceUrl: urlInput.trim(),
-      status: 'interested',
-      addedBy: 'buyer',
-    }).catch(() => {});
-    setUrlInput(''); setAddressInput(''); setPriceInput('');
-    setShowForm(false);
+    setAddError(null);
+    try {
+      await addProperty({
+        dealId: deal.id,
+        address: addr,
+        city: '', state: '',
+        price: priceInput ? parseInt(priceInput.replace(/\D/g, ''), 10) : 0,
+        beds: 0, baths: 0, sqft: 0,
+        thumbnailUrl: '',
+        sourceUrl: urlInput.trim(),
+        status: 'interested',
+        addedBy: 'buyer',
+      });
+      setUrlInput(''); setAddressInput(''); setPriceInput('');
+      setShowForm(false);
+    } catch {
+      // Keep the form (and what they typed) so they can retry.
+      setAddError("Couldn't add that property — please try again.");
+    }
   }
 
   function handleUploadLetter() {
@@ -937,12 +985,15 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
             <input type="text" value={priceInput} onChange={(e) => setPriceInput(e.target.value)}
               placeholder="List price (optional)"
               className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 outline-none focus:border-brand-navy/30" />
+            {addError && (
+              <p className="text-xs font-medium text-red-500">{addError}</p>
+            )}
             <div className="flex gap-2">
               <button onClick={handleAdd} disabled={!addressInput.trim() && !urlInput.trim()}
                 className="flex-1 rounded-lg bg-brand-navy py-2 text-xs font-bold text-white disabled:opacity-40 hover:bg-brand-navy/80 transition-colors">
                 Add property
               </button>
-              <button onClick={() => { setShowForm(false); setUrlInput(''); setAddressInput(''); setPriceInput(''); }}
+              <button onClick={() => { setShowForm(false); setUrlInput(''); setAddressInput(''); setPriceInput(''); setAddError(null); }}
                 className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-500 hover:bg-gray-50 transition-colors">
                 Cancel
               </button>
@@ -1033,6 +1084,12 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
 
       {/* Property list — always visible */}
       <div className="space-y-3">
+        {actionError && (
+          <div role="alert" className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
+            <AlertCircle size={14} className="text-red-500 flex-shrink-0" />
+            <p className="text-xs font-medium text-red-600">{actionError}</p>
+          </div>
+        )}
         {properties.length === 0 && !showForm && (
           <div className="rounded-2xl border border-dashed border-gray-200 px-5 py-8 text-center">
             <Home size={28} className="mx-auto mb-2 text-gray-200" />
@@ -1045,10 +1102,10 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
         {properties.map((prop) => (
           <PropertyCard key={prop.id} property={prop}
             canOffer={preApproved}
-            onStatusChange={(status) => updateStatus(prop.id, status)}
-            onRemove={() => removeProperty(prop.id)}
-            onBuyerNote={(note) => updateBuyerNote(prop.id, note)}
-            onOfferRequest={() => handleOfferInterest(prop.id, prop.address)} />
+            onStatusChange={(status) => runAction(updateStatus(prop.id, status))}
+            onRemove={() => runAction(removeProperty(prop.id))}
+            onBuyerNote={(note) => runAction(updateBuyerNote(prop.id, note))}
+            onOfferRequest={() => setOfferRequested(prop.id, true)} />
         ))}
       </div>
 
@@ -1067,7 +1124,7 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
             sourceUrl: '',
             status: 'interested',
             addedBy: 'buyer',
-          }).catch(() => {})
+          })
         }
       />
 
