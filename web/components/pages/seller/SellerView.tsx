@@ -19,7 +19,7 @@ import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
   Phone, Mail, Home, Star,
-  TrendingUp, Clock, DollarSign, Eye, Wrench, Send,
+  TrendingUp, Clock, DollarSign, Wrench, Send,
 } from 'lucide-react';
 import VendorDirectory from "@/components/VendorDirectory";
 
@@ -463,7 +463,7 @@ function ShowingAvailabilityModal({ dealId, onClose }: { dealId: string; onClose
 function ListingActiveCard({ deal }: { deal: Deal }) {
   const [showAvailModal, setShowAvailModal] = useState(false);
   const { slots: availability } = useShowingAvailability(deal.id);
-  const { offers } = useOffers(deal.id);
+  const { offers, loading: offersLoading } = useOffers(deal.id);
   const daysOnMarket = deal.timeline.daysInStage ?? 0;
 
   function fmt(t: string) {
@@ -481,24 +481,12 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
           <span className="text-sm font-bold text-green-800">You&apos;re live on the market</span>
         </div>
         <div className="p-5">
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            {[
-              { icon: Clock,      label: 'Days Listed', value: String(daysOnMarket) },
-              { icon: Eye,        label: 'Showings',    value: '7' },
-              { icon: TrendingUp, label: 'Online Views', value: '142' },
-            ].map(({ icon: Icon, label, value }) => (
-              <div key={label} className="rounded-xl bg-gray-50 px-3 py-3 text-center">
-                <Icon size={14} className="text-gray-400 mx-auto mb-1" />
-                <p className="text-xl font-black text-brand-navy leading-none">{value}</p>
-                <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">{label}</p>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3">
-            <p className="text-xs font-semibold text-amber-800 mb-1">Latest showing feedback</p>
-            <p className="text-xs text-amber-600 leading-relaxed italic">
-              &quot;Great layout, loved the kitchen. Buyers want to see it again this weekend.&quot;
-            </p>
+          <div className="rounded-xl bg-gray-50 px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock size={14} className="text-gray-400" />
+              <span className="text-xs text-gray-400">Days Listed</span>
+            </div>
+            <p className="text-xl font-black text-brand-navy leading-none">{daysOnMarket}</p>
           </div>
         </div>
       </div>
@@ -539,14 +527,23 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
         )}
       </div>
 
-      {/* Offers */}
-      {offers.length > 0 && (
-        <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-gray-100">
-            <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
-              Offers Received ({offers.length})
-            </span>
-          </div>
+      {/* Offers — real offers only; an honest empty state when there are none */}
+      <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-gray-100">
+          <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
+            {offers.length > 0 ? `Offers Received (${offers.length})` : 'Offers'}
+          </span>
+        </div>
+        {offers.length === 0 ? (
+          !offersLoading && (
+            <div className="px-5 py-6 text-center">
+              <p className="text-sm text-gray-400">No offers yet.</p>
+              <p className="mt-1 text-xs text-gray-300 leading-relaxed">
+                When a buyer submits an offer, it will show up here and your agent will walk you through it.
+              </p>
+            </div>
+          )
+        ) : (
           <div className="divide-y divide-gray-50">
             {offers.map((offer) => (
               <div key={offer.id} className="px-5 py-4">
@@ -572,8 +569,8 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {showAvailModal && (
         <ShowingAvailabilityModal dealId={deal.id} onClose={() => setShowAvailModal(false)} />
@@ -932,178 +929,6 @@ function FallenThroughCard({ deal, firstName }: { deal: Deal; firstName: string 
   );
 }
 
-// ─── Offer Comparison ────────────────────────────────────────────────────────
-
-type LocalOffer = {
-  id: string;
-  buyerName: string;
-  price: number;
-  financing: 'Conventional' | 'FHA' | 'VA' | 'Cash';
-  earnestMoney: number;
-  inspectionContingency: boolean;
-  closingDate: string;
-  concessions: number;
-  submittedAt: string;
-};
-
-const MOCK_OFFERS: LocalOffer[] = [
-  {
-    id: 'offer-1',
-    buyerName: 'The Patterson Family',
-    price: 392000,
-    financing: 'Conventional',
-    earnestMoney: 7500,
-    inspectionContingency: false,
-    closingDate: '2026-03-28',
-    concessions: 0,
-    submittedAt: '2026-02-17',
-  },
-  {
-    id: 'offer-2',
-    buyerName: 'Marcus & Diane Liu',
-    price: 387500,
-    financing: 'Conventional',
-    earnestMoney: 5000,
-    inspectionContingency: true,
-    closingDate: '2026-04-05',
-    concessions: 3000,
-    submittedAt: '2026-02-18',
-  },
-  {
-    id: 'offer-3',
-    buyerName: 'Kevin Okafor',
-    price: 395000,
-    financing: 'Cash',
-    earnestMoney: 10000,
-    inspectionContingency: false,
-    closingDate: '2026-03-21',
-    concessions: 0,
-    submittedAt: '2026-02-19',
-  },
-];
-
-function OfferComparison({ listPrice }: { listPrice: number }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const best = MOCK_OFFERS.reduce((a, b) => {
-    const netA = a.price - a.concessions;
-    const netB = b.price - b.concessions;
-    return netA >= netB ? a : b;
-  });
-
-  return (
-    <div className="space-y-3">
-      {/* Section header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-brand-navy">Offers Received</h3>
-        <span className="rounded-full bg-brand-navy/10 px-2.5 py-0.5 text-xs font-bold text-brand-navy">
-          {MOCK_OFFERS.length} offers
-        </span>
-      </div>
-
-      {/* Offer cards */}
-      {MOCK_OFFERS.map((offer) => {
-        const isSelected = selectedId === offer.id;
-        const isBest = offer.id === best.id;
-        const overList = offer.price - listPrice;
-        const net = offer.price - offer.concessions;
-
-        return (
-          <div
-            key={offer.id}
-            className={[
-              'rounded-2xl border bg-white shadow-sm overflow-hidden transition-all',
-              isBest ? 'border-brand-gold ring-1 ring-brand-gold/30' : 'border-gray-100',
-            ].join(' ')}
-          >
-            {/* Card header */}
-            <button
-              type="button"
-              onClick={() => setSelectedId(isSelected ? null : offer.id)}
-              className="w-full text-left px-4 py-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                    <span className="font-bold text-brand-navy text-sm">{offer.buyerName}</span>
-                    {isBest && (
-                      <span className="rounded-full bg-brand-gold/20 border border-brand-gold/40 px-2 py-0.5 text-[10px] font-bold text-brand-navy uppercase tracking-wide">
-                        Best Offer
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
-                    <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-600">
-                      {offer.financing}
-                    </span>
-                    <span>Submitted {offer.submittedAt}</span>
-                  </div>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-lg font-black text-brand-navy leading-none">
-                    ${offer.price.toLocaleString()}
-                  </p>
-                  {overList > 0 ? (
-                    <p className="text-[11px] font-semibold text-green-600 mt-0.5">
-                      +${overList.toLocaleString()} over ask
-                    </p>
-                  ) : overList < 0 ? (
-                    <p className="text-[11px] font-semibold text-red-500 mt-0.5">
-                      ${Math.abs(overList).toLocaleString()} under ask
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-gray-400 mt-0.5">At ask</p>
-                  )}
-                </div>
-              </div>
-            </button>
-
-            {/* Expanded details */}
-            {isSelected && (
-              <div className="border-t border-gray-100 px-4 py-4 bg-gray-50 space-y-3">
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { label: 'Net to Seller', value: `$${net.toLocaleString()}`, highlight: true },
-                    { label: 'Earnest Money', value: `$${offer.earnestMoney.toLocaleString()}` },
-                    { label: 'Concessions', value: offer.concessions > 0 ? `-$${offer.concessions.toLocaleString()}` : 'None', warn: offer.concessions > 0 },
-                    { label: 'Target Close', value: offer.closingDate },
-                    { label: 'Inspection', value: offer.inspectionContingency ? 'Contingent' : 'Waived', warn: offer.inspectionContingency, good: !offer.inspectionContingency },
-                    { label: 'Financing', value: offer.financing },
-                  ].map(({ label, value, highlight, warn, good }) => (
-                    <div key={label} className="rounded-xl bg-white border border-gray-100 px-3 py-2.5">
-                      <p className="text-[10px] text-gray-400 uppercase tracking-wide font-semibold mb-0.5">{label}</p>
-                      <p className={`text-sm font-bold ${
-                        highlight ? 'text-brand-navy' :
-                        warn ? 'text-amber-600' :
-                        good ? 'text-green-600' :
-                        'text-gray-700'
-                      }`}>{value}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <button className="flex-1 rounded-xl bg-brand-navy py-2 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors">
-                    Accept
-                  </button>
-                  <button className="flex-1 rounded-xl border border-gray-200 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors">
-                    Counter
-                  </button>
-                  <button className="flex-1 rounded-xl border border-red-100 bg-red-50 py-2 text-xs font-semibold text-red-500 hover:bg-red-100 transition-colors">
-                    Decline
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      <p className="text-center text-xs text-gray-400 pt-1">
-        Tap any offer to see full details. Your agent will guide you through the decision.
-      </p>
-    </div>
-  );
-}
-
 // ─── Stage card dispatcher ────────────────────────────────────────────────────
 
 function StageCard({ deal, firstName }: { deal: Deal; firstName: string }) {
@@ -1285,11 +1110,6 @@ export default function SellerView() {
       {/* Smooth Exit pitch — only if not enrolled */}
       {!deal.smoothExit?.status && !isFallenThrough && deal.stage !== 'post_close' && (
         <SmoothExitPitch dealId={deal.id} />
-      )}
-
-      {/* Offer comparison — only at offer_active stage */}
-      {deal.stage === 'offer_active' && !isFallenThrough && (
-        <OfferComparison listPrice={deal.property.price} />
       )}
 
       {/* Overdue alert */}
