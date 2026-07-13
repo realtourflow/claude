@@ -4150,7 +4150,7 @@ function TimelineTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
 
 // ─── Stage Advance Automation Modal ──────────────────────────────────────────
 
-function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: {
+export function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: {
   deal: Deal;
   nextStage: DealStage;
   gateError?: { blockingTasks: { id: string; title: string }[] } | null;
@@ -4162,12 +4162,15 @@ function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: 
   const [msg, setMsg] = useState(defaultMsg);
   const [editingMsg, setEditingMsg] = useState(false);
 
+  // Only list automations that actually run on confirm (#185): auto tasks are
+  // created via POST /tasks, the (edited) client message is posted to the
+  // client thread, and the stage PATCH enqueues the calendar closing-event
+  // push. The old "TC alerted to open file" / "Commission paperwork queued"
+  // claims had no implementation behind them and were removed.
   const automationItems = [
     autoTasks.length > 0 ? `${autoTasks.length} task${autoTasks.length !== 1 ? 's' : ''} auto-generated` : null,
-    defaultMsg ? `Client message drafted for ${deal.clientName}` : null,
-    nextStage === 'under_contract' ? 'TC alerted to open file' : null,
+    msg.trim() ? `Client message sent to ${deal.clientName}` : null,
     nextStage === 'pre_close' || nextStage === 'closing' ? 'Closing date synced to calendar' : null,
-    nextStage === 'post_close' ? 'Commission paperwork queued' : null,
   ].filter(Boolean) as string[];
 
   return (
@@ -4243,6 +4246,7 @@ function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: 
                   value={msg}
                   onChange={(e) => setMsg(e.target.value)}
                   rows={5}
+                  aria-label="Client message"
                   className="w-full rounded-xl border border-brand-navy/20 bg-white px-3 py-2.5 text-sm text-gray-700 outline-none focus:border-brand-navy/40 resize-none leading-relaxed"
                 />
               ) : (
@@ -4250,7 +4254,11 @@ function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCancel }: 
                   <p className="text-sm text-gray-700 leading-relaxed">{msg}</p>
                 </div>
               )}
-              <p className="mt-1.5 text-[10px] text-gray-400">Sent to client&apos;s portal — they&apos;ll see it immediately.</p>
+              <p className="mt-1.5 text-[10px] text-gray-400">
+                {msg.trim()
+                  ? <>Sent to the client&apos;s message thread when you confirm.</>
+                  : <>Empty message — nothing will be sent to the client.</>}
+              </p>
             </div>
           )}
         </div>
@@ -4494,6 +4502,9 @@ export default function DealDetail() {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab);
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
   const [stageGateError, setStageGateError] = useState<{ blockingTasks: { id: string; title: string }[] } | null>(null);
+  // Non-blocking: set when the stage advanced but the drafted client message
+  // failed to post (#185) — the advance itself must never be rolled back.
+  const [clientMsgSendFailed, setClientMsgSendFailed] = useState(false);
 
   const { deal: apiDeal, loading: dealLoading, error: dealError, refresh: refreshDeal } = useDeal(dealId);
   const { tasks: dealTasks, refresh: refreshTasks } = useTasks(dealId ?? '');
@@ -4582,10 +4593,11 @@ export default function DealDetail() {
   };
 
   function advanceStage() {
+    setClientMsgSendFailed(false);
     setShowAdvanceModal(true);
   }
 
-  async function handleAdvanceConfirm(_draftMessage: string, force?: boolean) {
+  async function handleAdvanceConfirm(draftMessage: string, force?: boolean) {
     const idx = STAGE_ORDER.indexOf(stage);
     if (idx < STAGE_ORDER.length - 1) {
       const nextStage = STAGE_ORDER[idx + 1];
@@ -4604,6 +4616,17 @@ export default function DealDetail() {
       const msg = CLIENT_STAGE_MESSAGES[nextStage];
       if (msg) {
         addClientNotification({ dealId: deal.id, title: msg.title, body: msg.body });
+      }
+      // Post the agent's (possibly edited) drafted message to the client
+      // thread — the modal promises this (#185). Best-effort: a failed send
+      // must never break the stage advance itself.
+      const clientNote = draftMessage.trim();
+      if (clientNote) {
+        try {
+          await postMessage(deal.id, 'client_thread', clientNote);
+        } catch {
+          setClientMsgSendFailed(true);
+        }
       }
       const autoTasks = STAGE_AUTO_TASKS[nextStage]?.(deal) ?? [];
       await Promise.allSettled(
@@ -4670,6 +4693,24 @@ export default function DealDetail() {
           onAdvance={advanceStage}
           onRetreat={retreatStage}
         />
+      )}
+
+      {/* Non-blocking warning — stage advanced but the client message didn't send (#185) */}
+      {clientMsgSendFailed && (
+        <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
+            <p className="text-xs font-medium text-amber-800">
+              Stage advanced, but the client message could not be sent. You can resend it from the Messages tab.
+            </p>
+          </div>
+          <button
+            onClick={() => setClientMsgSendFailed(false)}
+            className="text-xs font-semibold text-amber-600 hover:text-amber-800 transition-colors flex-shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
       )}
 
       {/* Stage advance automation modal */}
