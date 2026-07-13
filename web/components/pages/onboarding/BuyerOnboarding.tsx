@@ -618,12 +618,15 @@ export default function BuyerOnboarding() {
     resumeState?.lenderChoice ? { ...EMPTY, lenderChoice: resumeState.lenderChoice } : EMPTY,
   );
 
-  // Fetch invite details from token to get real agentName.
+  // Fetch invite details from token to get real agentName (+ the deal the
+  // intake should land on, threaded into the /me/intake fallback below).
+  const [inviteDealId, setInviteDealId] = useState<string | null>(null);
   useEffect(() => {
     if (!token) return;
     api.get<{ agent_name: string; deal_id: string }>(`/invites/${token}`)
       .then((inv) => {
         setAgentName(inv.agent_name);
+        setInviteDealId(inv.deal_id ?? null);
       })
       .catch(() => {});
   }, [token]);
@@ -648,7 +651,8 @@ export default function BuyerOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeUser]);
 
-  // On done screen: persist contact info + claim invite (which advances stage + creates task + notifies agent)
+  // On done screen: persist contact info + the full questionnaire (#175) +
+  // claim invite (which advances stage + creates task + notifies agent)
   const hasSubmittedRef = useRef(false);
   useEffect(() => {
     if (screen !== TOTAL - 1 || hasSubmittedRef.current) return;
@@ -657,6 +661,9 @@ export default function BuyerOnboarding() {
     const name = data.contactName || activeUser?.name || '';
     const phone = data.contactPhone;
     const email = activeUser?.email || data.contactEmail;
+    // The entire questionnaire — budget, areas, credit, lenderChoice, first
+    // tracking address, … — persists onto the deal (deals.intake).
+    const answers: Record<string, unknown> = { ...data };
 
     if (activeUser) {
       // Authenticated buyer finishing onboarding: persist any contact edits and
@@ -664,12 +671,20 @@ export default function BuyerOnboarding() {
       // server-side so next login routes straight to their dashboard.
       api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
       markOnboardingComplete();
+      // Account-first flow: the invite may already be claimed (AuthSetup
+      // claims before sync), so write the intake to the participant deal
+      // directly. Idempotent with the claim's own intake write below.
+      api.post('/me/intake', {
+        role: 'buyer',
+        ...(inviteDealId ? { deal_id: inviteDealId } : {}),
+        answers,
+      }).catch(() => {});
     } else if (phone || name) {
       api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
     }
 
     if (token && email) {
-      api.post(`/invites/${token}/claim`, { email, name }).catch(() => {});
+      api.post(`/invites/${token}/claim`, { email, name, intake: { role: 'buyer', answers } }).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);

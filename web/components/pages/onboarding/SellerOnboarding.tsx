@@ -433,17 +433,30 @@ export default function SellerOnboarding() {
     const name = data.contactName || activeUser?.name || '';
     const phone = data.contactPhone;
     const email = activeUser?.email || data.contactEmail;
+    // #175 — the entire questionnaire (property address, list date,
+    // priorities, mortgage details, lenderChoice, …) persists onto the deal
+    // (deals.intake); the server also writes the property address onto the
+    // deal itself when the agent left it empty.
+    const answers: Record<string, unknown> = { ...data };
 
     if (activeUser) {
       // Authenticated seller finishing onboarding: persist contact edits and
       // mark onboarding complete (the PATCH flips onboarding_complete server-side).
       api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
       markOnboardingComplete();
+      // Account-first flow: the invite may already be claimed (AuthSetup
+      // claims before sync), so write the intake to the participant deal
+      // directly. Idempotent with the claim's own intake write below.
+      api.post('/me/intake', {
+        role: 'seller',
+        ...(dealId ? { deal_id: dealId } : {}),
+        answers,
+      }).catch(() => {});
     } else if (phone || name) {
       api.patch('/me/profile', { name: name || undefined, phone: phone || undefined }).catch(() => {});
     }
     if (token && email) {
-      api.post(`/invites/${token}/claim`, { email, name }).catch(() => {});
+      api.post(`/invites/${token}/claim`, { email, name, intake: { role: 'seller', answers } }).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);

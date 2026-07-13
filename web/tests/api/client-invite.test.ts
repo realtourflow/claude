@@ -397,6 +397,150 @@ describe("POST /api/invites/[token]/claim — existing accounts (#174)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Issue #175 — the onboarding questionnaire rides along with the claim so the
+// invite's deal gets the client's intake (and a seller's property address)
+// atomically, and the agent's "client joined" email carries highlights.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/invites/[token]/claim — intake persistence (#175)", () => {
+  it("1. buyer claim with intake persists it on the invite's deal", async () => {
+    const { deal, invite } = await seedInvite({ email: "buyer@example.com" });
+    const { client } = fakeEmail();
+    setEmailForTesting(client);
+
+    const answers = {
+      bedrooms: "4+",
+      areas: "Homewood",
+      minBudget: 300000,
+      maxBudget: 500000,
+      lenderChoice: "fastpass",
+    };
+    const req = await claimReq("auth0|new-buyer", [], invite.token, {
+      email: "buyer@example.com",
+      name: "Bob Buyer",
+      intake: { role: "buyer", answers },
+    });
+    const res = await claimInviteRoute(req, ctx(invite.token));
+    expect(res.status).toBe(200);
+
+    const row = await prisma.deals.findUnique({
+      where: { id: deal.id },
+      select: { intake: true },
+    });
+    const stored = row?.intake as {
+      role: string;
+      submitted_at: string;
+      answers: Record<string, unknown>;
+    };
+    expect(stored.role).toBe("buyer");
+    expect(stored.answers).toMatchObject(answers);
+  });
+
+  it("2. seller claim with intake writes the property address onto the deal", async () => {
+    const { deal, invite } = await seedInvite({
+      email: "seller@example.com",
+      role: "seller",
+    });
+    const { client } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await claimReq("auth0|new-seller", [], invite.token, {
+      email: "seller@example.com",
+      name: "Sam Seller",
+      intake: {
+        role: "seller",
+        answers: {
+          address: "789 Maple Dr, Hoover, AL 35226",
+          desiredListDate: "ASAP",
+        },
+      },
+    });
+    const res = await claimInviteRoute(req, ctx(invite.token));
+    expect(res.status).toBe(200);
+
+    const row = await prisma.deals.findUnique({
+      where: { id: deal.id },
+      select: { address: true, intake: true },
+    });
+    expect(row?.address).toBe("789 Maple Dr, Hoover, AL 35226");
+    expect(row?.intake).toBeTruthy();
+  });
+
+  it("3. the agent-notification email includes intake highlights (budget, areas, lender)", async () => {
+    const { invite } = await seedInvite({ email: "buyer@example.com" });
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await claimReq("auth0|new-buyer", [], invite.token, {
+      email: "buyer@example.com",
+      name: "Bob Buyer",
+      intake: {
+        role: "buyer",
+        answers: {
+          areas: "Vestavia Hills",
+          minBudget: 250000,
+          maxBudget: 400000,
+          lenderChoice: "mountain",
+        },
+      },
+    });
+    const res = await claimInviteRoute(req, ctx(invite.token));
+    expect(res.status).toBe(200);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].html).toContain("Vestavia Hills");
+    expect(sent[0].html).toContain("$250K");
+    expect(sent[0].html).toContain("$400K");
+    expect(sent[0].html).toContain("Mountain Mortgage");
+  });
+
+  it("4. claim without intake still works and leaves deals.intake null (back-compat)", async () => {
+    const { deal, invite } = await seedInvite({ email: "plain@example.com" });
+    const { client } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await claimReq("auth0|plain-new", [], invite.token, {
+      email: "plain@example.com",
+      name: "Plain Client",
+    });
+    const res = await claimInviteRoute(req, ctx(invite.token));
+    expect(res.status).toBe(200);
+
+    const row = await prisma.deals.findUnique({
+      where: { id: deal.id },
+      select: { intake: true },
+    });
+    expect(row?.intake).toBeNull();
+  });
+
+  it("5. malformed intake (answers not an object) → 400, nothing written, invite not burned", async () => {
+    const { deal, invite } = await seedInvite({ email: "bad@example.com" });
+    const { client } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await claimReq("auth0|bad-new", [], invite.token, {
+      email: "bad@example.com",
+      name: "Bad Payload",
+      intake: { role: "buyer", answers: "not-an-object" },
+    });
+    const res = await claimInviteRoute(req, ctx(invite.token));
+    expect(res.status).toBe(400);
+
+    const invRow = await prisma.deal_invites.findUnique({
+      where: { id: invite.id },
+      select: { claimed_at: true },
+    });
+    expect(invRow?.claimed_at).toBeNull();
+
+    const row = await prisma.deals.findUnique({
+      where: { id: deal.id },
+      select: { intake: true },
+    });
+    expect(row?.intake).toBeNull();
+  });
+});
+
 describe("upsertUser — keepExistingRole (#174)", () => {
   it("does not overwrite an existing row's role when keepExistingRole is set", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|keep-role" });
