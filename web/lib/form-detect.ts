@@ -10,8 +10,10 @@
  * human's only required job is verifying POSITION in the overlay. Vision LOCATES;
  * the type MAPS.
  */
+import { after } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import { prisma } from "./db";
+import { FORM_DETECT_QUEUE, getBoss } from "./queue";
 import { getObjectBytes } from "./s3";
 import {
   ClaudeVisionDetector,
@@ -135,6 +137,59 @@ export async function runFormDetectJob(formId: string): Promise<void> {
 
 /** Inline detect attempts still in flight (see waitForInlineFormDetects). */
 const inflightInlineDetects = new Set<Promise<void>>();
+
+/**
+ * Kick off detection for a just-created 'detecting' form WITHOUT blocking the
+ * upload response — the calendar-push shape (lib/jobs.ts: enqueue durable job →
+ * attempt inline → cron sweeps failures) adapted for a job that takes minutes,
+ * not milliseconds, so the attempt is fire-and-forget instead of awaited.
+ *
+ * The attempt promise is created EAGERLY (work starts now) and then handed to
+ * next/server `after()`, which on Vercel extends the invocation until it
+ * settles — a bare detached promise could be frozen mid-flight the moment the
+ * response is sent. Outside a request scope `after()` throws (Vitest invokes
+ * routes as plain functions — the nondeterminism lib/audit.ts documents); there
+ * the process doesn't freeze on response, so the already-running promise simply
+ * completes, and tests await it via `waitForInlineFormDetects()`.
+ *
+ * Outcomes:
+ * - success → consume the durable job (`includeQueued` completes a never-
+ *   fetched job) so the daily sweep's budget isn't spent no-op'ing forms that
+ *   already detected. A lost race just re-runs runFormDetectJob, whose
+ *   idempotent 'detecting' guard makes that a no-op.
+ * - failure → swallow and log; the job stays queued for the cron sweep.
+ * The attempt promise itself NEVER rejects.
+ */
+export function scheduleInlineFormDetect(formId: string, jobId: string | null): void {
+  const attempt = (async () => {
+    try {
+      await runFormDetectJob(formId);
+    } catch (err) {
+      console.error(
+        `inline form-detect failed for ${formId}; job ${jobId ?? "?"} left queued for the cron sweep`,
+        err
+      );
+      return;
+    }
+    if (!jobId) return;
+    try {
+      const boss = await getBoss();
+      await boss.complete(FORM_DETECT_QUEUE, jobId, null, { includeQueued: true });
+    } catch (err) {
+      console.error(
+        `form-detect job ${jobId} finished inline but couldn't be marked complete; the sweep will no-op (idempotent)`,
+        err
+      );
+    }
+  })();
+  inflightInlineDetects.add(attempt);
+  void attempt.finally(() => inflightInlineDetects.delete(attempt));
+  try {
+    after(attempt); // Vercel: keep the invocation alive until detection settles
+  } catch {
+    // No request scope (tests / scripts) — the promise above runs on its own.
+  }
+}
 
 /**
  * Resolves once every scheduled inline detect attempt has settled. Tests await

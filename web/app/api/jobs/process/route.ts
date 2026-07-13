@@ -11,11 +11,40 @@
  */
 import { env } from "@/lib/env";
 import { error, json } from "@/lib/http";
-import { processCalendarJobs, processFormDetectJobs } from "@/lib/queue";
+import {
+  processCalendarJobs,
+  processFormDetectJobs,
+  type ProcessResult,
+} from "@/lib/queue";
 
 // Vision detect jobs are slow (a dense form is ~14 model calls + a render). Give
 // the sweep room so one can finish in a single invocation.
 export const maxDuration = 300;
+
+// Stop pulling NEW detect jobs once this much of the invocation is spent, so an
+// in-flight vision run isn't killed by maxDuration mid-job.
+const DETECT_DRAIN_BUDGET_MS = 240_000;
+
+/**
+ * Drain form-detect jobs until the queue has nothing due or the time budget is
+ * spent — ONE job per fetch, since each can take minutes (#193). With inline
+ * detection as the primary path this queue holds only failures/lost races, but
+ * on the Hobby plan the cron fires once a DAY, so the old fixed 3-job batch let
+ * a backlog outgrow the sweep; draining clears it in a single invocation. A job
+ * that outlives the budget anyway dies with the function — the next sweep's
+ * `supervise` fails it back onto the retry track.
+ */
+async function drainFormDetectJobs(): Promise<ProcessResult> {
+  const started = Date.now();
+  const total: ProcessResult = { processed: 0, failed: 0 };
+  while (Date.now() - started < DETECT_DRAIN_BUDGET_MS) {
+    const r = await processFormDetectJobs({ limit: 1 });
+    total.processed += r.processed;
+    total.failed += r.failed;
+    if (r.processed + r.failed === 0) break; // nothing due (failed jobs sit in retry delay)
+  }
+  return total;
+}
 
 async function handle(req: Request): Promise<Response> {
   const secret = env().CRON_SECRET;
@@ -27,7 +56,7 @@ async function handle(req: Request): Promise<Response> {
   try {
     const [calendar, detect] = await Promise.all([
       processCalendarJobs({ limit: 25 }),
-      processFormDetectJobs({ limit: 3 }),
+      drainFormDetectJobs(),
     ]);
     return json({ calendar, detect });
   } catch (err) {

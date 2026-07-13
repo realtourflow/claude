@@ -11,6 +11,7 @@ import {
 } from "./known-forms";
 import { extractPdfText } from "./pdf-text";
 import { computeTextFingerprint } from "./text-layout";
+import { scheduleInlineFormDetect } from "./form-detect";
 import { enqueueFormDetectJob } from "./queue";
 import {
   getAttestationStatement,
@@ -138,12 +139,17 @@ export async function createUploadedForm(input: {
         created_at: true,
       },
     });
+    let jobId: string | null = null;
     try {
-      await enqueueFormDetectJob(visionForm.id);
+      jobId = await enqueueFormDetectJob(visionForm.id);
     } catch (err) {
       await prisma.uploaded_forms.delete({ where: { id: visionForm.id } });
       throw new FormDetectEnqueueError(err instanceof Error ? err.message : String(err));
     }
+    // #193: detection starts NOW, fire-and-forget — the upload response must
+    // not wait the minutes a vision run takes. The durable job above is the
+    // BACKSTOP (the daily cron sweep), not the primary path.
+    scheduleInlineFormDetect(visionForm.id, jobId);
     return { ...visionForm, fieldCount: 0, needsReviewCount: 0 };
   }
 
