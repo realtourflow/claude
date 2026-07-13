@@ -22,6 +22,12 @@ import type { Deal } from "@/lib/data/mockDeals";
 
 const requestUploadUrl = vi.fn();
 const confirmUpload = vi.fn();
+// #189 — the direct-to-Blob byte path. Mocked at the SDK boundary so the real
+// lib/direct-upload logic (direct → proxy fallback, size-error mapping) runs.
+const uploadPresignedMock = vi.fn();
+vi.mock("@vercel/blob/client", () => ({
+  uploadPresigned: (...a: unknown[]) => uploadPresignedMock(...a),
+}));
 vi.mock("@/hooks/useDocuments", () => ({
   useDocuments: vi.fn(() => ({
     docs: [],
@@ -291,6 +297,97 @@ describe("UploadDocModal PUT response handling (#190)", () => {
 
     // The Upload button is re-enabled — the agent can retry.
     expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
+  });
+});
+
+// ─── Direct-to-Blob upload (#189) ────────────────────────────────────────────
+// Vercel Functions reject bodies over ~4.5MB at the edge, so files 4.5–25MB
+// could never reach the blob-put proxy in prod. When the server hands back a
+// client_upload_url, the modal must push the bytes directly to Blob via the
+// SDK's presigned flow — no function in the byte path — while preserving the
+// #190 invariant: a failed upload NEVER confirms a documents row.
+
+describe("UploadDocModal direct-to-blob upload (#189)", () => {
+  const CLIENT_UPLOAD_URL = "/api/storage/client-upload?key=k&exp=1&sig=s";
+
+  beforeEach(() => {
+    requestUploadUrl.mockResolvedValue({
+      upload_url: UPLOAD_URL,
+      client_upload_url: CLIENT_UPLOAD_URL,
+      s3_key: S3_KEY,
+    });
+  });
+
+  it("uploads directly to Blob (no proxy fetch in the byte path) and confirms", async () => {
+    uploadPresignedMock.mockResolvedValue({ pathname: S3_KEY });
+    const { onUploaded } = await submitUpload();
+
+    expect(await screen.findByText(/document uploaded/i)).toBeInTheDocument();
+    // The SDK presigned upload carried the file, pinned to the server's key.
+    expect(uploadPresignedMock).toHaveBeenCalledWith(
+      S3_KEY,
+      FILE,
+      expect.objectContaining({
+        access: "private",
+        handleUploadUrl: CLIENT_UPLOAD_URL,
+        contentType: "application/pdf",
+      })
+    );
+    // The file body never went through the app's own fetch (the ~4.5MB proxy).
+    expect(fetchMock).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(confirmUpload).toHaveBeenCalledWith(
+        "deal-1",
+        "Buyer Agency Agreement",
+        S3_KEY,
+        "application/pdf",
+        FILE.size
+      )
+    );
+    expect(onUploaded).toHaveBeenCalled();
+  });
+
+  it("a too-large direct upload shows the 25MB error, never confirms, never falls back", async () => {
+    uploadPresignedMock.mockRejectedValue(
+      new Error("Vercel Blob: the file length cannot be greater than 26214400")
+    );
+    const { onUploaded } = await submitUpload();
+
+    expect(await screen.findByText(/file too large \(max 25MB\)/i)).toBeInTheDocument();
+    expect(confirmUpload).not.toHaveBeenCalled();
+    expect(onUploaded).not.toHaveBeenCalled();
+    // A size rejection must not retry through the proxy (it would 413 anyway).
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByText(/document uploaded/i)).not.toBeInTheDocument();
+  });
+
+  it("a non-size direct failure falls back to the proxy; a failed fallback never confirms", async () => {
+    uploadPresignedMock.mockRejectedValue(new Error("network down"));
+    fetchMock.mockResolvedValue({ ok: false, status: 500 });
+    const { onUploaded } = await submitUpload();
+
+    expect(await screen.findByText(/upload failed\. please try again\./i)).toBeInTheDocument();
+    // The direct path was attempted first…
+    expect(uploadPresignedMock).toHaveBeenCalled();
+    // …then the fallback attempted the capability-URL proxy…
+    expect(fetchMock).toHaveBeenCalledWith(
+      UPLOAD_URL,
+      expect.objectContaining({ method: "PUT", body: FILE })
+    );
+    // …and the failed upload still never created a documents row.
+    expect(confirmUpload).not.toHaveBeenCalled();
+    expect(onUploaded).not.toHaveBeenCalled();
+  });
+
+  it("a successful proxy fallback still confirms the upload", async () => {
+    uploadPresignedMock.mockRejectedValue(new Error("blob api hiccup"));
+    fetchMock.mockResolvedValue({ ok: true, status: 200 });
+    const { onUploaded } = await submitUpload();
+
+    expect(await screen.findByText(/document uploaded/i)).toBeInTheDocument();
+    expect(uploadPresignedMock).toHaveBeenCalled();
+    await waitFor(() => expect(confirmUpload).toHaveBeenCalled());
+    expect(onUploaded).toHaveBeenCalled();
   });
 });
 

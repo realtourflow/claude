@@ -24,6 +24,7 @@ import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/usePrope
 import { useMLSListings, MLSListing } from "@/hooks/useMLS";
 import PortalDealDocuments from "@/components/portal/PortalDealDocuments";
 import { useDocuments, getSigningUrl, requestUploadUrl, confirmUpload } from "@/hooks/useDocuments";
+import { uploadFileToStorage } from "@/lib/direct-upload";
 import ClientNotifications from "@/components/ClientNotifications";
 import { FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/data/mockFastPass";
 
@@ -68,9 +69,12 @@ function TaskCard({ task, onComplete, onUploaded }: { task: Task; onComplete?: (
     setExpanded(false);
   }
 
-  // Real S3 presigned upload (same flow the agent Documents tab uses): request a
-  // PUT URL, push the file to S3, then create the documents row so it lands in
-  // the deal's Documents. No fake success — failures surface an inline error.
+  // Real presigned upload (same flow the agent Documents tab uses): request the
+  // upload URLs, push the file to storage, then create the documents row so it
+  // lands in the deal's Documents. No fake success — failures surface an inline
+  // error. #189: when the server returns client_upload_url the bytes go
+  // browser → Blob directly (a Vercel Function caps bodies at ~4.5MB, so
+  // 4.5–25MB files can never pass through the proxy in prod).
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -78,9 +82,18 @@ function TaskCard({ task, onComplete, onUploaded }: { task: Task; onComplete?: (
     setUploadError(null);
     try {
       const mimeType = file.type || 'application/octet-stream';
-      const { upload_url, s3_key } = await requestUploadUrl(task.dealId, file.name, mimeType);
-      const put = await fetch(upload_url, { method: 'PUT', body: file, headers: { 'Content-Type': mimeType } });
-      if (!put.ok) throw new Error('S3 upload failed');
+      const { upload_url, client_upload_url, s3_key } = await requestUploadUrl(task.dealId, file.name, mimeType);
+      const put = await uploadFileToStorage({
+        uploadUrl: upload_url,
+        clientUploadUrl: client_upload_url,
+        key: s3_key,
+        file,
+        contentType: mimeType,
+      });
+      if (!put.ok) {
+        setUploadError(put.tooLarge ? 'File too large (max 25MB). Upload failed.' : 'Upload failed. Please try again.');
+        return;
+      }
       await confirmUpload(task.dealId, file.name, s3_key, mimeType, file.size);
       setUploaded(true);
       // Surface the new doc in the Documents tab this session (invalidate the

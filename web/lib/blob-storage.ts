@@ -19,13 +19,30 @@
  * is what authorizes the streamed bytes.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { put, del, head, get } from "@vercel/blob";
+import { put, del, head, get, issueSignedToken, presignUrl } from "@vercel/blob";
 import { env } from "./env";
 
 // The store is PRIVATE — see the file header. Writes are private; reads are authed.
 const ACCESS = "private" as const;
 
+/** App-wide upload size cap (25MB) — enforced by the blob-put proxy AND signed
+ * into every direct-upload grant (#189). */
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/** The three key namespaces the app reads/writes (see lib/s3 key generators).
+ * Anything else is rejected as defense-in-depth against a forged/misused
+ * capability — shared by blob-put, blob-get, and client-upload. */
+export const ALLOWED_KEY_PREFIXES = ["deals/", "agent-templates/", "agent-forms/"];
+
 type StoredBlob = { bytes: Uint8Array; contentType: string };
+
+/** A direct-upload grant recorded by the test seam (#189). */
+export type ClientUploadGrant = {
+  delegationToken: string;
+  key: string;
+  maximumSizeInBytes: number;
+  validUntil: number;
+};
 
 // ---------------------------------------------------------------------------
 // Test seam
@@ -54,8 +71,52 @@ export class TestStorage {
   /** Keys whose bytes were actually read — lets a test assert bytes were never fetched. */
   readonly reads: string[] = [];
 
+  /** Direct-upload grants minted via createClientUploadGrant (#189). */
+  readonly clientUploadGrants: ClientUploadGrant[] = [];
+
   seed(key: string, bytes: Uint8Array, contentType = "application/pdf"): void {
     this.seeded.set(key, { bytes, contentType });
+  }
+  /** Record a direct-upload grant (called by createClientUploadGrant in test mode). */
+  grantClientUpload(
+    key: string,
+    maximumSizeInBytes: number,
+    validUntil: number
+  ): ClientUploadGrant {
+    const grant: ClientUploadGrant = {
+      delegationToken: `test-delegation-${this.clientUploadGrants.length + 1}:${key}`,
+      key,
+      maximumSizeInBytes,
+      validUntil,
+    };
+    this.clientUploadGrants.push(grant);
+    return grant;
+  }
+  /**
+   * The test-seam equivalent of the BROWSER's direct PUT to Blob (#189):
+   * enforces what the real API enforces from the signed grant — a grant must
+   * exist, be unexpired, and the body must be under its size cap. The bytes
+   * land under the grant's pinned key (the pathname is signed; the uploader
+   * can't choose it).
+   */
+  directPut(
+    delegationToken: string,
+    bytes: Uint8Array,
+    contentType = "application/pdf"
+  ): void {
+    const grant = this.clientUploadGrants.find(
+      (g) => g.delegationToken === delegationToken
+    );
+    if (!grant) throw new Error("no grant exists for this delegation token");
+    if (Date.now() > grant.validUntil) throw new Error("delegation grant expired");
+    if (bytes.byteLength > grant.maximumSizeInBytes) {
+      throw new Error(
+        `file too large: the file length cannot be greater than the grant's ` +
+          `maximum of ${grant.maximumSizeInBytes} bytes`
+      );
+    }
+    this.puts.push({ key: grant.key, bytes, contentType });
+    this.seed(grant.key, bytes, contentType);
   }
   bytesFor(key: string): Uint8Array {
     this.reads.push(key);
@@ -156,6 +217,18 @@ export function blobDownloadPath(key: string): string {
   return `/api/storage/blob-get?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sign("get", key, exp)}`;
 }
 
+/**
+ * A capability URL for the direct-upload grant route (#189) — the
+ * `handleUploadUrl` @vercel/blob/client's uploadPresigned() POSTs its tiny
+ * JSON envelope to. Signed with the SAME "put" action HMAC as blobUploadPath:
+ * uploading a key through the proxy or minting a direct-upload grant for it
+ * is the same privilege, so one capability authorizes either mechanism.
+ */
+export function blobClientUploadPath(key: string): string {
+  const exp = Date.now() + CAP_TTL_MS;
+  return `/api/storage/client-upload?key=${encodeURIComponent(key)}&exp=${exp}&sig=${sign("put", key, exp)}`;
+}
+
 /** Verify an upload capability (timing-safe + not expired). */
 export function verifyUpload(key: string, exp: number, sig: string): boolean {
   return verify("put", key, exp, sig);
@@ -164,6 +237,90 @@ export function verifyUpload(key: string, exp: number, sig: string): boolean {
 /** Verify a download capability (timing-safe + not expired). */
 export function verifyDownload(key: string, exp: number, sig: string): boolean {
   return verify("get", key, exp, sig);
+}
+
+// ---------------------------------------------------------------------------
+// Direct-to-Blob client uploads (#189)
+// ---------------------------------------------------------------------------
+// Vercel Functions reject request bodies over ~4.5MB at the platform edge, so
+// the blob-put proxy can never receive a 5–25MB file in production. For files
+// the app's UI uploads, the browser instead pushes bytes STRAIGHT to Blob via
+// the SDK's presigned flow: the capability-gated client-upload route calls
+// createClientUploadGrant, which issues a signed, single-key, size-capped
+// delegation via the Blob control plane. issueSignedToken authenticates like
+// every other server SDK call — R/W token when present, otherwise OIDC
+// (VERCEL_OIDC_TOKEN + BLOB_STORE_ID), which is exactly prod's setup. (Note:
+// the SDK's `handleUpload` client-token flow was NOT used because in
+// @vercel/blob 2.4.1 it hard-requires BLOB_READ_WRITE_TOKEN, which prod does
+// not have.)
+
+/** The payload @vercel/blob/client's uploadPresigned() expects from its token route. */
+export type PresignedUploadPayload = {
+  delegationToken: string;
+  signature: string;
+  params: Record<string, string>;
+};
+
+/**
+ * Convert the SDK's presigned PUT URL back into the {delegationToken,
+ * signature, params} payload uploadPresigned() consumes. presignUrl() is the
+ * public export that carries the signed parts, and its PUT URL shape is
+ * stable: the control-plane URL + `pathname` + the signed `vercel-blob-*`
+ * query params. Throws (never mints a broken grant) if the signed parts are
+ * missing.
+ */
+export function presignedPutUrlToPayload(url: string): PresignedUploadPayload {
+  const u = new URL(url);
+  const delegationToken = u.searchParams.get("vercel-blob-delegation");
+  const signature = u.searchParams.get("vercel-blob-signature");
+  if (!delegationToken || !signature) {
+    throw new Error("presigned URL is missing its delegation token or signature");
+  }
+  const params: Record<string, string> = {};
+  for (const [k, v] of u.searchParams) {
+    if (k === "pathname" || k === "vercel-blob-delegation" || k === "vercel-blob-signature") {
+      continue;
+    }
+    params[k] = v;
+  }
+  return { delegationToken, signature, params };
+}
+
+/**
+ * Mint a direct-to-Blob upload grant for ONE exact key. Scope mirrors the
+ * HMAC capability that authorizes minting it: one key, "put" only, the same
+ * 15-minute TTL, and the app's 25MB size cap — all signed server-side, so the
+ * browser can't widen any of it.
+ */
+export async function createClientUploadGrant(
+  key: string
+): Promise<PresignedUploadPayload> {
+  const validUntil = Date.now() + CAP_TTL_MS;
+  if (testStore) {
+    const grant = testStore.grantClientUpload(key, MAX_UPLOAD_BYTES, validUntil);
+    return {
+      delegationToken: grant.delegationToken,
+      signature: "test-signature",
+      params: {},
+    };
+  }
+  const signedToken = await issueSignedToken({
+    pathname: key,
+    operations: ["put"],
+    validUntil,
+    maximumSizeInBytes: MAX_UPLOAD_BYTES,
+    ...auth(),
+  });
+  const { presignedUrl } = await presignUrl(signedToken, {
+    operation: "put",
+    pathname: key,
+    access: ACCESS,
+    // Mirror putBlob: keys already carry a timestamp prefix for uniqueness,
+    // and reads resolve blobs by exact key (no random suffix).
+    allowOverwrite: true,
+    addRandomSuffix: false,
+  });
+  return presignedPutUrlToPayload(presignedUrl);
 }
 
 // ---------------------------------------------------------------------------

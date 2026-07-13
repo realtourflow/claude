@@ -59,6 +59,12 @@ vi.mock("@/hooks/useDocuments", () => ({
   requestUploadUrl: vi.fn(),
   confirmUpload: vi.fn(),
 }));
+// #189 — the direct-to-Blob byte path, mocked at the SDK boundary so the real
+// lib/direct-upload logic (direct upload, proxy fallback) runs in these tests.
+const uploadPresignedMock = vi.fn();
+vi.mock("@vercel/blob/client", () => ({
+  uploadPresigned: (...a: unknown[]) => uploadPresignedMock(...a),
+}));
 
 import BuyerView from "@/components/pages/buyer/BuyerView";
 import { patchTaskStatus } from "@/hooks/useTasks";
@@ -136,6 +142,7 @@ beforeEach(() => {
   mockRefreshTasks.mockReset();
   mockRequestUploadUrl.mockReset();
   mockConfirmUpload.mockReset();
+  uploadPresignedMock.mockReset();
   mockTasks = [makeTask()];
 });
 
@@ -243,5 +250,69 @@ describe("Buyer portal document upload (upload task)", () => {
     await screen.findByText(/upload failed/i);
     expect(screen.queryByText(/uploaded successfully/i)).toBeNull();
     expect(mockConfirmUpload).not.toHaveBeenCalled();
+  });
+
+  // ── Direct-to-Blob upload (#189) ───────────────────────────────────────────
+  // When the server returns a client_upload_url, the portal upload must push
+  // the bytes straight to Blob (no ~4.5MB function proxy in the byte path).
+
+  it("uses the direct-to-blob path when the server returns client_upload_url (#189)", async () => {
+    const CLIENT_UPLOAD_URL = "/api/storage/client-upload?key=k&exp=1&sig=s";
+    mockRequestUploadUrl.mockResolvedValue({
+      upload_url: UPLOAD_URL,
+      client_upload_url: CLIENT_UPLOAD_URL,
+      s3_key: S3_KEY,
+    });
+    mockConfirmUpload.mockResolvedValue({ id: "doc-1" });
+    uploadPresignedMock.mockResolvedValue({ pathname: S3_KEY });
+    // Never let a wrong code path reach the real network.
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 500 }));
+
+    const { container } = renderBuyer(<BuyerView />);
+    const input = openUploadInput(container);
+    fireEvent.change(input, { target: { files: [makeFile()] } });
+
+    await waitFor(() => expect(mockConfirmUpload).toHaveBeenCalledTimes(1));
+    // The SDK carried the bytes, pinned to the server-minted key…
+    expect(uploadPresignedMock).toHaveBeenCalledWith(
+      S3_KEY,
+      expect.any(File),
+      expect.objectContaining({
+        access: "private",
+        handleUploadUrl: CLIENT_UPLOAD_URL,
+        contentType: "application/pdf",
+      }),
+    );
+    // …and the file never went through the app's own fetch (the 4.5MB proxy).
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await screen.findByText(/uploaded successfully/i)).toBeTruthy();
+
+    fetchSpy.mockRestore();
+  });
+
+  it("a failed direct upload with a failed fallback never confirms (#189)", async () => {
+    mockRequestUploadUrl.mockResolvedValue({
+      upload_url: UPLOAD_URL,
+      client_upload_url: "/api/storage/client-upload?key=k&exp=1&sig=s",
+      s3_key: S3_KEY,
+    });
+    uploadPresignedMock.mockRejectedValue(new Error("blob api down"));
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 500 }));
+
+    const { container } = renderBuyer(<BuyerView />);
+    const input = openUploadInput(container);
+    fireEvent.change(input, { target: { files: [makeFile()] } });
+
+    await screen.findByText(/upload failed/i);
+    expect(screen.queryByText(/uploaded successfully/i)).toBeNull();
+    expect(mockConfirmUpload).not.toHaveBeenCalled();
+    // The proxy fallback was attempted before giving up.
+    expect(fetchSpy).toHaveBeenCalledWith(UPLOAD_URL, expect.objectContaining({ method: "PUT" }));
+
+    fetchSpy.mockRestore();
   });
 });

@@ -58,9 +58,17 @@ describe("POST /api/deals/[id]/documents/upload-url", () => {
     );
     const res = await uploadUrlRoute(req, ctx(deal.id));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { upload_url: string; s3_key: string };
+    const body = (await res.json()) as {
+      upload_url: string;
+      s3_key: string;
+      client_upload_url: string;
+    };
     expect(body.upload_url).toMatch(UPLOAD_URL_RE);
     expect(body.s3_key).toMatch(new RegExp(`^deals/${deal.id}/\\d+/contract\\.pdf$`));
+    // #189 — the direct-to-Blob grant route (the browser byte path skips the
+    // ~4.5MB function proxy). Pinned to the same key via the same capability.
+    expect(body.client_upload_url).toMatch(/^\/api\/storage\/client-upload\?/);
+    expect(body.client_upload_url).toContain(`key=${encodeURIComponent(body.s3_key)}`);
   });
 
   it("400 when file_name missing", async () => {

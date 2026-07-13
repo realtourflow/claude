@@ -1,7 +1,7 @@
 import { error, json, withAuth } from "@/lib/http";
 import { resolveUserId } from "@/lib/users";
 import { hasDealAccess } from "@/lib/deals";
-import { getUploadUrl, makeS3Key } from "@/lib/s3";
+import { getUploadUrl, getClientUploadUrl, makeS3Key } from "@/lib/s3";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -29,6 +29,10 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       key,
       contentType: body.mime_type ?? "application/octet-stream",
     });
-    return json({ upload_url: url, s3_key: key });
+    // #189: client_upload_url is the direct-to-Blob grant route — the browser
+    // pushes the bytes straight to Blob (no ~4.5MB function proxy in the byte
+    // path). upload_url remains the proxy capability, kept as the fallback.
+    const clientUploadUrl = await getClientUploadUrl({ key });
+    return json({ upload_url: url, client_upload_url: clientUploadUrl, s3_key: key });
   })) as Response;
 }

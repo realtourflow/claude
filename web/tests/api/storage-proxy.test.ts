@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createHmac } from "node:crypto";
 import { PUT as blobPut } from "@/app/api/storage/blob-put/route";
 import { GET as blobGet } from "@/app/api/storage/blob-get/route";
-import { getUploadUrl, getDownloadUrl } from "@/lib/s3";
+import { POST as clientUpload } from "@/app/api/storage/client-upload/route";
+import { getUploadUrl, getDownloadUrl, getClientUploadUrl } from "@/lib/s3";
 import {
   setStorageForTesting,
   type TestStorage,
@@ -10,6 +11,8 @@ import {
   blobDownloadPath,
   verifyUpload,
   verifyDownload,
+  presignedPutUrlToPayload,
+  MAX_UPLOAD_BYTES,
 } from "@/lib/blob-storage";
 import { resetEnvForTesting } from "@/lib/env";
 
@@ -115,6 +118,195 @@ describe("storage capability proxy round trip", () => {
     const res = await blobPut(putReq(asUpload, BYTES));
     expect(res.status).toBe(403);
     expect(storage.puts).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #189 — direct-to-Blob client uploads (presigned grant route).
+//
+// Vercel rejects request bodies over ~4.5MB at the platform edge, so the
+// blob-put proxy can never receive a 5–25MB file in prod. The fix: an authed
+// caller mints the SAME HMAC "put" capability as before, but the client
+// exchanges it at /api/storage/client-upload for a presigned direct-to-Blob
+// PUT grant (SDK issueSignedToken + presignUrl — OIDC-compatible). The token
+// route only ever handles a tiny JSON envelope; the file bytes go from the
+// browser straight to Blob. These tests lock in:
+//   1. the token route never buffers file bytes through a function,
+//   2. the capability/ownership/namespace checks still gate the grant, and
+//   3. a 10MB upload round-trips through the direct path in the test seam.
+// ---------------------------------------------------------------------------
+describe("#189 direct client upload (presigned grant route)", () => {
+  function mintReq(url: string, body: unknown): Request {
+    return new Request(`http://localhost${url}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function mintBody(pathname: string = KEY, multipart = false): unknown {
+    // The exact envelope @vercel/blob/client's uploadPresigned() POSTs.
+    return {
+      type: "blob.generate-presigned-url",
+      payload: { pathname, multipart, clientPayload: null },
+    };
+  }
+
+  it("mints a presigned grant without ever buffering file bytes through the function", async () => {
+    const url = await getClientUploadUrl({ key: KEY });
+    expect(url).toMatch(/^\/api\/storage\/client-upload\?/);
+
+    const res = await clientUpload(mintReq(url, mintBody()));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      type: string;
+      presignedUrlPayload: { delegationToken: string; signature: string; params: Record<string, string> };
+    };
+    expect(body.type).toBe("blob.generate-presigned-url");
+    expect(body.presignedUrlPayload.delegationToken).toBeTruthy();
+
+    // The token route handled a tiny JSON envelope only — no file bytes flowed
+    // through the function (nothing was written via the server-side backend).
+    expect(storage.puts).toHaveLength(0);
+    expect(storage.reads).toHaveLength(0);
+  });
+
+  it("the grant pins the exact key and the 25MB cap (capability semantics preserved)", async () => {
+    const url = await getClientUploadUrl({ key: KEY });
+    await clientUpload(mintReq(url, mintBody()));
+
+    expect(storage.clientUploadGrants).toHaveLength(1);
+    expect(storage.clientUploadGrants[0].key).toBe(KEY);
+    expect(storage.clientUploadGrants[0].maximumSizeInBytes).toBe(MAX_UPLOAD_BYTES);
+    expect(MAX_UPLOAD_BYTES).toBe(25 * 1024 * 1024);
+    expect(storage.clientUploadGrants[0].validUntil).toBeGreaterThan(Date.now());
+  });
+
+  it("rejects a key outside the allowed namespaces", async () => {
+    const url = (await getClientUploadUrl({ key: KEY })).replace(
+      encodeURIComponent(KEY),
+      encodeURIComponent("secrets/passwd")
+    );
+    const res = await clientUpload(mintReq(url, mintBody("secrets/passwd")));
+    expect([400, 403]).toContain(res.status);
+    expect(storage.clientUploadGrants).toHaveLength(0);
+  });
+
+  it("rejects a tampered signature", async () => {
+    const url = (await getClientUploadUrl({ key: KEY })).replace(
+      /sig=([0-9a-f]+)/,
+      (_m, sig: string) => `sig=${sig[0] === "0" ? "1" : "0"}${sig.slice(1)}`
+    );
+    const res = await clientUpload(mintReq(url, mintBody()));
+    expect(res.status).toBe(403);
+    expect(storage.clientUploadGrants).toHaveLength(0);
+  });
+
+  it("rejects an expired capability", async () => {
+    const url = (await getClientUploadUrl({ key: KEY })).replace(/exp=\d+/, "exp=1");
+    const res = await clientUpload(mintReq(url, mintBody()));
+    expect(res.status).toBe(403);
+    expect(storage.clientUploadGrants).toHaveLength(0);
+  });
+
+  it("a download (get) capability cannot mint an upload grant (action-namespaced)", async () => {
+    const asMint = (await getDownloadUrl({ key: KEY })).replace(
+      "/api/storage/blob-get?",
+      "/api/storage/client-upload?"
+    );
+    const res = await clientUpload(mintReq(asMint, mintBody()));
+    expect(res.status).toBe(403);
+    expect(storage.clientUploadGrants).toHaveLength(0);
+  });
+
+  it("rejects a body pathname that does not match the capability's pinned key", async () => {
+    const url = await getClientUploadUrl({ key: KEY });
+    const res = await clientUpload(
+      mintReq(url, mintBody("deals/deal-1/1700000000/other.pdf"))
+    );
+    expect([400, 403]).toContain(res.status);
+    expect(storage.clientUploadGrants).toHaveLength(0);
+  });
+
+  it("rejects multipart grant requests (25MB cap never needs them)", async () => {
+    const url = await getClientUploadUrl({ key: KEY });
+    const res = await clientUpload(mintReq(url, mintBody(KEY, true)));
+    expect(res.status).toBe(400);
+    expect(storage.clientUploadGrants).toHaveLength(0);
+  });
+
+  it("rejects a malformed or wrong-type body", async () => {
+    const url = await getClientUploadUrl({ key: KEY });
+    expect((await clientUpload(mintReq(url, { type: "blob.upload-completed" }))).status).toBe(400);
+    expect(
+      (
+        await clientUpload(
+          new Request(`http://localhost${url}`, { method: "POST", body: "not json" })
+        )
+      ).status
+    ).toBe(400);
+    expect(storage.clientUploadGrants).toHaveLength(0);
+  });
+
+  it("a 10MB upload round-trips through the direct path (test seam)", async () => {
+    // 10MB would be impossible through a Vercel Function (~4.5MB edge cap) —
+    // the whole point of #189. In the seam the browser's direct PUT is
+    // storage.directPut against the minted grant.
+    const url = await getClientUploadUrl({ key: KEY });
+    const res = await clientUpload(mintReq(url, mintBody()));
+    const { presignedUrlPayload } = (await res.json()) as {
+      presignedUrlPayload: { delegationToken: string };
+    };
+
+    const tenMB = new Uint8Array(10 * 1024 * 1024);
+    for (let i = 0; i < tenMB.length; i += 4096) tenMB[i] = i % 251;
+    storage.directPut(presignedUrlPayload.delegationToken, tenMB, "application/pdf");
+
+    const dl = await blobGet(getReq(await getDownloadUrl({ key: KEY })));
+    expect(dl.status).toBe(200);
+    const back = new Uint8Array(await dl.arrayBuffer());
+    expect(back.byteLength).toBe(tenMB.byteLength);
+    expect(Buffer.compare(Buffer.from(back), Buffer.from(tenMB))).toBe(0);
+  });
+
+  it("the storage side enforces the signed 25MB cap on the direct path", async () => {
+    const url = await getClientUploadUrl({ key: KEY });
+    const res = await clientUpload(mintReq(url, mintBody()));
+    const { presignedUrlPayload } = (await res.json()) as {
+      presignedUrlPayload: { delegationToken: string };
+    };
+
+    const tooBig = new Uint8Array(MAX_UPLOAD_BYTES + 1);
+    expect(() =>
+      storage.directPut(presignedUrlPayload.delegationToken, tooBig, "application/pdf")
+    ).toThrowError(/too large|maximum/i);
+    expect(storage.seeded.has(KEY)).toBe(false);
+  });
+
+  it("a direct PUT without a minted grant is rejected by the storage side", () => {
+    expect(() =>
+      storage.directPut("forged-delegation-token", BYTES, "application/pdf")
+    ).toThrowError(/grant|delegation/i);
+  });
+
+  it("presignedPutUrlToPayload round-trips the SDK's presigned PUT URL shape", () => {
+    const url =
+      "https://blob.vercel-storage.com/?pathname=deals%2Fdeal-1%2Fx.pdf" +
+      "&vercel-blob-valid-until=1700000000000" +
+      "&vercel-blob-maximum-size-in-bytes=26214400" +
+      "&vercel-blob-delegation=eyJwYXlsb2FkIjoi.sig" +
+      "&vercel-blob-signature=abc123";
+    const payload = presignedPutUrlToPayload(url);
+    expect(payload.delegationToken).toBe("eyJwYXlsb2FkIjoi.sig");
+    expect(payload.signature).toBe("abc123");
+    expect(payload.params).toEqual({
+      "vercel-blob-valid-until": "1700000000000",
+      "vercel-blob-maximum-size-in-bytes": "26214400",
+    });
+    // A URL missing the signed parts must throw, never mint a broken grant.
+    expect(() =>
+      presignedPutUrlToPayload("https://blob.vercel-storage.com/?pathname=x")
+    ).toThrowError(/delegation|signature/i);
   });
 });
 

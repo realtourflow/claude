@@ -11,6 +11,7 @@
 import {
   assertStorageConfigured,
   blobUploadPath,
+  blobClientUploadPath,
   blobDownloadPath,
   putBlob,
   getBlobBytes,
@@ -54,6 +55,17 @@ export async function getUploadUrl(input: {
 }): Promise<string> {
   assertStorageConfigured();
   return blobUploadPath(input.key);
+}
+
+/**
+ * A capability URL for the direct-to-Blob upload flow (#189): the client hands
+ * it to @vercel/blob/client's uploadPresigned() as `handleUploadUrl`, so the
+ * file bytes go browser → Blob without a Vercel Function (~4.5MB body cap) in
+ * the byte path. Same "put" capability semantics as getUploadUrl.
+ */
+export async function getClientUploadUrl(input: { key: string }): Promise<string> {
+  assertStorageConfigured();
+  return blobClientUploadPath(input.key);
 }
 
 /** A capability URL the browser opens to download the file. */

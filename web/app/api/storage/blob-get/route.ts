@@ -4,6 +4,7 @@ import {
   verifyDownload,
   getBlobBytes,
   getBlobContentType,
+  ALLOWED_KEY_PREFIXES,
 } from "@/lib/blob-storage";
 
 // The browser GETs the file body here. Authorized by the HMAC capability in the query
@@ -15,7 +16,7 @@ import {
 export const maxDuration = 60;
 
 // The three key namespaces the app reads (see lib/s3 key generators).
-const ALLOWED_PREFIXES = ["deals/", "agent-templates/", "agent-forms/"];
+const ALLOWED_PREFIXES = ALLOWED_KEY_PREFIXES;
 
 export async function GET(req: Request): Promise<Response> {
   if (!storageConfigured()) return error("blob storage not configured", 404);

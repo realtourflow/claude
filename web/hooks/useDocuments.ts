@@ -86,8 +86,10 @@ export async function requestUploadUrl(
   dealId: string,
   fileName: string,
   mimeType: string,
-): Promise<{ upload_url: string; s3_key: string }> {
-  return api.post<{ upload_url: string; s3_key: string }>(
+): Promise<{ upload_url: string; client_upload_url?: string; s3_key: string }> {
+  // client_upload_url (#189) is the direct-to-Blob grant route — preferred
+  // byte path (no ~4.5MB function proxy); upload_url is the proxy fallback.
+  return api.post<{ upload_url: string; client_upload_url?: string; s3_key: string }>(
     `/deals/${dealId}/documents/upload-url`,
     { file_name: fileName, mime_type: mimeType },
   );
