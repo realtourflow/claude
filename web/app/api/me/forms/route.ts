@@ -40,9 +40,11 @@ async function notifyAdminOfFormUpload(opts: {
 }
 
 // Bound the work this route does on untrusted upload bytes (it loads them into
-// pdf-lib AND pdfjs). Cap the function time and reject an oversized object before
-// buffering/parsing it — a legit blank form is well under this.
-export const maxDuration = 60;
+// pdf-lib AND pdfjs); reject an oversized object before buffering/parsing it —
+// a legit blank form is well under the cap. 300s (matching /api/jobs/process)
+// because a flat upload's INLINE vision detect (#193) runs via `after()` inside
+// this same invocation; the response still returns in seconds.
+export const maxDuration = 300;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
 
 type FormListRow = {

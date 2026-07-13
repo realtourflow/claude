@@ -16,6 +16,7 @@ import {
   type VisionFieldDetector,
 } from "@/lib/form-ai/vision";
 import { seedFormTypes, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
+import { waitForInlineFormDetects } from "@/lib/form-detect";
 import { getBoss, stopBossForTesting } from "@/lib/queue";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -25,9 +26,26 @@ import { createUser } from "../helpers/factories";
 let storage: TestStorage;
 let FLAT3: Uint8Array;
 
+// Each split child kicks off an INLINE detect attempt (#193). The gate lets a
+// test hold those attempts open so the intermediate 'detecting' state is
+// observable without racing them.
+let gate: { opened: Promise<void>; open: () => void } | null = null;
+
+function holdDetector() {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  gate = { opened, open };
+  return gate;
+}
+
 const fakeDetector: VisionFieldDetector = {
   detect: async () => [],
-  detectGuided: async () => [],
+  detectGuided: async () => {
+    if (gate) await gate.opened;
+    return [];
+  },
 };
 
 
@@ -51,11 +69,16 @@ beforeEach(async () => {
   storage = setStorageForTesting()!;
   storage.defaultBytes = FLAT3;
   storage.defaultSize = 8192;
+  gate = null;
   setVisionDetectorForTesting(fakeDetector);
   await seedFormTypes();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Settle straggling inline attempts against the FAKE detector before it's
+  // uninstalled (a straggler with none injected would build the real client).
+  gate?.open();
+  await waitForInlineFormDetects();
   setVisionDetectorForTesting(undefined);
 });
 
@@ -150,6 +173,7 @@ describe("admin bundle split", () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const id = await seedBundle(agent.id);
 
+    const g = holdDetector(); // hold the children's inline vision so 'detecting' is observable
     const res = await splitForm(
       await splitReq(id, "auth0|admin", ["admin"], {
         parts: [
@@ -189,5 +213,15 @@ describe("admin bundle split", () => {
       "Buyer Agency Agreement",
       "Wire Fraud Advisory",
     ]);
+
+    // Inline detect (#193) runs for split children too: release vision and the
+    // children land in review with no cron sweep involved.
+    g.open();
+    await waitForInlineFormDetects();
+    const done = await prisma.uploaded_forms.findMany({
+      where: { id: { in: out.created.map((c) => c.id) } },
+      select: { status: true },
+    });
+    for (const c of done) expect(c.status).toBe("pending_review");
   });
 });

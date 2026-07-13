@@ -16,8 +16,12 @@ import {
   FormDetectEnqueueError,
 } from "@/lib/create-uploaded-form";
 
-// Loading + slicing a multi-form bundle PDF is heavier than a JSON call.
-export const maxDuration = 120;
+// Loading + slicing a multi-form bundle PDF is heavier than a JSON call — and
+// each flat child kicks off an INLINE vision detect (#193) that runs via
+// `after()` inside this same invocation, so give it the full 300s (matching
+// /api/jobs/process). The response itself still returns as soon as the carve
+// finishes; any child whose detect outlives the budget falls back to the sweep.
+export const maxDuration = 300;
 
 type Ctx = { params: Promise<{ id: string }> };
 
