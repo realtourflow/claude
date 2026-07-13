@@ -1,16 +1,25 @@
 import { error } from "@/lib/http";
-import { storageConfigured, verifyUpload, putBlob } from "@/lib/blob-storage";
+import {
+  storageConfigured,
+  verifyUpload,
+  putBlob,
+  MAX_UPLOAD_BYTES,
+  ALLOWED_KEY_PREFIXES,
+} from "@/lib/blob-storage";
 
 // The client PUTs the file body here (Blob has no native pre-signed PUT). Authorized
 // by the HMAC capability in the query — issued by the authed getUploadUrl for this
 // exact key — NOT by a JWT, so the client's plain `fetch(url, {method:'PUT'})` works
-// unchanged. Every uploaded file (deal docs, agent templates, agent forms) flows here.
+// unchanged. Agent form uploads and doc templates flow here; NOTE (#189): this
+// function buffers the whole body, and Vercel rejects bodies over ~4.5MB at the
+// platform edge, so deal-document UI uploads use the direct-to-Blob flow
+// (/api/storage/client-upload) instead, keeping this proxy as their fallback.
 export const maxDuration = 60;
-const MAX_BYTES = 25 * 1024 * 1024;
+const MAX_BYTES = MAX_UPLOAD_BYTES;
 
 // The three key namespaces the app writes (see lib/s3 key generators). Anything else
 // is rejected as defense-in-depth against a forged/misused capability.
-const ALLOWED_PREFIXES = ["deals/", "agent-templates/", "agent-forms/"];
+const ALLOWED_PREFIXES = ALLOWED_KEY_PREFIXES;
 
 export async function PUT(req: Request): Promise<Response> {
   if (!storageConfigured()) return error("blob storage not configured", 404);
