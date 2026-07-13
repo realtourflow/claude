@@ -1,16 +1,24 @@
 // @vitest-environment happy-dom
 /**
- * UploadDocModal (DealDetail) — the agent's document-upload flow.
+ * DealDetail component tests.
  *
- * Regression tests for issue #190: the blob PUT response must be checked
- * BEFORE confirmUpload. A failed PUT (413/500) must surface an error and
- * must NOT create the documents row (phantom document) or show the green
- * "Document uploaded" success screen. Only a 2xx PUT may confirm.
+ * 1) UploadDocModal — regression tests for issue #190: the blob PUT response
+ *    must be checked BEFORE confirmUpload. A failed PUT (413/500) must surface
+ *    an error and must NOT create the documents row (phantom document) or show
+ *    the green "Document uploaded" success screen. Only a 2xx PUT may confirm.
+ *
+ * 2) Stage advance (#185) — the modal drafts a client message and promises it
+ *    is "Sent to client's portal". Confirming the advance must actually POST
+ *    the (edited) draft to the deal's client_thread, an empty draft must post
+ *    nothing, a failed post must never break the advance itself, and the
+ *    modal must not claim automations that don't exist ("TC alerted to open
+ *    file", "Commission paperwork queued").
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { UploadDocModal } from "@/components/pages/agent/DealDetail";
+import DealDetail, { UploadDocModal, StageAdvanceModal } from "@/components/pages/agent/DealDetail";
+import type { Deal } from "@/lib/data/mockDeals";
 
 const requestUploadUrl = vi.fn();
 const confirmUpload = vi.fn();
@@ -28,6 +36,160 @@ vi.mock("@/hooks/useDocuments", () => ({
   sendForSignatureByUserIds: vi.fn(),
   refreshDocuSignStatus: vi.fn(),
   setDisclosuresComplete: vi.fn(),
+}));
+
+// ─── Full-page harness mocks (stage-advance flow, #185) ─────────────────────
+// DealDetail is rendered whole, so every hook/store it (or an always-rendered
+// child) calls is mocked at the module boundary — the same seam pattern the
+// other component tests use. Spies are dereferenced lazily (`(...a) => spy(...a)`)
+// so vi.mock hoisting stays safe.
+
+const DEAL_ID = "5f0f6f6a-9b1c-4f6e-8a2d-3c4b5a697e01";
+
+function makeDeal(overrides: Partial<Deal> = {}): Deal {
+  return {
+    id: DEAL_ID,
+    type: "buy",
+    clientName: "Jane Buyer",
+    clientId: "",
+    agentId: "agent-1",
+    stage: "active_search",
+    health: "green",
+    priority: "medium",
+    property: {
+      address: "123 Main Street",
+      city: "Birmingham",
+      state: "AL",
+      zip: "35203",
+      price: 350000,
+    },
+    timeline: {
+      createdAt: "2026-05-01T00:00:00Z",
+      daysInStage: 4,
+    },
+    flags: [],
+    status: "active",
+    estimatedCommission: 10500,
+    openTaskCount: 0,
+    overdueTaskCount: 0,
+    ...overrides,
+  };
+}
+
+let currentDeal: Deal;
+
+const patchStage = vi.fn();
+vi.mock("@/hooks/useDeals", () => ({
+  useDeal: () => ({ deal: currentDeal, loading: false, error: null, refresh: vi.fn() }),
+  patchStage: (...a: unknown[]) => patchStage(...a),
+}));
+
+const postMessage = vi.fn();
+vi.mock("@/hooks/useMessages", () => ({
+  useMessages: () => ({ messages: [], loading: false, error: null, refresh: vi.fn() }),
+  postMessage: (...a: unknown[]) => postMessage(...a),
+}));
+
+const postTask = vi.fn();
+vi.mock("@/hooks/useTasks", () => ({
+  useTasks: () => ({ tasks: [], loading: false, refresh: vi.fn() }),
+  postTask: (...a: unknown[]) => postTask(...a),
+  patchTask: vi.fn(),
+  patchTaskStatus: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useParams: () => ({ dealId: DEAL_ID }),
+  useRouter: () => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+  // Land on the light Timeline tab — Overview drags in many more cards.
+  useSearchParams: () => new URLSearchParams("tab=timeline"),
+}));
+
+const setStage = vi.fn();
+vi.mock("@/lib/store/dealStageStore", () => ({
+  useDealStageStore: () => ({ stageByDeal: {}, setStage: (...a: unknown[]) => setStage(...a) }),
+}));
+
+vi.mock("@/lib/store/authStore", () => ({
+  useAuthStore: (sel?: (s: unknown) => unknown) => {
+    const state = { activeUser: { id: "agent-1", groupId: "agent", name: "Agent Amy" } };
+    return sel ? sel(state) : state;
+  },
+}));
+
+const addClientNotification = vi.fn();
+vi.mock("@/lib/store/notificationStore", () => ({
+  useNotificationStore: (sel?: (s: unknown) => unknown) => {
+    const state = { addClientNotification: (...a: unknown[]) => addClientNotification(...a) };
+    return sel ? sel(state) : state;
+  },
+}));
+
+vi.mock("@/lib/store/taskStore", () => ({
+  useTaskStore: () => ({ reassign: vi.fn(), effectiveAssignee: () => undefined }),
+}));
+
+vi.mock("@/permissions/usePermission", () => ({
+  usePermission: () => ({
+    can: () => true,
+    canAny: () => true,
+    canAll: () => true,
+    currentGroup: "agent",
+    hasPermission: () => true,
+  }),
+}));
+
+vi.mock("@/lib/api-client", () => ({
+  api: {
+    get: vi.fn(async () => []),
+    post: vi.fn(async () => ({})),
+    patch: vi.fn(async () => ({})),
+    delete: vi.fn(async () => ({})),
+  },
+  ApiError: class ApiError extends Error {
+    status: number;
+    body?: { gate?: string; blocking_tasks?: { id: string; title: string }[] };
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
+  setTokenGetter: vi.fn(),
+}));
+
+// Hooks/components pulled in by tabs and cards these tests never exercise.
+vi.mock("@/hooks/useParticipants", () => ({
+  useParticipants: () => ({ participants: [], loading: false, refresh: vi.fn() }),
+}));
+vi.mock("@/hooks/useVendors", () => ({
+  useVendors: () => ({ vendors: [], loading: false, refresh: vi.fn() }),
+}));
+vi.mock("@/hooks/useProperties", () => ({
+  useProperties: () => ({ properties: [], loading: false, refresh: vi.fn() }),
+}));
+vi.mock("@/hooks/useShowingAvailability", () => ({
+  useShowingAvailability: () => ({ slots: [], loading: false, refresh: vi.fn() }),
+  DAYS_OF_WEEK: [],
+}));
+vi.mock("@/hooks/useOffers", () => ({
+  useOffers: () => ({ offers: [], loading: false, refresh: vi.fn() }),
+}));
+vi.mock("@/hooks/useNetSheet", () => ({
+  useNetSheet: () => ({ lines: [], loading: false, refresh: vi.fn() }),
+  recalcLines: () => [],
+  calcNetProceeds: () => 0,
+}));
+vi.mock("@/hooks/useContingencies", () => ({
+  useContingencies: () => ({ contingencies: [], loading: false, refresh: vi.fn() }),
+}));
+vi.mock("@/components/MetroMap", () => ({ default: () => null }));
+vi.mock("@/components/DealInviteModal", () => ({ default: () => null }));
+vi.mock("@/components/pages/agent/SendTemplateModal", () => ({ default: () => null }));
+vi.mock("@/components/net-sheet/AddCustomLineControl", () => ({
+  AddCustomLineControl: () => null,
+}));
+vi.mock("@/components/contingencies/AddContingencyForm", () => ({
+  AddContingencyForm: () => null,
 }));
 
 // The modal PUTs the file to the capability URL with the global fetch —
@@ -129,5 +291,167 @@ describe("UploadDocModal PUT response handling (#190)", () => {
 
     // The Upload button is re-enabled — the agent can retry.
     expect(screen.getByRole("button", { name: /^upload$/i })).toBeEnabled();
+  });
+});
+
+// ─── Stage advance — drafted client message must actually send (#185) ────────
+
+describe("Stage advance posts the drafted client message (#185)", () => {
+  beforeEach(() => {
+    currentDeal = makeDeal(); // active_search → next stage is offer_active
+    patchStage.mockResolvedValue(undefined);
+    postTask.mockResolvedValue(undefined);
+    postMessage.mockResolvedValue({ id: "msg-1" });
+  });
+
+  /** Render the page, click the advance button, wait for the modal. */
+  async function openAdvanceModal() {
+    const user = userEvent.setup();
+    render(<DealDetail />);
+    // The advance button is labeled with the next stage's name.
+    await user.click(screen.getByRole("button", { name: /offer active/i }));
+    await screen.findByRole("button", { name: /confirm & advance/i });
+    return user;
+  }
+
+  it("posts the edited draft to the client thread on confirm", async () => {
+    const user = await openAdvanceModal();
+
+    // Edit the drafted message, exactly like the repro in the ticket.
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    const textarea = screen.getByRole("textbox");
+    await user.clear(textarea);
+    await user.type(textarea, "Custom note for my client");
+
+    await user.click(screen.getByRole("button", { name: /confirm & advance/i }));
+
+    await waitFor(() =>
+      expect(postMessage).toHaveBeenCalledWith(
+        DEAL_ID,
+        "client_thread",
+        "Custom note for my client"
+      )
+    );
+    // The stage advance itself is unchanged.
+    expect(patchStage).toHaveBeenCalledWith(DEAL_ID, "offer_active", undefined);
+    expect(setStage).toHaveBeenCalledWith(DEAL_ID, "offer_active");
+  });
+
+  it("posts the default draft as-is when the agent doesn't edit it", async () => {
+    const user = await openAdvanceModal();
+    await user.click(screen.getByRole("button", { name: /confirm & advance/i }));
+
+    await waitFor(() => expect(postMessage).toHaveBeenCalledTimes(1));
+    const [dealId, channel, body] = postMessage.mock.calls[0];
+    expect(dealId).toBe(DEAL_ID);
+    expect(channel).toBe("client_thread");
+    // The offer_active draft is personalized with client + address.
+    expect(body).toMatch(/Jane/);
+    expect(body).toMatch(/123 Main Street/);
+  });
+
+  it("an empty draft posts nothing (stage still advances)", async () => {
+    const user = await openAdvanceModal();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.clear(screen.getByRole("textbox"));
+    await user.click(screen.getByRole("button", { name: /confirm & advance/i }));
+
+    await waitFor(() =>
+      expect(patchStage).toHaveBeenCalledWith(DEAL_ID, "offer_active", undefined)
+    );
+    // Wait for the flow to finish (modal closes) before asserting no post.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /confirm & advance/i })
+      ).not.toBeInTheDocument()
+    );
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("a failed message send never breaks the advance and surfaces a warning", async () => {
+    postMessage.mockRejectedValue(new Error("network down"));
+    const user = await openAdvanceModal();
+
+    await user.click(screen.getByRole("button", { name: /confirm & advance/i }));
+
+    // The advance completed…
+    await waitFor(() => expect(setStage).toHaveBeenCalledWith(DEAL_ID, "offer_active"));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: /confirm & advance/i })
+      ).not.toBeInTheDocument()
+    );
+    // …and the failure is surfaced without blocking anything.
+    expect(
+      await screen.findByText(/client message could not be sent/i)
+    ).toBeInTheDocument();
+  });
+});
+
+// ─── Stage-advance modal — no fictional automation claims (#185) ─────────────
+
+describe("StageAdvanceModal automation claims match reality (#185)", () => {
+  const noop = () => {};
+
+  it("under_contract: no 'TC alerted to open file' claim", () => {
+    render(
+      <StageAdvanceModal
+        deal={makeDeal({ stage: "offer_active" })}
+        nextStage="under_contract"
+        gateError={null}
+        onConfirm={noop}
+        onCancel={noop}
+      />
+    );
+    expect(screen.queryByText(/tc alerted/i)).not.toBeInTheDocument();
+    // The honest items stay: auto tasks + the (now real) client message send.
+    expect(screen.getByText(/tasks auto-generated/i)).toBeInTheDocument();
+    expect(screen.getByText(/client message sent to jane buyer/i)).toBeInTheDocument();
+  });
+
+  it("post_close: no 'Commission paperwork queued' claim", () => {
+    render(
+      <StageAdvanceModal
+        deal={makeDeal({ stage: "closing" })}
+        nextStage="post_close"
+        gateError={null}
+        onConfirm={noop}
+        onCancel={noop}
+      />
+    );
+    expect(screen.queryByText(/commission paperwork queued/i)).not.toBeInTheDocument();
+  });
+
+  it("pre_close keeps the real calendar-sync claim", () => {
+    render(
+      <StageAdvanceModal
+        deal={makeDeal({ stage: "under_contract" })}
+        nextStage="pre_close"
+        gateError={null}
+        onConfirm={noop}
+        onCancel={noop}
+      />
+    );
+    expect(screen.getByText(/closing date synced to calendar/i)).toBeInTheDocument();
+  });
+
+  it("clearing the draft removes the 'client message sent' claim", async () => {
+    const user = userEvent.setup();
+    render(
+      <StageAdvanceModal
+        deal={makeDeal()}
+        nextStage="offer_active"
+        gateError={null}
+        onConfirm={noop}
+        onCancel={noop}
+      />
+    );
+    expect(screen.getByText(/client message sent to jane buyer/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.clear(screen.getByRole("textbox"));
+
+    expect(screen.queryByText(/client message sent/i)).not.toBeInTheDocument();
   });
 });
