@@ -2,11 +2,19 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { upsertUser } from "@/lib/users";
 import { sendNotificationEmail } from "@/lib/email";
+import { formatIntakeHighlights } from "@/lib/notification-email";
+import { applyIntakeToDeal, isIntakeRole, parseIntakeAnswers } from "@/lib/intake";
 import type { Role } from "@/lib/roles";
 
 type Ctx = { params: Promise<{ token: string }> };
 
-type ClaimBody = { email?: string; name?: string };
+type ClaimBody = {
+  email?: string;
+  name?: string;
+  // #175 — the onboarding questionnaire rides along with the claim so the
+  // invite's deal gets the client's answers atomically.
+  intake?: { role?: unknown; answers?: unknown };
+};
 
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { token } = await ctx.params;
@@ -20,6 +28,13 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     }
     if (!body.email || !body.name) {
       return error("email and name are required", 400);
+    }
+    // Validate the optional intake up front — before any write — so a
+    // malformed payload can never leave a half-claimed invite behind.
+    let intakeAnswers: Record<string, unknown> | null = null;
+    if (body.intake !== undefined) {
+      intakeAnswers = parseIntakeAnswers(body.intake?.answers);
+      if (!intakeAnswers) return error("intake.answers must be a JSON object", 400);
     }
 
     const invites = await prisma.$queryRaw<
@@ -91,6 +106,23 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       ON CONFLICT DO NOTHING
     `;
 
+    // #175 — persist the onboarding questionnaire on the invite's deal. The
+    // invite's role is canonical (never trust the body's role for scoping);
+    // seller intakes also fill the deal address when the agent left it empty.
+    const bodyIntakeRole = body.intake?.role;
+    const intakeRole = isIntakeRole(inv.role)
+      ? inv.role
+      : isIntakeRole(bodyIntakeRole)
+        ? bodyIntakeRole
+        : null;
+    if (intakeAnswers && intakeRole) {
+      await applyIntakeToDeal({
+        dealId: inv.deal_id,
+        role: intakeRole,
+        answers: intakeAnswers,
+      });
+    }
+
     // Best-effort: notify the inviting agent that their client accepted and
     // created their account. Makes the onboarding "your agent has been
     // notified" promise real. A delivery failure must never fail the claim.
@@ -106,11 +138,17 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       const info = infoRows[0];
       if (info?.agent_email) {
         const origin = new URL(req.url).origin;
+        // #175 — append intake highlights so the email isn't a bare "client
+        // joined" notice.
+        const highlights =
+          intakeAnswers && intakeRole
+            ? formatIntakeHighlights(intakeRole, intakeAnswers)
+            : "";
         await sendNotificationEmail({
           to: info.agent_email,
           subject: `${body.name} accepted your invite`,
           heading: `${body.name} joined ${info.title}`,
-          body: `${body.name} (${body.email}) accepted your invite and created their account. They're now on your "${info.title}" deal in RealTourFlow.`,
+          body: `${body.name} (${body.email}) accepted your invite and created their account. They're now on your "${info.title}" deal in RealTourFlow.${highlights}`,
           dealUrl: `${origin}/agent/deals/${inv.deal_id}`,
         });
       }

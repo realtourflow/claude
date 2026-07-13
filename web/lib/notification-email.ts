@@ -270,3 +270,74 @@ export async function emailOfferRequested(input: {
     }
   );
 }
+
+// ---------------------------------------------------------------------------
+// #175 — intake highlights for the "client joined" agent notification.
+// Append-only addition: turns the persisted onboarding answers into a compact
+// one-line summary the invite-claim route appends to its email body, so the
+// agent's "client joined" email carries real context instead of arriving bare.
+// ---------------------------------------------------------------------------
+
+const LENDER_LABELS: Record<string, string> = {
+  mountain: "Mountain Mortgage",
+  fastpass: "Fast Pass (Mountain Mortgage)",
+  other: "Using another lender",
+};
+
+function moneyShort(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M`;
+  return `$${Math.round(n / 1000)}K`;
+}
+
+/**
+ * A compact " Intake highlights — …" sentence from the questionnaire answers,
+ * or "" when there is nothing worth surfacing. Plain text — callers pass it
+ * through sendNotificationEmail, which HTML-escapes the body.
+ */
+export function formatIntakeHighlights(
+  role: "buyer" | "seller",
+  answers: Record<string, unknown>
+): string {
+  const str = (k: string): string | null => {
+    const v = answers[k];
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  };
+  const num = (k: string): number | null => {
+    const v = answers[k];
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+
+  const parts: string[] = [];
+  if (role === "buyer") {
+    const min = num("minBudget");
+    const max = num("maxBudget");
+    if (min !== null && max !== null) parts.push(`Budget ${moneyShort(min)}–${moneyShort(max)}`);
+    const beds = str("bedrooms");
+    const baths = str("bathrooms");
+    if (beds) parts.push(`${beds} bed${baths ? ` / ${baths} bath` : ""}`);
+    const areas = str("areas");
+    if (areas) parts.push(`Areas: ${areas}`);
+    const journey = str("journeyStage");
+    if (journey) parts.push(journey);
+    const lender = str("lenderChoice");
+    if (lender) parts.push(`Lender: ${LENDER_LABELS[lender] ?? lender}`);
+    const tracking = str("trackingAddress");
+    if (tracking) parts.push(`First property: ${tracking}`);
+  } else {
+    const address = str("address");
+    if (address) parts.push(`Property: ${address}`);
+    const listDate = str("desiredListDate");
+    if (listDate) parts.push(`Target list: ${listDate}`);
+    const priority = str("whatMattersMost");
+    if (priority) parts.push(`Priority: ${priority}`);
+    const reasons = answers.reasonsForSelling;
+    if (Array.isArray(reasons)) {
+      const items = reasons.filter((r): r is string => typeof r === "string" && r.trim() !== "");
+      if (items.length > 0) parts.push(`Reason: ${items.join(", ")}`);
+    }
+    const lender = str("lenderChoice");
+    if (lender) parts.push(`Lender: ${LENDER_LABELS[lender] ?? lender}`);
+  }
+
+  return parts.length > 0 ? ` Intake highlights — ${parts.join(" · ")}.` : "";
+}
