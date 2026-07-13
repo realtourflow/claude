@@ -6,7 +6,7 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, DealStage } from "@/lib/data/mockDeals";
 import { Task } from "@/lib/data/mockTasks";
 import ClientNotifications from "@/components/ClientNotifications";
-import { useDealStageStore } from "@/lib/store/dealStageStore";
+import { BUYER_STATUS_STEPS } from "@/lib/buyer-status";
 import { useMyDeals } from "@/hooks/useMyDeals";
 import PortalDealDocuments from "@/components/portal/PortalDealDocuments";
 import { useTasks } from "@/hooks/useTasks";
@@ -583,19 +583,10 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
 
 function UnderContractCard({ deal }: { deal: Deal }) {
   const hasRepairRequest = deal.flags.includes('repair_request');
-  const { buyerStatusByDeal } = useDealStageStore();
-  // Net sheet shown inline when agent marks it ready
-  const buyerStatus = buyerStatusByDeal[deal.id];
-
-  const BUYER_STATUS_STEPS = [
-    'Inspection scheduled',
-    'Inspection complete',
-    'Appraisal ordered',
-    'Appraisal complete',
-    'Financing in review',
-    'Financing approved',
-    'Clear to close',
-  ];
+  // Agent-set "Buyer's Progress" (#184) — persisted server-side and delivered
+  // on the /api/me/deals payload, so it survives reloads and reaches this
+  // (seller) session. Steps come from the shared canonical list.
+  const buyerStatus = deal.buyerStatus;
 
   const statusIdx = buyerStatus ? BUYER_STATUS_STEPS.indexOf(buyerStatus) : -1;
 

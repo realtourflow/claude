@@ -133,6 +133,12 @@ export type Deal = {
   preApproved?: boolean;
   baaSigned?: boolean;
   disclosuresComplete?: boolean;
+  /**
+   * Agent-set "Buyer's Progress" step shown on the seller portal (#184).
+   * Persisted server-side (deals.buyer_status); one of BUYER_STATUS_STEPS
+   * in lib/buyer-status.ts, or undefined when not set.
+   */
+  buyerStatus?: string;
 };
 
 export const MOCK_DEALS: Deal[] = [
