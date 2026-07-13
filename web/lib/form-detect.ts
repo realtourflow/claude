@@ -130,3 +130,19 @@ export async function runFormDetectJob(formId: string): Promise<void> {
     await tx.uploaded_forms.update({ where: { id: formId }, data: { status: "pending_review" } });
   });
 }
+
+// ── inline attempt on upload (#193) ─────────────────────────────────────────
+
+/** Inline detect attempts still in flight (see waitForInlineFormDetects). */
+const inflightInlineDetects = new Set<Promise<void>>();
+
+/**
+ * Resolves once every scheduled inline detect attempt has settled. Tests await
+ * this for determinism (the attempts are fire-and-forget by design); nothing
+ * in the request path should ever need it.
+ */
+export async function waitForInlineFormDetects(): Promise<void> {
+  while (inflightInlineDetects.size > 0) {
+    await Promise.allSettled([...inflightInlineDetects]);
+  }
+}
