@@ -16,6 +16,7 @@ import { Task } from "@/lib/data/mockTasks";
 import { useTasks, patchTaskStatus, patchTask, postTask } from "@/hooks/useTasks";
 import { autoTaskDueDate } from "@/lib/task-due-dates";
 import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, getSigningUrl, refreshDocuSignStatus, setDisclosuresComplete, Document as ApiDocument } from "@/hooks/useDocuments";
+import { uploadFileToStorage } from "@/lib/direct-upload";
 import SendTemplateModal from "./SendTemplateModal";
 import { useMessages, postMessage, MessageChannel } from "@/hooks/useMessages";
 import { useVendors } from "@/hooks/useVendors";
@@ -2940,17 +2941,21 @@ export function UploadDocModal({
     setError(null);
     try {
       const mimeType = file.type || 'application/octet-stream';
-      const { upload_url, s3_key } = await requestUploadUrl(dealId, file.name, mimeType);
-      const put = await fetch(upload_url, {
-        method: 'PUT',
-        body: file,
-        headers: { 'Content-Type': mimeType },
+      const { upload_url, client_upload_url, s3_key } = await requestUploadUrl(dealId, file.name, mimeType);
+      // #189: bytes go browser → Blob via the presigned grant when available
+      // (a Vercel Function caps request bodies at ~4.5MB, so 4.5–25MB files
+      // can never pass through the proxy in prod); the proxy remains the
+      // fallback. A failed upload must never confirm — that would create a
+      // phantom documents row that 404s on download (#190).
+      const put = await uploadFileToStorage({
+        uploadUrl: upload_url,
+        clientUploadUrl: client_upload_url,
+        key: s3_key,
+        file,
+        contentType: mimeType,
       });
-      // fetch does not throw on HTTP errors — a 413/403/500 here means the blob
-      // was never written. Confirming anyway would create a phantom documents
-      // row that 404s on download (#190).
       if (!put.ok) {
-        setError(put.status === 413 ? 'File too large (max 25MB).' : 'Upload failed. Please try again.');
+        setError(put.tooLarge ? 'File too large (max 25MB).' : 'Upload failed. Please try again.');
         return;
       }
       await confirmUpload(dealId, effectiveName, s3_key, mimeType, file.size);
