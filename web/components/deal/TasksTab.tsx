@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Deal } from "@/lib/data/mockDeals";
+import { Deal, Task } from "@/lib/types";
 import { usePermission } from "@/permissions/usePermission";
 import { PERMISSIONS } from "@/permissions/permissions";
 import { useTaskStore } from "@/lib/store/taskStore";
-import { Task } from "@/lib/data/mockTasks";
 import { patchTaskStatus, patchTask, postTask } from "@/hooks/useTasks";
 import { Calendar, CheckCircle2, CheckSquare, Bot, ChevronDown, Building2, Plus, Users } from "lucide-react";
 import { TASK_STATUS_ICON } from "@/components/deal/shared";

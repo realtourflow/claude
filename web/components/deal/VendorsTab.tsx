@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Deal } from "@/lib/data/mockDeals";
+import { Deal } from "@/lib/types";
 import { useVendors } from "@/hooks/useVendors";
-import { MOCK_USERS } from "@/lib/data/mockUsers";
-import { VENDOR_CATEGORY_LABELS, VENDOR_CATEGORY_ORDER, VendorCategory } from "@/lib/data/mockVendors";
+import { VENDOR_CATEGORY_LABELS, VENDOR_CATEGORY_ORDER, VendorCategory } from "@/lib/vendor-categories";
 import { ChevronRight, ChevronDown, Phone, Mail, RefreshCw, Pencil, Plus, X, Star, Users, ExternalLink } from "lucide-react";
 
 type ContactRole = 'lender' | 'titleCompany' | 'closingAttorney' | 'inspector' | 'insurance' | 'other';
@@ -255,9 +254,6 @@ export function VendorsTab({ deal }: { deal: Deal }) {
   const [showModal, setShowModal] = useState(false);
   const [localVendors, setLocalVendors] = useState(deal.vendors ?? {});
 
-  // Look up agent and TC from user list
-  const agent = MOCK_USERS.find((u) => u.id === deal.agentId);
-  const tc = MOCK_USERS.find((u) => u.groupId === 'tc' && u.dealIds.includes(deal.id));
 
   function handleSave(form: ContactForm) {
     if (form.role === 'other') {
@@ -311,27 +307,16 @@ export function VendorsTab({ deal }: { deal: Deal }) {
             </button>
           </div>
 
-          {/* Agent */}
-          {agent && (
+          {/* Agent — contact info comes from the real API on each deal */}
+          {deal.agentName && (
             <ContactRow
               role="Agent"
-              name={agent.name}
-              subtitle={agent.email}
-              phone="(205) 555-0100"
-              email={agent.email}
-              avatarLetter={agent.name.charAt(0)}
+              name={deal.agentName}
+              subtitle={deal.agentEmail}
+              phone={deal.agentPhone ?? undefined}
+              email={deal.agentEmail}
+              avatarLetter={deal.agentName.charAt(0)}
               avatarColor="bg-brand-navy"
-            />
-          )}
-
-          {/* TC */}
-          {tc && (
-            <ContactRow
-              role="Transaction Coordinator"
-              name={tc.name}
-              email={tc.email}
-              avatarLetter={tc.name.charAt(0)}
-              avatarColor="bg-amber-500"
             />
           )}
 

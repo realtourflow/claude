@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { Deal } from "@/lib/data/mockDeals";
+import { Deal } from "@/lib/types";
 import { apiDealToFrontend, ApiDeal } from './useDeals';
 
 type ApiMyDeal = ApiDeal & {

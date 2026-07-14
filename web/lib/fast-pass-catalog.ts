@@ -10,7 +10,7 @@
  *
  * Unlike Smooth Exit (where only the add-ons go through Stripe), the Fast Pass
  * charge is the base fee PLUS any selected upsells — matching what the Go
- * handler billed and what the UI shows. The UI list in lib/data/mockFastPass.ts
+ * handler billed and what the UI shows. The UI list in lib/fast-pass-display.ts
  * derives its displayed dollar prices from these cents, so what the user sees
  * is what the server charges.
  */

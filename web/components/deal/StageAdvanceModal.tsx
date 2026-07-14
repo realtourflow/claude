@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Deal, DealStage } from "@/lib/data/mockDeals";
+import { Deal, DealStage } from "@/lib/types";
 import { stageAutoTasks } from "@/lib/stage-auto-tasks";
 import { CheckCircle2, Circle, Zap, Pencil, AlertTriangle } from "lucide-react";
 import { STAGE_LABELS, STAGE_DRAFT_MESSAGE } from "@/components/deal/shared";

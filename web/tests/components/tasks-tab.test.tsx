@@ -10,8 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TasksTab } from "@/components/pages/agent/DealDetail";
-import type { Deal } from "@/lib/data/mockDeals";
-import type { Task } from "@/lib/data/mockTasks";
+import type { Deal, Task } from "@/lib/types";
 
 const postTask = vi.fn();
 const patchTask = vi.fn();

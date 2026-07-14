@@ -6,7 +6,6 @@ import { ReactNode, useState, useSyncExternalStore } from "react";
 import { ApiError } from "@/lib/api-client";
 import AuthSetup from "@/components/AuthSetup";
 import TestAuthSetup from "@/components/TestAuthSetup";
-import { RoleSwitcher } from "@/components/RoleSwitcher";
 
 // E2E-only: when Playwright seeds a session we bypass Auth0 entirely (see
 // TestAuthSetup). Off in every normal/production build.
@@ -21,12 +20,11 @@ const getIsServer = () => false;
 
 /**
  * Client-side provider stack. Wraps everything in Auth0Provider so React Router
- * pages can call useAuth0(); also fires /users/sync via AuthSetup and renders
- * the dev-only RoleSwitcher overlay.
+ * pages can call useAuth0(); also fires /users/sync via AuthSetup.
  *
  * The provider stack is deferred until the client (see the `isClient` flag) so
  * the first client render matches the server-rendered HTML — otherwise the
- * client-only Auth0Provider/RoleSwitcher subtree triggers a hydration mismatch.
+ * client-only Auth0Provider subtree triggers a hydration mismatch.
  */
 export function Providers({ children }: { children: ReactNode }) {
   // Defer the entire client-only provider stack until after the first client
@@ -34,7 +32,7 @@ export function Providers({ children }: { children: ReactNode }) {
   // React throws a hydration mismatch. Reading `window.location.origin` in a
   // useState initializer broke that: the server rendered just `children` (no
   // `window` → no providers), while the client's first render injected
-  // Auth0Provider + RoleSwitcher — so that subtree appeared only on the client
+  // the Auth0Provider subtree the server never produced
   // (issue #102). Gating on a client flag keeps the first client render
   // identical to SSR, then swaps in the providers once `window` is guaranteed.
   const isClient = useSyncExternalStore(subscribeNoop, getIsClient, getIsServer);
@@ -89,7 +87,6 @@ export function Providers({ children }: { children: ReactNode }) {
         }}
       >
         <AuthSetup>{children}</AuthSetup>
-        <RoleSwitcher />
       </Auth0Provider>
     </QueryClientProvider>
   );

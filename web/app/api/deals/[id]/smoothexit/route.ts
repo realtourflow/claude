@@ -52,7 +52,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     // catalog — body.upsell_total_cents is ignored, so a tampered client can't
     // set its own price. Unknown keys 400 before anything is persisted.
     // Duplicate keys count once, matching calcSmoothExitUpsellTotal in
-    // lib/data/mockSmoothExit.ts. (Deliberate divergence from the Go handler,
+    // lib/smooth-exit-display.ts. (Deliberate divergence from the Go handler,
     // which trusted the client's total.)
     let upsellTotalCents = 0;
     for (const key of new Set(selectedUpsells)) {

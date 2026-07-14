@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
-import { Deal, DealStage } from "@/lib/data/mockDeals";
-import { Task } from "@/lib/data/mockTasks";
+import { Deal, DealStage, Task } from "@/lib/types";
+import { STAGE_ORDER } from "@/lib/stages";
 import ClientNotifications from "@/components/ClientNotifications";
 import { BUYER_STATUS_STEPS } from "@/lib/buyer-status";
 import { useMyDeals } from "@/hooks/useMyDeals";
@@ -34,10 +34,6 @@ const SELLER_STAGE_LABELS: Record<DealStage, string> = {
   closing:        'Closing Day',
   post_close:     'Sold!',
 };
-
-const STAGE_ORDER: DealStage[] = [
-  'intake', 'active_search', 'offer_active', 'under_contract', 'pre_close', 'closing', 'post_close',
-];
 
 const TASK_STATUS_ICON: Record<string, React.ReactNode> = {
   completed:   <CheckCircle2 size={18} className="text-green-500 flex-shrink-0" />,

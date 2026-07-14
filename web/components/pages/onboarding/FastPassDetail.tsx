@@ -9,7 +9,7 @@ import {
   FAST_PASS_UPSELLS,
   FastPassUpsellId,
   calcFastPassTotal,
-} from "@/lib/data/mockFastPass";
+} from "@/lib/fast-pass-display";
 // Single source of truth for the handoff key — keeps writer and reader in sync.
 import { HANDOFF_KEY } from "./FastPassSurvey";
 

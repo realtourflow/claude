@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Deal, LoanMilestones } from "@/lib/data/mockDeals";
+import { Deal, LoanMilestones, Task } from "@/lib/types";
 import { api } from "@/lib/api-client";
 import { useAuthStore } from "@/lib/store/authStore";
-import { Task } from "@/lib/data/mockTasks";
 import { BUYER_STATUS_STEPS } from "@/lib/buyer-status";
 import { useParticipants } from "@/hooks/useParticipants";
 import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
@@ -437,7 +436,7 @@ function printNetSheet(deal: { clientName: string; property: { address: string }
   w.onload = () => w.print();
 }
 
-function SellerNetSheetCard({ deal }: { deal: import("@/lib/data/mockDeals").Deal }) {
+function SellerNetSheetCard({ deal }: { deal: import("@/lib/types").Deal }) {
   const { sheet, loading, saveSheet, markReady } = useNetSheet(deal.id);
   const [lines, setLines] = useState<NetSheetLine[]>([]);
   const [salePrice, setSalePrice] = useState(deal.property.price);

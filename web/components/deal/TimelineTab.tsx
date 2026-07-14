@@ -1,7 +1,6 @@
 "use client";
 
-import { Deal, DealStage } from "@/lib/data/mockDeals";
-import { Task } from "@/lib/data/mockTasks";
+import { Deal, DealStage, Task } from "@/lib/types";
 import MetroMap from "@/components/MetroMap";
 import { CheckCircle2, AlertCircle, Zap } from "lucide-react";
 import { STAGE_LABELS, STAGE_ORDER } from "@/components/deal/shared";

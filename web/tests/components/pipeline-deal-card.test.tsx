@@ -13,7 +13,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { DealCard } from "@/components/pages/agent/Pipeline";
-import type { Deal } from "@/lib/data/mockDeals";
+import type { Deal } from "@/lib/types";
 
 function makeDeal(overrides: Partial<Deal> = {}): Deal {
   return {

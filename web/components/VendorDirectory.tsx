@@ -6,7 +6,7 @@ import {
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
   VendorCategory,
-} from "@/lib/data/mockVendors";
+} from "@/lib/vendor-categories";
 import { useVendors, Vendor } from "@/hooks/useVendors";
 
 function CategorySection({ category, vendors }: { category: VendorCategory; vendors: Vendor[] }) {

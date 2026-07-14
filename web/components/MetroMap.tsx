@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Deal } from "@/lib/data/mockDeals";
+import { Deal } from "@/lib/types";
 import { Zap, DollarSign } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────

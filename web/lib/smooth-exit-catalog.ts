@@ -8,7 +8,7 @@
  * (backend/internal/handlers/enrollment.go), which trusted the client's
  * upsell_total_cents.
  *
- * The UI list in lib/data/mockSmoothExit.ts derives its displayed dollar
+ * The UI list in lib/smooth-exit-display.ts derives its displayed dollar
  * prices from these cents, so what the user sees is what the server charges.
  */
 export const SMOOTH_EXIT_UPSELL_PRICE_CENTS = {

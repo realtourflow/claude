@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AddContingencyForm } from "@/components/contingencies/AddContingencyForm";
-import type { Deal } from "@/lib/data/mockDeals";
+import type { Deal } from "@/lib/types";
 
 const addItem = vi.fn();
 const updateStatus = vi.fn();

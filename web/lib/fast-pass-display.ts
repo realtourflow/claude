@@ -1,3 +1,7 @@
+// Fast Pass marketing/display copy shown in the buyer onboarding flow and
+// admin dashboard (formerly lib/data/mockFastPass.ts — renamed in #89; this
+// is live UI content, not mock data).
+//
 // Prices derive from lib/fast-pass-catalog.ts (cents) so the dollars shown
 // here always equal what POST /deals/[id]/fastpass charges (#78). Edit the
 // catalog, not these numbers.
@@ -142,30 +146,6 @@ export const FAST_PASS_UPSELLS: FastPassUpsell[] = [
     price: FAST_PASS_UPSELL_PRICE_CENTS.moving_coordination / 100,
   },
 ];
-
-export type FastPassEnrollmentStatus = 'pending_payment' | 'active' | 'complete' | 'collected';
-
-export type FastPassPaymentOption = 'now' | 'at_closing' | 'seller_concession';
-
-export type FastPassSurveyAnswers = {
-  currentSituation: string;
-  targetMoveDate: string;
-  dateFlexibility: string;
-  moveSize: string;
-  moverPreference: string;
-  packingPreference: string;
-  utilities: string[];
-  notes: string;
-};
-
-export type FastPassEnrollment = {
-  enrolledAt: string;
-  status: FastPassEnrollmentStatus;
-  paymentOption: FastPassPaymentOption;
-  selectedUpsells: FastPassUpsellId[];
-  totalPaid: number;
-  surveyAnswers?: FastPassSurveyAnswers;
-};
 
 export function calcFastPassTotal(upsells: FastPassUpsellId[]): number {
   const upsellTotal = FAST_PASS_UPSELLS

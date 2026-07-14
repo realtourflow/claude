@@ -3,32 +3,14 @@
 import { useState } from 'react';
 import Link from "next/link";
 import { useAuthStore } from "@/lib/store/authStore";
-import { Deal, DealType } from "@/lib/data/mockDeals";
+import { Deal, DealStage, DealType } from "@/lib/types";
+import { AGENT_STAGE_LABELS as STAGE_LABELS, STAGE_ORDER } from "@/lib/stages";
 import { useDeals, type ApiDeal } from "@/hooks/useDeals";
 import { api } from "@/lib/api-client";
 import { ArrowRight, MapPin, Calendar, Clock, Zap, Plus, X } from 'lucide-react';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const STAGE_LABELS: Record<string, string> = {
-  intake: 'Intake',
-  active_search: 'Active Search',
-  offer_active: 'Offer Active',
-  under_contract: 'Under Contract',
-  pre_close: 'Pre-Close',
-  closing: 'Closing',
-  post_close: 'Post-Close',
-};
-
-const STAGE_ORDER = [
-  'intake',
-  'active_search',
-  'offer_active',
-  'under_contract',
-  'pre_close',
-  'closing',
-  'post_close',
-];
 
 const HEALTH_BORDER: Record<string, string> = {
   green: 'border-l-[4px] border-l-green-400',
@@ -427,7 +409,7 @@ export function DealCard({ deal }: { deal: Deal }) {
 
 // ─── Stage Group ─────────────────────────────────────────────────────────────
 
-function StageGroup({ stage, deals }: { stage: string; deals: Deal[] }) {
+function StageGroup({ stage, deals }: { stage: DealStage; deals: Deal[] }) {
   if (deals.length === 0) return null;
   return (
     <div>
