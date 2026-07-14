@@ -35,6 +35,7 @@ export async function GET(req: Request): Promise<Response> {
         pre_approved: boolean;
         baa_signed: boolean;
         disclosures_complete: boolean;
+        buyer_status: string | null;
         created_at: Date;
         updated_at: Date;
         agent_name: string;
@@ -49,6 +50,7 @@ export async function GET(req: Request): Promise<Response> {
              deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
              deals.fast_pass, deals.smooth_exit,
              deals.pre_approved, deals.baa_signed, deals.disclosures_complete,
+             deals.buyer_status,
              deals.created_at, deals.updated_at,
              u.name AS agent_name, u.email AS agent_email, u.phone AS agent_phone
       FROM deals

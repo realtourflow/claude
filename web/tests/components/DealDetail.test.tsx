@@ -17,7 +17,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import DealDetail, { UploadDocModal, StageAdvanceModal } from "@/components/pages/agent/DealDetail";
+import DealDetail, { UploadDocModal, StageAdvanceModal, SellerBuyerStatusCard } from "@/components/pages/agent/DealDetail";
+import { api } from "@/lib/api-client";
 import type { Deal } from "@/lib/data/mockDeals";
 
 const requestUploadUrl = vi.fn();
@@ -483,6 +484,64 @@ describe("Stage advance posts the drafted client message (#185)", () => {
     expect(
       await screen.findByText(/client message could not be sent/i)
     ).toBeInTheDocument();
+  });
+});
+
+// ─── Buyer's Progress — agent setter persists via the API (#184) ─────────────
+// The old card wrote to an in-browser zustand map the seller could never see.
+// The card must read the persisted value from the deal payload and PATCH
+// /deals/:id/buyer-status so the seller portal (a different session) sees it.
+
+describe("SellerBuyerStatusCard persists buyer status via the API (#184)", () => {
+  function renderCard(overrides: Partial<Deal> = {}) {
+    const onRefresh = vi.fn();
+    const deal = makeDeal({ type: "sell", stage: "under_contract", ...overrides });
+    render(<SellerBuyerStatusCard deal={deal} onRefresh={onRefresh} />);
+    return { onRefresh };
+  }
+
+  it("shows the persisted status from the deal payload (not a client store)", () => {
+    renderCard({ buyerStatus: "Inspection complete" });
+    expect(screen.getByRole("combobox")).toHaveValue("Inspection complete");
+  });
+
+  it("PATCHes /deals/:id/buyer-status and refreshes the deal on change", async () => {
+    const user = userEvent.setup();
+    const { onRefresh } = renderCard();
+
+    await user.selectOptions(screen.getByRole("combobox"), "Appraisal ordered");
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith(`/deals/${DEAL_ID}/buyer-status`, {
+        buyer_status: "Appraisal ordered",
+      })
+    );
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+  });
+
+  it("clearing back to '— Not set —' PATCHes null", async () => {
+    const user = userEvent.setup();
+    renderCard({ buyerStatus: "Appraisal ordered" });
+
+    await user.selectOptions(screen.getByRole("combobox"), "");
+
+    await waitFor(() =>
+      expect(api.patch).toHaveBeenCalledWith(`/deals/${DEAL_ID}/buyer-status`, {
+        buyer_status: null,
+      })
+    );
+  });
+
+  it("a failed save surfaces an error and never claims success", async () => {
+    vi.mocked(api.patch).mockRejectedValueOnce(new Error("network down"));
+    const user = userEvent.setup();
+    const { onRefresh } = renderCard();
+
+    await user.selectOptions(screen.getByRole("combobox"), "Clear to close");
+
+    expect(await screen.findByText(/could not (be )?sav/i)).toBeInTheDocument();
+    expect(onRefresh).not.toHaveBeenCalled();
+    expect(screen.queryByText(/currently showing/i)).not.toBeInTheDocument();
   });
 });
 

@@ -160,6 +160,7 @@ model deals {
   disclosures_source      String                @default("")
   disclosures_updated_at  DateTime?             @db.Timestamptz(6)
   intake                  Json?
+  buyer_status            String?
   audit_log               audit_log[]
   checklist_items         checklist_items[]
   deal_contingencies      deal_contingencies[]

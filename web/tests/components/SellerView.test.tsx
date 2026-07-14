@@ -29,10 +29,6 @@ vi.mock("@/lib/store/authStore", () => ({
   useAuthStore: (sel: (s: { activeUser: { name: string } }) => unknown) =>
     sel({ activeUser: { name: "Sam Seller" } }),
 }));
-vi.mock("@/lib/store/dealStageStore", () => ({
-  useDealStageStore: () => ({ buyerStatusByDeal: {} }),
-}));
-
 vi.mock("@/hooks/useMyDeals", () => ({
   useMyDeals: () => ({ deals: [makeDeal()], loading: false, error: null, refresh: vi.fn() }),
 }));
@@ -76,7 +72,18 @@ import SellerView from "@/components/pages/seller/SellerView";
 
 const DEAL_ID = "5f0f6f6a-9b1c-4f6e-8a2d-3c4b5a697e01";
 
+// Per-test deal shape — reset in beforeEach; the useMyDeals mock calls
+// makeDeal() at render time so each test can reshape the deal.
+let dealOverrides: Partial<MyDeal> = {};
+
 function makeDeal(): MyDeal {
+  return {
+    ...baseDeal(),
+    ...dealOverrides,
+  } as MyDeal;
+}
+
+function baseDeal(): MyDeal {
   return {
     id: DEAL_ID,
     type: "sell",
@@ -121,6 +128,7 @@ function renderSeller(ui: ReactElement) {
 beforeEach(() => {
   sessionStorage.clear();
   mockOffers = [];
+  dealOverrides = {};
 });
 
 describe("SellerView at offer_active — offers are real, never fabricated (#182)", () => {
@@ -187,5 +195,34 @@ describe("SellerView at offer_active — offers are real, never fabricated (#182
     // The real stat (derived from deal.timeline.daysInStage) stays.
     expect(screen.getByText("Days Listed")).toBeTruthy();
     expect(screen.getByText("12")).toBeTruthy();
+  });
+});
+
+// ─── Buyer's Progress reaches the seller (#184) ──────────────────────────────
+// The status used to live only in the AGENT'S in-browser zustand store, so the
+// seller (a different browser/session) always saw the empty state. The card
+// must read the persisted value delivered on the deal payload (/api/me/deals).
+
+describe("SellerView at under_contract — Buyer's Progress from the deal payload (#184)", () => {
+  it("shows the agent-set status delivered by the API, with the current step marked", () => {
+    dealOverrides = { stage: "under_contract", buyerStatus: "Appraisal ordered" };
+    renderSeller(<SellerView />);
+
+    // The full checklist renders with the persisted step marked Current.
+    expect(screen.getByText("Appraisal ordered")).toBeTruthy();
+    expect(screen.getByText("Current")).toBeTruthy();
+    expect(screen.getByText("Inspection scheduled")).toBeTruthy();
+    expect(screen.getByText("Clear to close")).toBeTruthy();
+
+    // The empty state must NOT show once a status is set.
+    expect(screen.queryByText(/your agent will update the buyer/i)).toBeNull();
+  });
+
+  it("shows the honest empty state when no status has been set", () => {
+    dealOverrides = { stage: "under_contract" };
+    renderSeller(<SellerView />);
+
+    expect(screen.getByText(/your agent will update the buyer/i)).toBeTruthy();
+    expect(screen.queryByText("Current")).toBeNull();
   });
 });

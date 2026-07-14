@@ -5,6 +5,7 @@ import { PATCH as advanceStageRoute } from "@/app/api/deals/[id]/stage/route";
 import { PATCH as notesRoute } from "@/app/api/deals/[id]/notes/route";
 import { PATCH as commissionRoute } from "@/app/api/deals/[id]/commission/route";
 import { PATCH as flagsRoute } from "@/app/api/deals/[id]/flags/route";
+import { PATCH as buyerStatusRoute } from "@/app/api/deals/[id]/buyer-status/route";
 import { GET as myDealsRoute } from "@/app/api/me/deals/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -544,6 +545,118 @@ describe("GET /api/me/deals — full portal payload (#171)", () => {
     expect(raw).not.toContain("SECRET-FOREIGN-DEAL");
     expect(raw).not.toContain("SECRET-LOAN-STATUS");
     expect(raw).not.toContain("SECRET-FP");
+  });
+});
+
+describe("PATCH /api/deals/[id]/buyer-status (#184)", () => {
+  async function patchStatus(dealId: string, token: string, value: unknown) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/buyer-status`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: token },
+      body: JSON.stringify({ buyer_status: value }),
+    });
+    return buyerStatusRoute(req, ctx(dealId));
+  }
+
+  it("agent sets the status and a seller participant reads it via /api/me/deals", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const seller = await createUser({ role: "seller", auth0_id: "auth0|seller-1" });
+    const deal = await createDeal({ agent_id: agent.id, type: "sell", stage: "under_contract" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: seller.id, role: "seller" },
+    });
+
+    const res = await patchStatus(deal.id, await authHeader("auth0|a", ["agent"]), "Inspection complete");
+    expect(res.status).toBe(200);
+
+    const sellerReq = new Request("http://localhost/api/me/deals", {
+      headers: { authorization: await authHeader("auth0|seller-1", ["seller"]) },
+    });
+    const sellerRes = await myDealsRoute(sellerReq);
+    expect(sellerRes.status).toBe(200);
+    const body = (await sellerRes.json()) as { id: string; buyer_status: string | null }[];
+    expect(body.length).toBe(1);
+    expect(body[0].buyer_status).toBe("Inspection complete");
+  });
+
+  it("persists in the DB and comes back on a fresh GET /api/deals/[id] (survives reload)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, type: "sell", stage: "under_contract" });
+
+    const res = await patchStatus(deal.id, await authHeader("auth0|a", ["agent"]), "Appraisal ordered");
+    expect(res.status).toBe(200);
+
+    // Persisted server-side — not in anyone's browser store.
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.buyer_status).toBe("Appraisal ordered");
+
+    // A brand-new request (fresh session/reload) still sees it.
+    const getReq = new Request(`http://localhost/api/deals/${deal.id}`, {
+      headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+    });
+    const getRes = await getDealRoute(getReq, ctx(deal.id));
+    expect(getRes.status).toBe(200);
+    const body = (await getRes.json()) as { buyer_status: string | null };
+    expect(body.buyer_status).toBe("Appraisal ordered");
+  });
+
+  it("404 when a seller participant tries to set it — writes are agent-only", async () => {
+    const agent = await createUser({ role: "agent" });
+    const seller = await createUser({ role: "seller", auth0_id: "auth0|seller-2" });
+    const deal = await createDeal({ agent_id: agent.id, type: "sell", stage: "under_contract" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: seller.id, role: "seller" },
+    });
+
+    const res = await patchStatus(deal.id, await authHeader("auth0|seller-2", ["seller"]), "Clear to close");
+    expect(res.status).toBe(404);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.buyer_status).toBeNull();
+  });
+
+  it("404 when another agent (non-owner) tries to set it", async () => {
+    const owner = await createUser({ role: "agent" });
+    await createUser({ role: "agent", auth0_id: "auth0|intruder" });
+    const deal = await createDeal({ agent_id: owner.id });
+
+    const res = await patchStatus(deal.id, await authHeader("auth0|intruder", ["agent"]), "Clear to close");
+    expect(res.status).toBe(404);
+  });
+
+  it("404 for a linked TC — buyer-status writes stay agent-only (matches #167 stage policy)", async () => {
+    const tc = await createUser({ role: "tc", auth0_id: "auth0|tc-linked" });
+    const agent = await createUser({ role: "agent" });
+    await prisma.users.update({ where: { id: agent.id }, data: { tc_user_id: tc.id } });
+    const deal = await createDeal({ agent_id: agent.id, type: "sell", stage: "under_contract" });
+
+    const res = await patchStatus(deal.id, await authHeader("auth0|tc-linked", ["tc"]), "Inspection scheduled");
+    expect(res.status).toBe(404);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.buyer_status).toBeNull();
+  });
+
+  it("400 for a status outside the canonical step list", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await patchStatus(deal.id, await authHeader("auth0|a", ["agent"]), "Aliens landed");
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.buyer_status).toBeNull();
+  });
+
+  it("clearing with null empties the status", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: { buyer_status: "Financing approved" },
+    });
+
+    const res = await patchStatus(deal.id, await authHeader("auth0|a", ["agent"]), null);
+    expect(res.status).toBe(200);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.buyer_status).toBeNull();
   });
 });
 

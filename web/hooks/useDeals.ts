@@ -29,6 +29,8 @@ export type ApiDeal = {
   pre_approved?: boolean;
   baa_signed?: boolean;
   disclosures_complete?: boolean;
+  /** Agent-set "Buyer's Progress" step shown on the seller portal (#184). */
+  buyer_status?: string | null;
   /** Postgres DECIMAL serialized as text by the API (`commission_pct::text`). */
   commission_pct?: string | null;
   created_at: string;
@@ -195,6 +197,7 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     preApproved: d.pre_approved ?? false,
     baaSigned: d.baa_signed ?? false,
     disclosuresComplete: d.disclosures_complete ?? false,
+    buyerStatus: d.buyer_status ?? undefined,
   };
 }
 

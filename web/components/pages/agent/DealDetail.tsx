@@ -66,6 +66,7 @@ import {
 } from 'lucide-react';
 import MetroMap from "@/components/MetroMap";
 import { MOCK_USERS } from "@/lib/data/mockUsers";
+import { BUYER_STATUS_STEPS } from "@/lib/buyer-status";
 import { useDealStageStore } from "@/lib/store/dealStageStore";
 import { useParticipants } from "@/hooks/useParticipants";
 import DealInviteModal from "@/components/DealInviteModal";
@@ -556,19 +557,33 @@ function SellerOffersCard({ dealId }: { dealId: string }) {
 
 // ─── Seller: Buyer Status Setter ──────────────────────────────────────────────
 
-const BUYER_STATUS_OPTIONS = [
-  'Inspection scheduled',
-  'Inspection complete',
-  'Appraisal ordered',
-  'Appraisal complete',
-  'Financing in review',
-  'Financing approved',
-  'Clear to close',
-];
+/**
+ * Agent-set "Buyer's Progress" (#184). Persisted server-side via
+ * PATCH /api/deals/:id/buyer-status so the seller portal (a different
+ * session) reads the same value from /api/me/deals — never a client store.
+ */
+export function SellerBuyerStatusCard({ deal, onRefresh }: { deal: Deal; onRefresh?: () => void }) {
+  // Local echo of the last save so the select reflects the choice
+  // immediately; null = show the server value from the deal payload.
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const current = pendingStatus ?? deal.buyerStatus ?? '';
 
-function SellerBuyerStatusCard({ dealId }: { dealId: string }) {
-  const { buyerStatusByDeal, setBuyerStatus } = useDealStageStore();
-  const current = buyerStatusByDeal[dealId] ?? '';
+  const save = async (value: string) => {
+    setPendingStatus(value);
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api.patch(`/deals/${deal.id}/buyer-status`, { buyer_status: value || null });
+      onRefresh?.();
+    } catch {
+      setSaveError('Could not save — try again.');
+      setPendingStatus(null); // revert to the last persisted value
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="rounded-xl bg-white shadow-sm overflow-hidden">
@@ -580,15 +595,22 @@ function SellerBuyerStatusCard({ dealId }: { dealId: string }) {
         <p className="text-xs text-gray-400 mb-2">Set the buyer&apos;s current status — this shows up on the seller&apos;s portal.</p>
         <select
           value={current}
-          onChange={(e) => setBuyerStatus(dealId, e.target.value)}
-          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-brand-navy outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10"
+          disabled={saving}
+          onChange={(e) => void save(e.target.value)}
+          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-brand-navy outline-none focus:border-brand-navy/30 focus:ring-2 focus:ring-brand-navy/10 disabled:opacity-60"
         >
           <option value="">— Not set —</option>
-          {BUYER_STATUS_OPTIONS.map((s) => (
+          {BUYER_STATUS_STEPS.map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        {current && (
+        {saveError && (
+          <div className="mt-2.5 flex items-center gap-2 rounded-lg bg-red-50 border border-red-100 px-3 py-2">
+            <AlertCircle size={12} className="text-red-500" />
+            <span className="text-xs font-semibold text-red-700">{saveError}</span>
+          </div>
+        )}
+        {current && !saveError && (
           <div className="mt-2.5 flex items-center gap-2 rounded-lg bg-green-50 border border-green-100 px-3 py-2">
             <CheckCircle2 size={12} className="text-green-500" />
             <span className="text-xs font-semibold text-green-700">Currently showing: {current}</span>
@@ -2023,7 +2045,7 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
 
           {/* Buyer Status — under_contract and beyond */}
           {['under_contract', 'pre_close', 'closing', 'post_close'].includes(deal.stage) && (
-            <SellerBuyerStatusCard dealId={deal.id} />
+            <SellerBuyerStatusCard deal={deal} onRefresh={onRefresh} />
           )}
 
           {/* Net Sheet — pre_close and post_close */}
