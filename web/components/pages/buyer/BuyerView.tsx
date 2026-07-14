@@ -26,7 +26,7 @@ import PortalDealDocuments from "@/components/portal/PortalDealDocuments";
 import { useDocuments, getSigningUrl, requestUploadUrl, confirmUpload } from "@/hooks/useDocuments";
 import { uploadFileToStorage } from "@/lib/direct-upload";
 import ClientNotifications from "@/components/ClientNotifications";
-import { FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/fast-pass-display";
+import { FAST_PASS_BASE_PRICE, FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/fast-pass-display";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1687,7 +1687,7 @@ function FastPassPitch({ dealId }: { dealId: string }) {
           We handle your move-in coordination — movers, utilities, deep clean, address changes, and more. Close on Thursday, wake up home on Saturday.
         </p>
         <div className="mt-3 inline-block rounded-lg bg-green-100 px-3 py-1.5 text-sm font-black text-green-800">
-          $1,497 · pay now or at closing
+          ${FAST_PASS_BASE_PRICE.toLocaleString()} · pay now or at closing
         </div>
       </div>
       <div className="border-t border-green-200 px-5 py-3 flex items-center gap-3">
