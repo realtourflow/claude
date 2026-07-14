@@ -112,22 +112,9 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams("tab=timeline"),
 }));
 
-const setStage = vi.fn();
-vi.mock("@/lib/store/dealStageStore", () => ({
-  useDealStageStore: () => ({ stageByDeal: {}, setStage: (...a: unknown[]) => setStage(...a) }),
-}));
-
 vi.mock("@/lib/store/authStore", () => ({
   useAuthStore: (sel?: (s: unknown) => unknown) => {
     const state = { activeUser: { id: "agent-1", groupId: "agent", name: "Agent Amy" } };
-    return sel ? sel(state) : state;
-  },
-}));
-
-const addClientNotification = vi.fn();
-vi.mock("@/lib/store/notificationStore", () => ({
-  useNotificationStore: (sel?: (s: unknown) => unknown) => {
-    const state = { addClientNotification: (...a: unknown[]) => addClientNotification(...a) };
     return sel ? sel(state) : state;
   },
 }));
@@ -432,7 +419,6 @@ describe("Stage advance posts the drafted client message (#185)", () => {
     );
     // The stage advance itself is unchanged.
     expect(patchStage).toHaveBeenCalledWith(DEAL_ID, "offer_active", undefined);
-    expect(setStage).toHaveBeenCalledWith(DEAL_ID, "offer_active");
   });
 
   it("posts the default draft as-is when the agent doesn't edit it", async () => {
@@ -474,7 +460,9 @@ describe("Stage advance posts the drafted client message (#185)", () => {
     await user.click(screen.getByRole("button", { name: /confirm & advance/i }));
 
     // The advance completed…
-    await waitFor(() => expect(setStage).toHaveBeenCalledWith(DEAL_ID, "offer_active"));
+    await waitFor(() =>
+      expect(patchStage).toHaveBeenCalledWith(DEAL_ID, "offer_active", undefined)
+    );
     await waitFor(() =>
       expect(
         screen.queryByRole("button", { name: /confirm & advance/i })

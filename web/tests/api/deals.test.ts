@@ -364,6 +364,126 @@ describe("PATCH /api/deals/[id]/stage", () => {
   });
 });
 
+describe("PATCH /api/deals/[id]/stage — auto-task seeding (#87)", () => {
+  async function advance(dealId: string, token: string, stage: string) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/stage`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: token },
+      body: JSON.stringify({ stage }),
+    });
+    return advanceStageRoute(req, ctx(dealId));
+  }
+
+  it("seeds the buy-side auto-tasks when advancing to active_search", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      stage: "intake",
+      type: "buy",
+      title: "Jane Buyer",
+    });
+
+    const res = await advance(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    expect(res.status).toBe(200);
+
+    const tasks = await prisma.tasks.findMany({
+      where: { deal_id: deal.id },
+      orderBy: { created_at: "asc" },
+    });
+    // Same set (and order) the old client-side loop produced for a buy deal.
+    expect(tasks.map((t) => t.title)).toEqual([
+      "Send pre-approval checklist — Jane Buyer",
+      "Schedule initial buyer consultation",
+      "Set up saved MLS search for client",
+    ]);
+    // Every seeded task is AI-sourced, scoped to the entered stage, unassigned,
+    // and carries a default due date (so overdue/health/calendar have data).
+    for (const t of tasks) {
+      expect(t.source).toBe("ai");
+      expect(t.stage_context).toBe("active_search");
+      expect(t.assigned_to).toBeNull();
+      expect(t.due_date).not.toBeNull();
+    }
+    const byTitle = Object.fromEntries(tasks.map((t) => [t.title, t]));
+    expect(byTitle["Send pre-approval checklist — Jane Buyer"].priority).toBe("high");
+    expect(byTitle["Send pre-approval checklist — Jane Buyer"].role).toBe("agent");
+  });
+
+  it("seeds the sell-side variant tasks (TC + agent roles)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      stage: "offer_active",
+      type: "sell",
+      title: "Sam Seller",
+    });
+
+    const res = await advance(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "under_contract"
+    );
+    expect(res.status).toBe(200);
+
+    const tasks = await prisma.tasks.findMany({ where: { deal_id: deal.id } });
+    const titles = tasks.map((t) => t.title);
+    expect(titles).toContain("Send executed contract to TC");
+    expect(titles).toContain("Open title file with title company");
+    const titleTask = tasks.find(
+      (t) => t.title === "Open title file with title company"
+    );
+    expect(titleTask?.role).toBe("tc");
+    expect(titleTask?.source).toBe("ai");
+    expect(titleTask?.stage_context).toBe("under_contract");
+  });
+
+  it("is idempotent — a retried advance to the same stage does not double-seed", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      stage: "intake",
+      type: "buy",
+      title: "Jane Buyer",
+    });
+    const token = await authHeader("auth0|a", ["agent"]);
+
+    await advance(deal.id, token, "active_search");
+    expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(3);
+
+    // Retry / double-submit the same advance (race or reload).
+    await advance(deal.id, token, "active_search");
+    expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(3);
+  });
+
+  it("does not seed when an AI task already exists for the target stage", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      stage: "intake",
+      type: "buy",
+      title: "Jane Buyer",
+    });
+    // A pre-existing AI task for active_search (e.g. from an earlier visit).
+    await prisma.tasks.create({
+      data: {
+        deal_id: deal.id,
+        title: "Existing ai task",
+        source: "ai",
+        stage_context: "active_search",
+        role: "agent",
+      },
+    });
+
+    await advance(deal.id, await authHeader("auth0|a", ["agent"]), "active_search");
+    // The guard skipped seeding — still just the one pre-existing task.
+    expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(1);
+  });
+});
+
 describe("PATCH /api/deals/[id]/notes", () => {
   it("updates notes for the owning agent", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });

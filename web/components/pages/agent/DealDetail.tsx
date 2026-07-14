@@ -11,10 +11,9 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { usePermission } from "@/permissions/usePermission";
 import { PERMISSIONS } from "@/permissions/permissions";
 import { useTaskStore } from "@/lib/store/taskStore";
-import { useNotificationStore } from "@/lib/store/notificationStore";
 import { Task } from "@/lib/data/mockTasks";
 import { useTasks, patchTaskStatus, patchTask, postTask } from "@/hooks/useTasks";
-import { autoTaskDueDate } from "@/lib/task-due-dates";
+import { stageAutoTasks } from "@/lib/stage-auto-tasks";
 import { useDocuments, requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, getSigningUrl, refreshDocuSignStatus, setDisclosuresComplete, Document as ApiDocument } from "@/hooks/useDocuments";
 import { uploadFileToStorage } from "@/lib/direct-upload";
 import SendTemplateModal from "./SendTemplateModal";
@@ -68,7 +67,6 @@ import MetroMap from "@/components/MetroMap";
 import IntakeCard from "@/components/intake/IntakeCard";
 import { MOCK_USERS } from "@/lib/data/mockUsers";
 import { BUYER_STATUS_STEPS } from "@/lib/buyer-status";
-import { useDealStageStore } from "@/lib/store/dealStageStore";
 import { useParticipants } from "@/hooks/useParticipants";
 import DealInviteModal from "@/components/DealInviteModal";
 import { useProperties, TrackedProperty, PropertyStatus } from "@/hooks/useProperties";
@@ -107,71 +105,9 @@ const STAGE_ORDER: DealStage[] = [
 ];
 
 // ─── Stage Automation ────────────────────────────────────────────────────────
-
-type AutoTask = {
-  title: string;
-  description?: string;
-  assignedTo: 'agent' | 'tc';
-  priority: 'high' | 'medium' | 'low';
-};
-
-const STAGE_AUTO_TASKS: Partial<Record<DealStage, (deal: Deal) => AutoTask[]>> = {
-  active_search: (d) => [
-    ...(d.type === 'buy' ? [
-      { title: `Send pre-approval checklist — ${d.clientName}`, assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Schedule initial buyer consultation', assignedTo: 'agent' as const, priority: 'medium' as const },
-      { title: 'Set up saved MLS search for client', assignedTo: 'agent' as const, priority: 'medium' as const },
-    ] : [
-      { title: `Schedule listing strategy call — ${d.clientName}`, assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Pull comparable sales (CMA)', assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Order professional photography', assignedTo: 'agent' as const, priority: 'medium' as const },
-    ]),
-  ],
-  offer_active: (d) => [
-    ...(d.type === 'buy' ? [
-      { title: `Review offer details with ${d.clientName}`, assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Prepare purchase agreement', assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Submit offer to listing agent', assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: `Send earnest money instructions — ${d.clientName}`, assignedTo: 'tc' as const, priority: 'high' as const },
-    ] : [
-      { title: `Review offer with ${d.clientName}`, assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Request proof of funds / pre-approval from buyer', assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Prepare counter offer if applicable', assignedTo: 'agent' as const, priority: 'medium' as const },
-    ]),
-  ],
-  under_contract: (d) => [
-    ...(d.type === 'buy' ? [
-      { title: `Schedule home inspection — ${d.clientName}`, assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Send executed contract to TC', assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Open title file with title company', assignedTo: 'tc' as const, priority: 'high' as const },
-      { title: `Confirm loan milestones with lender — ${d.clientName}`, assignedTo: 'agent' as const, priority: 'medium' as const },
-      { title: `Send wire / EMD instructions to ${d.clientName}`, assignedTo: 'tc' as const, priority: 'high' as const },
-    ] : [
-      { title: 'Send executed contract to TC', assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Open title file with title company', assignedTo: 'tc' as const, priority: 'high' as const },
-      { title: `Respond to repair request — ${d.clientName}`, description: 'Seller must respond within the contractual deadline', assignedTo: 'agent' as const, priority: 'high' as const },
-      { title: 'Confirm appraisal scheduling with buyer agent', assignedTo: 'agent' as const, priority: 'medium' as const },
-    ]),
-  ],
-  pre_close: (d) => [
-    { title: `Schedule final walkthrough — ${d.clientName}`, assignedTo: 'agent' as const, priority: 'high' as const },
-    { title: 'Verify clear-to-close status with lender', assignedTo: 'agent' as const, priority: 'high' as const },
-    { title: 'Confirm closing time and location with title company', assignedTo: 'tc' as const, priority: 'high' as const },
-    { title: `Remind ${d.clientName} to bring government ID to closing`, assignedTo: 'agent' as const, priority: 'medium' as const },
-    { title: 'Review ALTA / HUD-1 settlement statement', assignedTo: 'tc' as const, priority: 'high' as const },
-  ],
-  closing: (d) => [
-    { title: 'Confirm all parties for closing', assignedTo: 'tc' as const, priority: 'high' as const },
-    { title: `Verify wire instructions with ${d.clientName}`, assignedTo: 'agent' as const, priority: 'high' as const },
-    { title: 'Final clear-to-close check', assignedTo: 'tc' as const, priority: 'high' as const },
-  ],
-  post_close: (d) => [
-    { title: `Request 5-star review — ${d.clientName}`, assignedTo: 'agent' as const, priority: 'high' as const },
-    { title: `Send $50 referral program info to ${d.clientName}`, assignedTo: 'agent' as const, priority: 'medium' as const },
-    { title: 'Submit commission paperwork to brokerage', assignedTo: 'agent' as const, priority: 'high' as const },
-    { title: 'Update CRM with closed deal status', assignedTo: 'agent' as const, priority: 'low' as const },
-  ],
-};
+// STAGE_AUTO_TASKS moved to lib/stage-auto-tasks.ts (#87): the tasks are now
+// seeded server-side in the stage PATCH handler, and the modal preview imports
+// `stageAutoTasks` from there so both share one definition.
 
 const STAGE_DRAFT_MESSAGE: Partial<Record<DealStage, (deal: Deal) => string>> = {
   active_search: (d) => d.type === 'buy'
@@ -4188,7 +4124,7 @@ export function StageAdvanceModal({ deal, nextStage, gateError, onConfirm, onCan
   onConfirm: (draftMessage: string, force?: boolean) => void;
   onCancel: () => void;
 }) {
-  const autoTasks = STAGE_AUTO_TASKS[nextStage]?.(deal) ?? [];
+  const autoTasks = stageAutoTasks(nextStage, deal);
   const defaultMsg = STAGE_DRAFT_MESSAGE[nextStage]?.(deal) ?? '';
   const [msg, setMsg] = useState(defaultMsg);
   const [editingMsg, setEditingMsg] = useState(false);
@@ -4539,8 +4475,6 @@ export default function DealDetail() {
 
   const { deal: apiDeal, loading: dealLoading, error: dealError, refresh: refreshDeal } = useDeal(dealId);
   const { tasks: dealTasks, refresh: refreshTasks } = useTasks(dealId ?? '');
-  const { stageByDeal, setStage } = useDealStageStore();
-  const addClientNotification = useNotificationStore((s) => s.addClientNotification);
   const { docs: dealDocs, loading: docsLoading, refresh: refreshDocs } = useDocuments(dealId ?? '');
 
   if (dealLoading) {
@@ -4584,44 +4518,11 @@ export default function DealDetail() {
   }
 
   const deal = apiDeal;
-  const stage = stageByDeal[deal.id] ?? deal.stage;
+  // Server stage is the single source of truth (#87 — the dealStageStore local
+  // override was deleted). After an advance/retreat we refreshDeal() to pull it.
+  const stage = deal.stage;
   const localDeal = { ...deal, stage };
   const canAdvanceStage = ['agent', 'tc', 'admin'].includes(activeUser?.groupId ?? '');
-
-  const CLIENT_STAGE_MESSAGES: Partial<Record<DealStage, { title: string; body: string }>> = {
-    active_search: {
-      title: "You're cleared to start your home search!",
-      body: "Your agent has set up your search portal. Start tracking homes and get your pre-approval in place.",
-    },
-    offer_active: {
-      title: "Your offer has been submitted!",
-      body: "We're waiting to hear back from the seller. Stay available — your agent may need a quick response.",
-    },
-    under_contract: {
-      title: deal.type === 'sell' ? "You have an accepted offer!" : "Your offer was accepted — you're under contract!",
-      body: deal.type === 'sell'
-        ? "The buyer's contingency period has started. Check your portal for next steps."
-        : "Key deadlines are starting now. Check your portal — there are tasks that need your attention.",
-    },
-    pre_close: {
-      title: "All contingencies cleared — almost there!",
-      body: deal.type === 'sell'
-        ? "Closing is confirmed. Start coordinating your move-out and check your portal for final tasks."
-        : "Final stretch. Review your closing disclosure and confirm your wire instructions with your agent.",
-    },
-    closing: {
-      title: "Today is closing day!",
-      body: deal.type === 'sell'
-        ? "Check your portal for what to bring and where to go. You're almost done!"
-        : "Check your portal for what to bring to the closing table. Congratulations — you're almost a homeowner!",
-    },
-    post_close: {
-      title: deal.type === 'sell' ? "Your home has officially sold!" : "Welcome home! 🏡",
-      body: deal.type === 'sell'
-        ? "Congratulations! Check your portal for your net proceeds summary and next steps."
-        : "Congratulations! Check your portal for move-in next steps and your Fast Pass status.",
-    },
-  };
 
   function advanceStage() {
     setClientMsgSendFailed(false);
@@ -4642,12 +4543,7 @@ export default function DealDetail() {
         setShowAdvanceModal(false);
         return;
       }
-      setStage(deal.id, nextStage);
       refreshDeal();
-      const msg = CLIENT_STAGE_MESSAGES[nextStage];
-      if (msg) {
-        addClientNotification({ dealId: deal.id, title: msg.title, body: msg.body });
-      }
       // Post the agent's (possibly edited) drafted message to the client
       // thread — the modal promises this (#185). Best-effort: a failed send
       // must never break the stage advance itself.
@@ -4659,22 +4555,9 @@ export default function DealDetail() {
           setClientMsgSendFailed(true);
         }
       }
-      const autoTasks = STAGE_AUTO_TASKS[nextStage]?.(deal) ?? [];
-      await Promise.allSettled(
-        autoTasks.map((taskDef) =>
-          postTask(deal.id, {
-            title: taskDef.title,
-            description: taskDef.description,
-            priority: taskDef.priority,
-            source: 'ai',
-            stage_context: nextStage,
-            role: taskDef.assignedTo,
-            // Default relative due date so overdue/health/calendar have
-            // real data from day one (#187).
-            due_date: autoTaskDueDate(nextStage, taskDef.priority),
-          }),
-        ),
-      );
+      // Auto-tasks are now seeded server-side, atomically with the stage
+      // transition (#87 — the old client postTask() loop was lost if the tab
+      // closed mid-loop). Pull the freshly-seeded tasks into the UI.
       refreshTasks();
     }
     setStageGateError(null);
@@ -4690,7 +4573,6 @@ export default function DealDetail() {
       } catch {
         return;
       }
-      setStage(deal.id, prevStage);
       refreshDeal();
     }
   }
