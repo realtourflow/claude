@@ -780,6 +780,139 @@ describe("PATCH /api/deals/[id]/buyer-status (#184)", () => {
   });
 });
 
+describe("POST /api/deals — malformed body validation (#88)", () => {
+  async function post(body: string) {
+    const req = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body,
+    });
+    return createDealRoute(req);
+  }
+
+  it("400 (not 500) when price is a non-numeric string", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const res = await post(
+      JSON.stringify({ title: "123 Elm", type: "buy", price: "not-a-number" })
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("price");
+    expect(await prisma.deals.count()).toBe(0);
+  });
+
+  it("still accepts a numeric-string price (current wire tolerance preserved)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const res = await post(
+      JSON.stringify({ title: "123 Elm", type: "buy", price: "500000" })
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { price: string | null };
+    // DECIMAL(12,2) — the wire value is the text cast with scale 2.
+    expect(body.price).toBe("500000.00");
+  });
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const res = await post("null");
+    expect(res.status).toBe(400);
+  });
+
+  it("400 (not 500) when arive_linked is a string", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const res = await post(
+      JSON.stringify({ title: "123 Elm", type: "buy", arive_linked: "yes" })
+    );
+    expect(res.status).toBe(400);
+    expect(await prisma.deals.count()).toBe(0);
+  });
+
+  it("400 (not 500) when address is a number", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const res = await post(
+      JSON.stringify({ title: "123 Elm", type: "buy", address: 42 })
+    );
+    expect(res.status).toBe(400);
+    expect(await prisma.deals.count()).toBe(0);
+  });
+});
+
+describe("PATCH /api/deals/[id]/stage — malformed body validation (#88)", () => {
+  async function patch(dealId: string, body: string) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/stage`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body,
+    });
+    return advanceStageRoute(req, ctx(dealId));
+  }
+
+  it("400 (not 500) for a stage outside the canonical list — nothing written", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    const res = await patch(deal.id, JSON.stringify({ stage: "warp_speed" }));
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.stage).toBe("intake");
+    expect(
+      await prisma.deal_stage_history.count({ where: { deal_id: deal.id } })
+    ).toBe(0);
+  });
+
+  it("400 (not 500) when stage is a number", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    const res = await patch(deal.id, JSON.stringify({ stage: 5 }));
+    expect(res.status).toBe(400);
+  });
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    const res = await patch(deal.id, "null");
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("PATCH /api/deals/[id]/buyer-status — malformed body validation (#88)", () => {
+  it("400 when buyer_status is a number", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/buyer-status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ buyer_status: 123 }),
+    });
+    const res = await buyerStatusRoute(req, ctx(deal.id));
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.buyer_status).toBeNull();
+  });
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const req = new Request(`http://localhost/api/deals/${deal.id}/buyer-status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: "null",
+    });
+    const res = await buyerStatusRoute(req, ctx(deal.id));
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("PATCH /api/deals/[id]/flags", () => {
   it("toggles pre_approved and baa_signed", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });

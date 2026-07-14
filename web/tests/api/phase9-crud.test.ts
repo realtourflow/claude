@@ -432,3 +432,71 @@ describe("Contingencies (#186)", () => {
     expect(rows[0].contingency_type).toBe("hoa");
   });
 });
+
+describe("POST /api/deals/[id]/offers — malformed body validation (#88)", () => {
+  async function post(dealId: string, body: string) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/offers`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body,
+    });
+    return createOfferRoute(req, ctx({ id: dealId }));
+  }
+
+  it("400 (not 500) when offer_price is a non-numeric string", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(deal.id, JSON.stringify({ buyer_name: "Jane", offer_price: "abc" }));
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("offer_price");
+    expect(await prisma.offers.count({ where: { deal_id: deal.id } })).toBe(0);
+  });
+
+  it("400 for a numeric-string offer_price (never accepted — Prisma 500'd on it before)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(
+      deal.id,
+      JSON.stringify({ buyer_name: "Jane", offer_price: "425000" })
+    );
+    expect(res.status).toBe(400);
+    expect(await prisma.offers.count({ where: { deal_id: deal.id } })).toBe(0);
+  });
+
+  it("400 (not 500) when close_date is not a parseable date", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(
+      deal.id,
+      JSON.stringify({ buyer_name: "Jane", close_date: "not-a-date" })
+    );
+    expect(res.status).toBe(400);
+    expect(await prisma.offers.count({ where: { deal_id: deal.id } })).toBe(0);
+  });
+
+  it("400 (not 500) when contingencies is not an array", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(
+      deal.id,
+      JSON.stringify({ buyer_name: "Jane", contingencies: "financing" })
+    );
+    expect(res.status).toBe(400);
+    expect(await prisma.offers.count({ where: { deal_id: deal.id } })).toBe(0);
+  });
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(deal.id, "null");
+    expect(res.status).toBe(400);
+  });
+});

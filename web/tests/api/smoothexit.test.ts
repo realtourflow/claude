@@ -482,3 +482,73 @@ describe("POST /api/deals/[id]/smoothexit", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("POST /api/deals/[id]/smoothexit — malformed body validation (#88)", () => {
+  async function enroll(dealId: string, body: string) {
+    const r = new Request(`http://localhost/api/deals/${dealId}/smoothexit`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body,
+    });
+    return smoothExitRoute(r, ctx(dealId));
+  }
+
+  it("400 when estimated_sale_price is a string — junk never persisted", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await enroll(
+      deal.id,
+      JSON.stringify({ payment_option: "from_proceeds", estimated_sale_price: "lots" })
+    );
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("estimated_sale_price");
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.smooth_exit).toBeNull();
+  });
+
+  it("400 when fee_cents is a string — junk never persisted", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await enroll(
+      deal.id,
+      JSON.stringify({ payment_option: "from_proceeds", fee_cents: "4500" })
+    );
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.smooth_exit).toBeNull();
+  });
+
+  it("400 when payment_option is a number — junk never persisted", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await enroll(deal.id, JSON.stringify({ payment_option: 123 }));
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.smooth_exit).toBeNull();
+  });
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await enroll(deal.id, "null");
+    expect(res.status).toBe(400);
+  });
+
+  it("400 when selected_upsells is not an array (unchanged)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await enroll(
+      deal.id,
+      JSON.stringify({ payment_option: "from_proceeds", selected_upsells: "staging_consult" })
+    );
+    expect(res.status).toBe(400);
+  });
+});

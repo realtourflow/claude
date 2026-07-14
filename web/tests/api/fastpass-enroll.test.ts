@@ -445,3 +445,50 @@ describe("POST /api/deals/[id]/fastpass", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("POST /api/deals/[id]/fastpass — malformed body validation (#88)", () => {
+  async function enroll(dealId: string, body: string) {
+    const r = new Request(`http://localhost/api/deals/${dealId}/fastpass`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body,
+    });
+    return fastPassRoute(r, ctx(dealId));
+  }
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await enroll(deal.id, "null");
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fast_pass).toBeNull();
+  });
+
+  it("400 when payment_option is a number — junk never persisted", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await enroll(deal.id, JSON.stringify({ payment_option: 5 }));
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fast_pass).toBeNull();
+  });
+
+  it("400 when selected_upsells contains non-strings", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await enroll(
+      deal.id,
+      JSON.stringify({ payment_option: "at_closing", selected_upsells: [1, 2] })
+    );
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fast_pass).toBeNull();
+  });
+});

@@ -4,6 +4,8 @@ import { error, json, withAuth } from "@/lib/http";
 import { hasRole } from "@/lib/roles";
 import { resolveUserId } from "@/lib/users";
 import { listDealsForUser } from "@/lib/deals";
+import { createDealBodySchema } from "@/lib/schemas/deal";
+import { parseBody } from "@/lib/schemas/parse";
 
 export async function GET(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -17,25 +19,14 @@ export async function GET(req: Request): Promise<Response> {
   })) as Response;
 }
 
-type CreateBody = {
-  title?: string;
-  type?: string;
-  address?: string | null;
-  price?: number | null;
-  arive_linked?: boolean;
-};
-
 export async function POST(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found — call /users/sync first", 404);
 
-    let body: CreateBody;
-    try {
-      body = (await req.json()) as CreateBody;
-    } catch {
-      return error("invalid request body", 400);
-    }
+    const parsed = await parseBody(req, createDealBodySchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
     const title = typeof body.title === "string" ? body.title.trim() : "";
     const type = body.type;
     if (!title || (type !== "buy" && type !== "sell")) {

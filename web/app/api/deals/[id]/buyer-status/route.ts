@@ -2,10 +2,10 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { isBuyerStatus } from "@/lib/buyer-status";
+import { buyerStatusPatchBodySchema } from "@/lib/schemas/deal";
+import { parseBody } from "@/lib/schemas/parse";
 
 type Ctx = { params: Promise<{ id: string }> };
-
-type BuyerStatusBody = { buyer_status?: string | null };
 
 /**
  * PATCH /api/deals/[id]/buyer-status (#184)
@@ -26,17 +26,12 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
 
-    let body: BuyerStatusBody;
-    try {
-      body = (await req.json()) as BuyerStatusBody;
-    } catch {
-      return error("invalid request body", 400);
-    }
+    // Schema-validated (#88): non-string/non-null buyer_status 400s in the
+    // parse; the canonical-step check below keeps its own message.
+    const parsed = await parseBody(req, buyerStatusPatchBodySchema);
+    if (!parsed.ok) return parsed.response;
 
-    const raw = body.buyer_status;
-    if (raw !== null && raw !== undefined && typeof raw !== "string") {
-      return error("buyer_status must be a string or null", 400);
-    }
+    const raw = parsed.data.buyer_status;
     const value = raw ? raw.trim() : "";
     if (value !== "" && !isBuyerStatus(value)) {
       return error("invalid buyer_status", 400);
