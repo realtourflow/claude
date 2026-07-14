@@ -5,6 +5,7 @@ import { PATCH as activateRoute } from "@/app/api/users/[id]/activate/route";
 import { PATCH as deactivateRoute } from "@/app/api/users/[id]/deactivate/route";
 import { GET as listDealsRoute } from "@/app/api/deals/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
+import { isEmailUniqueViolation } from "@/lib/users";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
@@ -413,5 +414,77 @@ describe("GET /api/users — market + brokerage (admin)", () => {
     const row = rows.find((r) => r.id === agent.id);
     expect(row?.market).toBe("BALDWIN_GULF_COAST");
     expect(row?.brokerage).toBe("RE/MAX");
+  });
+});
+
+// #277 — the collision detector is pure, so exercise every error shape it must
+// recognize directly (the live DB only ever produces the P2010 branch below).
+describe("isEmailUniqueViolation", () => {
+  it("detects the real P2010 raw-query shape upsertUser throws", () => {
+    const err = {
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          name: "DriverAdapterError",
+          cause: {
+            originalCode: "23505",
+            kind: "UniqueConstraintViolation",
+            constraint: { fields: ["email"] },
+            originalMessage:
+              'duplicate key value violates unique constraint "users_email_key"',
+          },
+        },
+      },
+      message:
+        'Raw query failed. Code: `23505`. Message: `duplicate key value violates unique constraint "users_email_key"`',
+    };
+    expect(isEmailUniqueViolation(err)).toBe(true);
+  });
+
+  it("ignores a unique violation on a non-email field (e.g. auth0_id)", () => {
+    const err = {
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          cause: {
+            originalCode: "23505",
+            kind: "UniqueConstraintViolation",
+            constraint: { fields: ["auth0_id"] },
+          },
+        },
+      },
+    };
+    expect(isEmailUniqueViolation(err)).toBe(false);
+  });
+
+  it("detects a model-style P2002 targeting email", () => {
+    expect(isEmailUniqueViolation({ code: "P2002", meta: { target: ["email"] } })).toBe(true);
+  });
+
+  it("ignores a P2002 targeting a different field", () => {
+    expect(
+      isEmailUniqueViolation({ code: "P2002", meta: { target: ["auth0_id"] } })
+    ).toBe(false);
+  });
+
+  it("detects a bare pg 23505 passthrough on the email constraint", () => {
+    expect(isEmailUniqueViolation({ code: "23505", constraint: "users_email_key" })).toBe(true);
+  });
+
+  it("falls back to the message when the nested meta shape is absent", () => {
+    const err = {
+      code: "P2010",
+      message:
+        'Raw query failed. Code: `23505`. Message: `duplicate key value violates unique constraint "users_email_key"`',
+    };
+    expect(isEmailUniqueViolation(err)).toBe(true);
+  });
+
+  it("returns false for unrelated errors and non-objects", () => {
+    expect(isEmailUniqueViolation(new Error("connection refused"))).toBe(false);
+    expect(isEmailUniqueViolation({ code: "P2025" })).toBe(false);
+    expect(isEmailUniqueViolation(null)).toBe(false);
+    expect(isEmailUniqueViolation("boom")).toBe(false);
+    expect(isEmailUniqueViolation(undefined)).toBe(false);
   });
 });

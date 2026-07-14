@@ -93,8 +93,11 @@ export async function upsertUser(input: {
  * Confirms the email field where the detail is present; on this INSERT the only
  * inserted unique that can fire (auth0_id aside, handled by ON CONFLICT) is
  * users_email_key, so an unqualified unique violation is treated as the email.
+ *
+ * Exported for direct unit testing across the (Prisma-version-dependent) error
+ * shapes — the live DB only ever produces the P2010 branch.
  */
-function isEmailUniqueViolation(err: unknown): boolean {
+export function isEmailUniqueViolation(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const e = err as {
     code?: unknown;
@@ -143,6 +146,14 @@ function isEmailUniqueViolation(err: unknown): boolean {
   // Bare pg passthrough (no Prisma wrapper).
   if (e.code === "23505") {
     return typeof e.constraint !== "string" || e.constraint.includes("email");
+  }
+
+  // Last resort: the constraint name / code surfaced only in the message text
+  // (hardens against Prisma changing the nested meta shape between versions —
+  // upsertUser's error message includes `users_email_key` and `23505`).
+  if (typeof e.message === "string") {
+    if (e.message.includes("users_email_key")) return true;
+    if (e.message.includes("23505") && e.message.includes("email")) return true;
   }
 
   return false;
