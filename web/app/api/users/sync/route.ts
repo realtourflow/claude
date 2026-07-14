@@ -1,5 +1,5 @@
 import { error, json, withAuth } from "@/lib/http";
-import { getPersistedRole, upsertUser } from "@/lib/users";
+import { EmailConflictError, getPersistedRole, upsertUser } from "@/lib/users";
 import type { Role } from "@/lib/roles";
 
 type SyncBody = {
@@ -33,12 +33,23 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
-    const user = await upsertUser({
-      auth0Id: claims.sub,
-      email,
-      name,
-      role,
-    });
+    let user;
+    try {
+      user = await upsertUser({
+        auth0Id: claims.sub,
+        email,
+        name,
+        role,
+      });
+    } catch (err) {
+      // A second Auth0 identity reusing another user's email surfaces as a
+      // typed collision — return a readable 409 instead of a generic 500 so
+      // the client can recover (log in with the original account) (#277).
+      if (err instanceof EmailConflictError) {
+        return error(err.message, err.status);
+      }
+      throw err;
+    }
     return json(user);
   })) as Response;
 }

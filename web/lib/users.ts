@@ -16,6 +16,21 @@ export type SyncedUser = {
 };
 
 /**
+ * Thrown by upsertUser when a NEW auth0 subject presents an email that already
+ * belongs to a DIFFERENT user row (Postgres 23505 on users_email_key). Follows
+ * the AuthError typed-error style (a catchable Error subclass carrying its HTTP
+ * status) so route handlers can map it to a readable 409 instead of the opaque
+ * 500 a raw unique violation would otherwise become (#277).
+ */
+export class EmailConflictError extends Error {
+  readonly status = 409 as const;
+  constructor(message = "an account with this email already exists") {
+    super(message);
+    this.name = "EmailConflictError";
+  }
+}
+
+/**
  * Upserts a user from JWT data. Preserves a hand-edited name when Auth0 is
  * about to clobber it with the email (Auth0 sometimes defaults name=email).
  *
@@ -39,21 +54,98 @@ export async function upsertUser(input: {
     ? Prisma.sql`users.role`
     : Prisma.sql`EXCLUDED.role`;
   // Raw SQL keeps the CASE-WHEN name-preserve logic exactly as the Go side.
-  const rows = await prisma.$queryRaw<SyncedUser[]>`
-    INSERT INTO users (auth0_id, email, name, role)
-    VALUES (${input.auth0Id}, ${input.email}, ${input.name}, ${input.role}::user_role)
-    ON CONFLICT (auth0_id) DO UPDATE
-    SET email      = EXCLUDED.email,
-        name       = CASE
-                       WHEN users.name IS NULL OR users.name = '' OR users.name = users.email
-                       THEN EXCLUDED.name
-                       ELSE users.name
-                     END,
-        role       = ${roleOnConflict},
-        updated_at = NOW()
-    RETURNING id, auth0_id, email, name, role, phone, onboarding_complete, created_at, updated_at
-  `;
+  let rows: SyncedUser[];
+  try {
+    rows = await prisma.$queryRaw<SyncedUser[]>`
+      INSERT INTO users (auth0_id, email, name, role)
+      VALUES (${input.auth0Id}, ${input.email}, ${input.name}, ${input.role}::user_role)
+      ON CONFLICT (auth0_id) DO UPDATE
+      SET email      = EXCLUDED.email,
+          name       = CASE
+                         WHEN users.name IS NULL OR users.name = '' OR users.name = users.email
+                         THEN EXCLUDED.name
+                         ELSE users.name
+                       END,
+          role       = ${roleOnConflict},
+          updated_at = NOW()
+      RETURNING id, auth0_id, email, name, role, phone, onboarding_complete, created_at, updated_at
+    `;
+  } catch (err) {
+    // A new auth0 sub carrying an email already bound to a DIFFERENT row trips
+    // users_email_key. ON CONFLICT (auth0_id) already absorbs same-sub
+    // re-syncs, so the only unique violation that can escape this INSERT is the
+    // email one — re-throw it typed so the caller can return a clean 409 (#277).
+    if (isEmailUniqueViolation(err)) {
+      throw new EmailConflictError();
+    }
+    throw err;
+  }
   return rows[0];
+}
+
+/**
+ * True when `err` is a unique-constraint violation on the users email column.
+ * Handles the shapes Prisma 7 + the pg driver adapter surface it in:
+ *  - a raw-query failure (P2010) wrapping the pg error under
+ *    meta.driverAdapterError.cause (what upsertUser's $queryRaw throws),
+ *  - a model-style unique violation (P2002, meta.target names the field),
+ *  - a bare pg passthrough carrying code 23505 + constraint.
+ * Confirms the email field where the detail is present; on this INSERT the only
+ * inserted unique that can fire (auth0_id aside, handled by ON CONFLICT) is
+ * users_email_key, so an unqualified unique violation is treated as the email.
+ */
+function isEmailUniqueViolation(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as {
+    code?: unknown;
+    meta?: unknown;
+    message?: unknown;
+    constraint?: unknown;
+  };
+
+  // Prisma raw-query failure (P2010) wrapping the driver-adapter error.
+  const cause = (
+    e.meta as
+      | {
+          driverAdapterError?: {
+            cause?: {
+              originalCode?: unknown;
+              kind?: unknown;
+              originalMessage?: unknown;
+              constraint?: { fields?: unknown };
+            };
+          };
+        }
+      | undefined
+  )?.driverAdapterError?.cause;
+  if (
+    cause &&
+    (cause.originalCode === "23505" ||
+      cause.kind === "UniqueConstraintViolation")
+  ) {
+    const fields = cause.constraint?.fields;
+    if (Array.isArray(fields)) return fields.includes("email");
+    if (typeof cause.originalMessage === "string") {
+      return cause.originalMessage.includes("email");
+    }
+    return true;
+  }
+
+  // Prisma model-style unique violation (P2002) — defensive, e.g. if this ever
+  // moves to a typed .create()/.upsert(); meta.target names the offending field.
+  if (e.code === "P2002") {
+    const target = (e.meta as { target?: unknown } | undefined)?.target;
+    if (Array.isArray(target)) return target.includes("email");
+    if (typeof target === "string") return target.includes("email");
+    return true;
+  }
+
+  // Bare pg passthrough (no Prisma wrapper).
+  if (e.code === "23505") {
+    return typeof e.constraint !== "string" || e.constraint.includes("email");
+  }
+
+  return false;
 }
 
 /**

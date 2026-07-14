@@ -126,6 +126,50 @@ describe("POST /api/users/sync", () => {
     expect(body.role).toBe("agent");
     expect(body.name).toBe("Invited User");
   });
+
+  // #277 — a second Auth0 identity presenting an already-used email must get a
+  // clean, recoverable 409, not the opaque 500 the raw unique violation caused.
+  it("returns 409 when a new sub presents an email already used by another user", async () => {
+    // An existing account already owns dup@example.com under a different sub.
+    await createUser({
+      auth0_id: "auth0|original-owner",
+      email: "dup@example.com",
+      name: "Original Owner",
+      role: "agent",
+    });
+    // syncBody authenticates as auth0|new-agent — a brand-new Auth0 identity —
+    // and tries to claim the same email.
+    const res = await syncRoute(
+      await syncBody({ email: "dup@example.com", name: "Impostor" })
+    );
+    expect(res.status).toBe(409);
+    const text = (await res.text()).toLowerCase();
+    expect(text).toContain("already exists");
+  });
+
+  // #277 Case 2 (unchanged happy path): a new sub + a fresh email still creates.
+  it("creates the user when both the sub and the email are new", async () => {
+    const res = await syncRoute(
+      await syncBody({ email: "fresh@example.com", name: "Fresh Agent" })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { email: string };
+    expect(body.email).toBe("fresh@example.com");
+  });
+
+  // #277 Case 3 (regression): re-syncing the SAME sub with its own email must
+  // update, never 409 — ON CONFLICT (auth0_id) owns that row's email, so the
+  // email-unique guard must not fire on a legitimate re-sync.
+  it("re-syncs an existing sub with its own email without a collision", async () => {
+    const first = await syncRoute(
+      await syncBody({ email: "keep@example.com", name: "Keeper" })
+    );
+    expect(first.status).toBe(200);
+    const second = await syncRoute(
+      await syncBody({ email: "keep@example.com", name: "Keeper Renamed" })
+    );
+    expect(second.status).toBe(200);
+  });
 });
 
 describe("GET /api/users", () => {
