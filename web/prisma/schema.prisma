@@ -64,6 +64,7 @@ model checklist_items {
   updated_at  DateTime           @default(now()) @db.Timestamptz(6)
   deals       deals              @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
+  @@unique([deal_id, label], map: "idx_checklist_items_deal_label_default", where: raw("(NOT is_custom)"))
   @@index([deal_id], map: "idx_checklist_items_deal_id")
 }
 
@@ -125,6 +126,8 @@ model deal_stage_history {
   changed_at DateTime    @default(now()) @db.Timestamptz(6)
   users      users       @relation(fields: [changed_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   deals      deals       @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([deal_id, changed_at(sort: Desc)], map: "idx_deal_stage_history_deal_changed")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -200,6 +203,9 @@ model documents {
   deals                  deals                 @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users                  users                 @relation(fields: [uploaded_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
   docusign_recipients    docusign_recipients[]
+
+  @@index([deal_id], map: "idx_documents_deal_id")
+  @@index([docusign_envelope_id], map: "idx_documents_docusign_envelope_id", where: raw("(docusign_envelope_id IS NOT NULL)"))
 }
 
 model messages {
@@ -272,6 +278,8 @@ model offers {
   submitted_at  DateTime  @default(now()) @db.Timestamptz(6)
   created_at    DateTime  @default(now()) @db.Timestamptz(6)
   deals         deals     @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([deal_id], map: "idx_offers_deal_id")
 }
 
 model preferred_vendors {
@@ -363,6 +371,8 @@ model tracked_properties {
   created_at         DateTime @default(now()) @db.Timestamptz(6)
   updated_at         DateTime @default(now()) @db.Timestamptz(6)
   deals              deals    @relation(fields: [deal_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([deal_id], map: "idx_tracked_properties_deal_id")
 }
 
 model user_settings {
@@ -384,7 +394,7 @@ model users {
   tc_user_id                                                  String?               @db.Uuid
   tc_contact                                                  Json?
   deactivated_at                                              DateTime?             @db.Timestamptz(6)
-  calendar_token                                              String?
+  calendar_token                                              String?               @unique(map: "idx_users_calendar_token", where: raw("(calendar_token IS NOT NULL)"))
   mls_key                                                     String?
   mls_secret                                                  String?
   onboarding_complete                                         Boolean               @default(false)
