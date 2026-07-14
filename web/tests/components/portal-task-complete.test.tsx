@@ -59,6 +59,17 @@ vi.mock("@/hooks/useDocuments", () => ({
   requestUploadUrl: vi.fn(),
   confirmUpload: vi.fn(),
 }));
+// BuyerView now reads notifications for the Messages tab badge (#294). Stub the
+// hook so its poll doesn't fire a real fetch('/api/notifications') — these tests
+// spy on global fetch to assert the upload byte-path, and that count must stay clean.
+vi.mock("@/hooks/useNotifications", () => ({
+  useNotifications: () => ({
+    notifications: [],
+    markRead: vi.fn(),
+    markAllRead: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}));
 // #189 — the direct-to-Blob byte path, mocked at the SDK boundary so the real
 // lib/direct-upload logic (direct upload, proxy fallback) runs in these tests.
 const uploadPresignedMock = vi.fn();
