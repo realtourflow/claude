@@ -1,19 +1,4 @@
-import { DealStage } from './mockDeals';
-
-export type Task = {
-  id: string;
-  dealId: string;
-  title: string;
-  description?: string;
-  assignedTo: 'agent' | 'buyer' | 'seller' | 'tc' | 'admin' | 'third_party';
-  assignedToId: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'overdue' | 'blocked';
-  priority: 'high' | 'medium' | 'low';
-  source: 'ai' | 'manual';
-  stageContext: DealStage;
-  dueDate?: string;
-  completedAt?: string;
-  dependsOn?: string[];
-  actionType?: 'confirm' | 'upload' | 'link';
-  actionUrl?: string;
-};
+// The Task type moved to @/lib/types (#88) — this re-export keeps the
+// existing `from "@/lib/data/mockTasks"` import sites compiling.
+// Rewriting those import sites to point at @/lib/types is ticket #89.
+export type { Task } from '@/lib/types';

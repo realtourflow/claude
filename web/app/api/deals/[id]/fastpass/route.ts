@@ -8,15 +8,10 @@ import {
   type FastPassUpsellId,
 } from "@/lib/fast-pass-catalog";
 import { createFastPassCheckout } from "@/lib/stripe";
+import { fastPassEnrollBodySchema } from "@/lib/schemas/enrollment";
+import { parseBody } from "@/lib/schemas/parse";
 
 type Ctx = { params: Promise<{ id: string }> };
-
-type EnrollBody = {
-  payment_option?: string; // now | at_closing | seller_concession
-  selected_upsells?: string[];
-  total_cents?: number; // client-sent; deliberately ignored — the server prices the enrollment
-  survey_answers?: unknown; // arbitrary JSON from the survey
-};
 
 const PAYMENT_OPTIONS = ["now", "at_closing", "seller_concession"] as const;
 
@@ -48,12 +43,10 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       return error("forbidden", 403);
     }
 
-    let body: EnrollBody;
-    try {
-      body = (await req.json()) as EnrollBody;
-    } catch {
-      return error("invalid request body", 400);
-    }
+    // Schema-validated (#88): typed junk 400s here before any write.
+    const parsed = await parseBody(req, fastPassEnrollBodySchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
 
     // Whitelist the payment option (now | at_closing | seller_concession);
     // only "now" charges upfront. Validated before any write.
@@ -62,9 +55,6 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       return error(`invalid payment_option: ${paymentOption}`, 400);
     }
 
-    if (body.selected_upsells !== undefined && !Array.isArray(body.selected_upsells)) {
-      return error("selected_upsells must be an array", 400);
-    }
     const selectedUpsells = body.selected_upsells ?? [];
 
     // Server-side pricing (#78): the total is computed from the shared catalog

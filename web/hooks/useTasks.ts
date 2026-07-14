@@ -4,22 +4,12 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { Task } from "@/lib/data/mockTasks";
 import { DealStage } from "@/lib/data/mockDeals";
+import { apiTaskListSchema, type ApiTask } from "@/lib/schemas/task";
+import { checkWire } from "@/lib/schemas/wire";
 
-export type ApiTask = {
-  id: string;
-  deal_id: string;
-  assigned_to: string | null;
-  title: string;
-  description: string | null;
-  status: 'pending' | 'in_progress' | 'completed' | 'skipped';
-  priority: string;
-  source: string;
-  stage_context: string | null;
-  role: string;
-  due_date: string | null;
-  created_at: string;
-  updated_at: string;
-};
+// The wire type is inferred from the zod schema (#88) — a single contract
+// shared with the server boundary instead of a hand-maintained copy.
+export type { ApiTask };
 
 // Exported: this mapping is what the dashboard's "Tasks Due" / overdue
 // counts are built on (a pending task past its due_date renders as overdue).
@@ -47,8 +37,9 @@ export function useAgentTasks(): { tasks: Task[]; loading: boolean; refresh: () 
   const query = useQuery({
     queryKey: ['agent-tasks'],
     queryFn: async () => {
+      // Dev/test-only wire check (#88): warns on schema drift; no-op in prod.
       const raw = await api.get<ApiTask[]>('/tasks');
-      return raw.map(apiTaskToFrontend);
+      return checkWire(apiTaskListSchema, raw, 'GET /api/tasks').map(apiTaskToFrontend);
     },
   });
 
@@ -64,7 +55,7 @@ export function useTasks(dealId: string): { tasks: Task[]; loading: boolean; ref
     queryKey: ['tasks', dealId],
     queryFn: async () => {
       const raw = await api.get<ApiTask[]>(`/deals/${dealId}/tasks`);
-      return raw.map(apiTaskToFrontend);
+      return checkWire(apiTaskListSchema, raw, 'GET /api/deals/:id/tasks').map(apiTaskToFrontend);
     },
     enabled: Boolean(dealId),
   });

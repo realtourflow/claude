@@ -1,0 +1,122 @@
+/**
+ * Deal wire contracts (#88): request-body schemas for the deal money routes
+ * and the ApiDeal response schema — the single source for the wire type the
+ * hooks used to hand-maintain (the string-vs-number lie behind #85).
+ *
+ * Client-safe: zod + pure libs only (hooks import from here too).
+ *
+ * Schema philosophy: reject garbage (types that previously 500'd deep in
+ * Prisma/Postgres), never tighten contracts. Semantic checks with
+ * user-facing messages (required-ness wording, catalog membership) stay in
+ * the handlers so responses don't change for payloads that already 400'd.
+ */
+import { z } from "zod";
+import { STAGE_ORDER } from "@/lib/stages";
+import { decimalString } from "./common";
+
+// ---------------------------------------------------------------------------
+// Request bodies
+// ---------------------------------------------------------------------------
+
+/** POST /api/deals */
+export const createDealBodySchema = z.object({
+  // Emptiness + type membership keep their combined handler message
+  // ("title and type (buy|sell) are required").
+  title: z.string().nullish(),
+  type: z.string().nullish(),
+  address: z.string().nullish(),
+  // number, numeric string (always worked — SQL casts ::decimal), or null.
+  price: z.union([z.number(), decimalString]).nullish(),
+  arive_linked: z.boolean().nullish(),
+});
+export type CreateDealBody = z.output<typeof createDealBodySchema>;
+
+/** PATCH /api/deals/[id]/stage — unknown stages 400 here (previously a 500). */
+export const dealStagePatchBodySchema = z.object({
+  // null/absent keeps the handler's "stage is required" message.
+  stage: z.enum(STAGE_ORDER).nullish(),
+});
+export type DealStagePatchBody = z.output<typeof dealStagePatchBodySchema>;
+
+/** PATCH /api/deals/[id]/buyer-status — canonical-step check stays in the handler. */
+export const buyerStatusPatchBodySchema = z.object({
+  buyer_status: z.string().nullish(),
+});
+export type BuyerStatusPatchBody = z.output<typeof buyerStatusPatchBodySchema>;
+
+// ---------------------------------------------------------------------------
+// Responses (wire shape the hooks consume)
+// ---------------------------------------------------------------------------
+
+export const ariveTrackerSchema = z.object({
+  name: z.string(),
+  currentTrackerStatus: z.object({ status: z.string() }),
+});
+
+export const ariveKeyDatesSchema = z.record(z.string(), z.string().nullable());
+
+export const fastPassApiDataSchema = z.object({
+  status: z.string(),
+  payment_option: z.string(),
+  selected_upsells: z.array(z.string()).optional(),
+  total_cents: z.number().optional(),
+  enrolled_at: z.string().optional(),
+});
+export type FastPassApiData = z.output<typeof fastPassApiDataSchema>;
+
+export const smoothExitApiDataSchema = z.object({
+  status: z.string(),
+  payment_option: z.string(),
+  estimated_sale_price: z.number().optional(),
+  fee_cents: z.number().optional(),
+  enrolled_at: z.string().optional(),
+  selected_upsells: z.array(z.string()).optional(),
+  upsell_total_cents: z.number().optional(),
+  upsells_paid: z.boolean().optional(),
+});
+export type SmoothExitApiData = z.output<typeof smoothExitApiDataSchema>;
+
+/**
+ * A deal row as the API serializes it. Postgres DECIMAL columns travel as
+ * text (`price::text`, `commission_pct::text`) — declaring them as strings
+ * here is the whole point (#85).
+ */
+export const apiDealSchema = z.object({
+  id: z.string(),
+  agent_id: z.string(),
+  type: z.enum(["buy", "sell"]),
+  stage: z.string(),
+  health: z.enum(["green", "yellow", "red"]),
+  title: z.string(),
+  address: z.string().nullable(),
+  /** Postgres DECIMAL serialized as text by the API (`price::text`). */
+  price: z.string().nullable(),
+  arive_linked: z.boolean(),
+  arive_loan_id: z.string().nullish(),
+  arive_milestones: z.array(ariveTrackerSchema).nullish(),
+  arive_key_dates: ariveKeyDatesSchema.nullish(),
+  arive_loan_status: z.string().nullish(),
+  notes: z.string().nullish(),
+  fee_status: z.string().optional(),
+  fee_amount_cents: z.number().optional(),
+  fee_paid_at: z.string().nullish(),
+  fast_pass: fastPassApiDataSchema.nullish(),
+  smooth_exit: smoothExitApiDataSchema.nullish(),
+  pre_approved: z.boolean().optional(),
+  baa_signed: z.boolean().optional(),
+  disclosures_complete: z.boolean().optional(),
+  /** Agent-set "Buyer's Progress" step shown on the seller portal (#184). */
+  buyer_status: z.string().nullish(),
+  /** Postgres DECIMAL serialized as text by the API (`commission_pct::text`). */
+  commission_pct: z.string().nullish(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  agent_name: z.string().optional(),
+  agent_email: z.string().optional(),
+  agent_phone: z.string().nullish(),
+  open_task_count: z.number().optional(),
+  overdue_task_count: z.number().optional(),
+});
+export type ApiDeal = z.output<typeof apiDealSchema>;
+
+export const apiDealListSchema = z.array(apiDealSchema);

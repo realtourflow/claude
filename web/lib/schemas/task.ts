@@ -1,0 +1,54 @@
+/**
+ * Task wire contracts (#88): request bodies for task create/patch and the
+ * ApiTask response schema. Client-safe: zod only.
+ *
+ * Semantic checks stay in the handlers (their 400 messages are asserted in
+ * tests): title emptiness, YYYY-MM-DD due-date format, the status
+ * whitelist, and deal-membership of assignees.
+ */
+import { z } from "zod";
+
+/** POST /api/deals/[id]/tasks */
+export const createTaskBodySchema = z.object({
+  title: z.string().nullish(),
+  description: z.string().nullish(),
+  priority: z.string().nullish(),
+  source: z.string().nullish(),
+  stage_context: z.string().nullish(),
+  role: z.string().nullish(),
+  due_date: z.string().nullish(),
+  assigned_to: z.string().nullish(),
+});
+export type CreateTaskBody = z.output<typeof createTaskBodySchema>;
+
+/**
+ * PATCH /api/tasks/[id]/status — accepts any combination of the three
+ * editable fields (#187); "no fields to update" presence check stays in the
+ * handler (zod preserves key presence for JSON inputs).
+ */
+export const patchTaskBodySchema = z.object({
+  status: z.string().optional(),
+  due_date: z.string().nullish(),
+  assigned_to: z.string().nullish(),
+});
+export type PatchTaskBody = z.output<typeof patchTaskBodySchema>;
+
+/** A task row as the API serializes it (`status::text`, `due_date::text`). */
+export const apiTaskSchema = z.object({
+  id: z.string(),
+  deal_id: z.string(),
+  assigned_to: z.string().nullable(),
+  title: z.string(),
+  description: z.string().nullable(),
+  status: z.enum(["pending", "in_progress", "completed", "skipped"]),
+  priority: z.string(),
+  source: z.string(),
+  stage_context: z.string().nullable(),
+  role: z.string(),
+  due_date: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type ApiTask = z.output<typeof apiTaskSchema>;
+
+export const apiTaskListSchema = z.array(apiTaskSchema);

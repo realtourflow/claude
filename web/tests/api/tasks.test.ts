@@ -619,3 +619,84 @@ describe("overdue + deal health from real due dates (#187)", () => {
     expect(done.status).toBe("completed");
   });
 });
+
+describe("POST /api/deals/[id]/tasks — malformed body validation (#88)", () => {
+  async function post(dealId: string, body: string) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body,
+    });
+    return createTaskRoute(req, ctx(dealId));
+  }
+
+  it("400 (not 500) when priority is a number", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(deal.id, JSON.stringify({ title: "Do it", priority: 123 }));
+    expect(res.status).toBe(400);
+    expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(0);
+  });
+
+  it("400 (not 500) when description is a number", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(deal.id, JSON.stringify({ title: "Do it", description: 42 }));
+    expect(res.status).toBe(400);
+    expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(0);
+  });
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(deal.id, "null");
+    expect(res.status).toBe(400);
+  });
+
+  it("400 when assigned_to is a number (was silently ignored)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await post(deal.id, JSON.stringify({ title: "Do it", assigned_to: 99 }));
+    expect(res.status).toBe(400);
+    expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(0);
+  });
+});
+
+describe("PATCH /api/tasks/[id]/status — malformed body validation (#88)", () => {
+  async function patch(taskId: string, body: string) {
+    const req = new Request(`http://localhost/api/tasks/${taskId}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body,
+    });
+    return updateStatusRoute(req, ctx(taskId));
+  }
+
+  it("400 when status is a number", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const res = await patch(task.id, JSON.stringify({ status: 123 }));
+    expect(res.status).toBe(400);
+  });
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const res = await patch(task.id, "null");
+    expect(res.status).toBe(400);
+  });
+});

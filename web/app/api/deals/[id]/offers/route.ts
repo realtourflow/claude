@@ -2,6 +2,8 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasDealAccess } from "@/lib/deals";
+import { createOfferBodySchema } from "@/lib/schemas/offer";
+import { parseBody } from "@/lib/schemas/parse";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -19,14 +21,6 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   })) as Response;
 }
 
-type CreateBody = {
-  buyer_name?: string;
-  offer_price?: number;
-  close_date?: string;
-  contingencies?: string[];
-  agent_notes?: string;
-};
-
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -38,12 +32,11 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     });
     if (!owned) return error("deal not found", 404);
 
-    let body: CreateBody;
-    try {
-      body = (await req.json()) as CreateBody;
-    } catch {
-      return error("invalid request body", 400);
-    }
+    // Schema-validated (#88): a stringly offer_price / bad close_date /
+    // non-array contingencies 400 here — they used to 500 inside Prisma.
+    const parsed = await parseBody(req, createOfferBodySchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
     const offer = await prisma.offers.create({
       data: {
         deal_id: dealId,

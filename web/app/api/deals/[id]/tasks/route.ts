@@ -5,6 +5,8 @@ import { canReadDeal } from "@/lib/deals";
 import { enqueuePushTaskDueEvent } from "@/lib/jobs";
 import { emailTaskAssigned } from "@/lib/notification-email";
 import { isValidDueDateString } from "@/lib/task-due-dates";
+import { createTaskBodySchema } from "@/lib/schemas/task";
+import { parseBody } from "@/lib/schemas/parse";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -50,17 +52,6 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   })) as Response;
 }
 
-type CreateBody = {
-  title?: string;
-  description?: string | null;
-  priority?: string;
-  source?: string;
-  stage_context?: string | null;
-  role?: string;
-  due_date?: string | null;
-  assigned_to?: string | null;
-};
-
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -72,12 +63,11 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     });
     if (!owned) return error("deal not found", 404);
 
-    let body: CreateBody;
-    try {
-      body = (await req.json()) as CreateBody;
-    } catch {
-      return error("invalid request body", 400);
-    }
+    // Schema-validated (#88): a numeric priority/description used to throw
+    // (`.trim()` on a number / Postgres type error) and 500.
+    const parsed = await parseBody(req, createTaskBodySchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
     const title = typeof body.title === "string" ? body.title.trim() : "";
     if (!title) return error("title is required", 400);
     const priority = body.priority?.trim() || "medium";

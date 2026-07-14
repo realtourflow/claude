@@ -6,17 +6,10 @@ import { hasDealAccess } from "@/lib/deals";
 import { enqueuePushTaskDueEvent } from "@/lib/jobs";
 import { isValidDueDateString } from "@/lib/task-due-dates";
 import type { TaskStatus } from "@/lib/stages";
+import { patchTaskBodySchema } from "@/lib/schemas/task";
+import { parseBody } from "@/lib/schemas/parse";
 
 type Ctx = { params: Promise<{ id: string }> };
-
-// PATCH accepts any combination of the three editable fields (#187).
-// `status` keeps its original semantics (any deal member may update it);
-// `due_date` / `assigned_to` are agent-only edits.
-type PatchBody = {
-  status?: string;
-  due_date?: string | null;
-  assigned_to?: string | null;
-};
 
 type TaskRow = {
   id: string;
@@ -50,12 +43,12 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
 
-    let body: PatchBody;
-    try {
-      body = (await req.json()) as PatchBody;
-    } catch {
-      return error("invalid request body", 400);
-    }
+    // Schema-validated (#88). PATCH accepts any combination of the three
+    // editable fields (#187): `status` keeps its original semantics (any
+    // deal member may update it); `due_date` / `assigned_to` are agent-only.
+    const parsed = await parseBody(req, patchTaskBodySchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
 
     const hasStatus = "status" in body;
     const hasDueDate = "due_date" in body;

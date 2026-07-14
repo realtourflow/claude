@@ -4,9 +4,10 @@ import { resolveUserId } from "@/lib/users";
 import { getDealForAgent } from "@/lib/deals";
 import {
   STAGE_LABELS,
-  type DealStage,
   isForwardAdvance,
 } from "@/lib/stages";
+import { dealStagePatchBodySchema } from "@/lib/schemas/deal";
+import { parseBody } from "@/lib/schemas/parse";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
 import { enqueuePushDealClosingEvent } from "@/lib/jobs";
@@ -14,8 +15,6 @@ import { seedStandardContingencies } from "@/lib/contingency-seed";
 import { seedStageAutoTasks } from "@/lib/stage-task-seed";
 
 type Ctx = { params: Promise<{ id: string }> };
-
-type AdvanceBody = { stage?: string };
 
 export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   const { id: dealId } = await ctx.params;
@@ -26,13 +25,11 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
 
-    let body: AdvanceBody;
-    try {
-      body = (await req.json()) as AdvanceBody;
-    } catch {
-      return error("invalid request body", 400);
-    }
-    const newStage = body.stage as DealStage | undefined;
+    // Schema-validated (#88): an unknown stage 400s here — it used to reach
+    // Prisma's enum validation and 500.
+    const parsed = await parseBody(req, dealStagePatchBodySchema);
+    if (!parsed.ok) return parsed.response;
+    const newStage = parsed.data.stage;
     if (!newStage) return error("stage is required", 400);
 
     // Look up current stage + ownership.

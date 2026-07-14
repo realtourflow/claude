@@ -7,17 +7,10 @@ import {
   isSmoothExitUpsellId,
 } from "@/lib/smooth-exit-catalog";
 import { createSmoothExitUpsellCheckout } from "@/lib/stripe";
+import { smoothExitEnrollBodySchema } from "@/lib/schemas/enrollment";
+import { parseBody } from "@/lib/schemas/parse";
 
 type Ctx = { params: Promise<{ id: string }> };
-
-type EnrollBody = {
-  payment_option?: string; // from_proceeds | buyer_concession
-  estimated_sale_price?: number;
-  fee_cents?: number;
-  survey_answers?: unknown; // arbitrary JSON from the survey
-  selected_upsells?: string[];
-  upsell_total_cents?: number; // client-sent; deliberately ignored — the server prices upsells
-};
 
 // POST /deals/:dealId/smoothexit — owning agent or any deal participant (#170:
 // sellers enroll their own deal from the portal pitch; upsells are priced
@@ -46,16 +39,13 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       return error("forbidden", 403);
     }
 
-    let body: EnrollBody;
-    try {
-      body = (await req.json()) as EnrollBody;
-    } catch {
-      return error("invalid request body", 400);
-    }
+    // Schema-validated (#88): typed junk (string prices, numeric
+    // payment_option, non-array upsells) 400s here instead of persisting
+    // into the smooth_exit JSONB.
+    const parsed = await parseBody(req, smoothExitEnrollBodySchema);
+    if (!parsed.ok) return parsed.response;
+    const body = parsed.data;
 
-    if (body.selected_upsells !== undefined && !Array.isArray(body.selected_upsells)) {
-      return error("selected_upsells must be an array", 400);
-    }
     const selectedUpsells = body.selected_upsells ?? [];
 
     // Server-side pricing (#81): the upsell total is computed from the shared
