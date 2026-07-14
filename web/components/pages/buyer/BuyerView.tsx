@@ -1916,7 +1916,7 @@ export default function BuyerView() {
       </div>
 
       {/* Agent's preferred vendor directory */}
-      <VendorDirectory agentId={deal.agentId} />
+      <VendorDirectory dealId={deal.id} />
 
       {/* Agent card */}
       <AgentCard agentName={deal.agentName} agentEmail={deal.agentEmail} agentPhone={deal.agentPhone} />

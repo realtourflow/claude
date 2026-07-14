@@ -1166,7 +1166,7 @@ export default function SellerView() {
       {isFallenThrough && <MessagesTab dealId={deal.id} />}
 
       <JourneyTracker deal={deal} />
-      <VendorDirectory agentId={deal.agentId} />
+      <VendorDirectory dealId={deal.id} />
       <AgentCard agentName={deal.agentName} agentEmail={deal.agentEmail} agentPhone={deal.agentPhone} />
 
       {/* Welcome modal — shown once after onboarding completes */}
