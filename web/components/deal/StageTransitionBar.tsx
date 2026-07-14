@@ -1,6 +1,6 @@
 "use client";
 
-import { Deal, DealStage } from "@/lib/data/mockDeals";
+import { Deal, DealStage } from "@/lib/types";
 import { useProperties } from "@/hooks/useProperties";
 import { ChevronRight, ChevronLeft, AlertTriangle } from "lucide-react";
 import { STAGE_LABELS, STAGE_ORDER, STAGE_GATE } from "@/components/deal/shared";

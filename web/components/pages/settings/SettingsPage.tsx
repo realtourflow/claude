@@ -17,7 +17,7 @@ import {
   VendorCategory,
   VENDOR_CATEGORY_LABELS,
   VENDOR_CATEGORY_ORDER,
-} from "@/lib/data/mockVendors";
+} from "@/lib/vendor-categories";
 import { useVendors, Vendor, VendorInput } from "@/hooks/useVendors";
 import { useSettings } from "@/hooks/useSettings";
 import { useMLSConnection } from "@/hooks/useMLS";

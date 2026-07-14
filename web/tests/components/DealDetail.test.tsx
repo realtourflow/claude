@@ -19,7 +19,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DealDetail, { UploadDocModal, StageAdvanceModal, SellerBuyerStatusCard } from "@/components/pages/agent/DealDetail";
 import { api } from "@/lib/api-client";
-import type { Deal } from "@/lib/data/mockDeals";
+import type { Deal } from "@/lib/types";
 
 const requestUploadUrl = vi.fn();
 const confirmUpload = vi.fn();

@@ -4,8 +4,8 @@ import { useState } from 'react';
 import Link from "next/link";
 import { useAuthStore } from "@/lib/store/authStore";
 import { useSettings } from "@/hooks/useSettings";
-import { Deal } from "@/lib/data/mockDeals";
-import { Task } from "@/lib/data/mockTasks";
+import { Deal, Task } from "@/lib/types";
+import { AGENT_STAGE_LABELS as STAGE_LABELS } from "@/lib/stages";
 import { useDeals } from "@/hooks/useDeals";
 import { useAgentTasks } from "@/hooks/useTasks";
 import { useNotifications, AppNotification } from "@/hooks/useNotifications";
@@ -18,16 +18,6 @@ function formatCurrency(n: number) {
   if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
   return `$${n}`;
 }
-
-const STAGE_LABELS: Record<string, string> = {
-  intake: 'Intake',
-  active_search: 'Active Search',
-  offer_active: 'Offer Active',
-  under_contract: 'Under Contract',
-  pre_close: 'Pre-Close',
-  closing: 'Closing',
-  post_close: 'Post-Close',
-};
 
 const HEALTH_BORDER: Record<string, string> = {
   green: 'border-l-4 border-l-green-400',

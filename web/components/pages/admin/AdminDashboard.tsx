@@ -7,7 +7,7 @@ import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useUsers, AppUser } from "@/hooks/useUsers";
 import { useSystemConfig, usePromoCodes, useAuditLog, SystemConfig, CreatePromoCodeInput } from "@/hooks/useAdmin";
-import { Deal } from "@/lib/data/mockDeals";
+import { Deal } from "@/lib/types";
 import { FormReview } from "@/components/pages/admin/FormReview";
 import {
   AlertTriangle,
@@ -34,31 +34,13 @@ import {
   Copy,
   CheckCheck,
 } from 'lucide-react';
-import { FAST_PASS_UPSELLS } from "@/lib/data/mockFastPass";
-import { NEXT_STEP_LABELS, SMOOTH_EXIT_UPSELLS, nextStepQualifiesForBridge } from "@/lib/data/mockSmoothExit";
+import { FAST_PASS_UPSELLS } from "@/lib/fast-pass-display";
+import { NEXT_STEP_LABELS, SMOOTH_EXIT_UPSELLS, nextStepQualifiesForBridge } from "@/lib/smooth-exit-display";
 import { marketLabel } from "@/lib/markets";
+import { AGENT_STAGE_LABELS as STAGE_LABELS, STAGE_ORDER } from "@/lib/stages";
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
 
-const STAGE_LABELS: Record<string, string> = {
-  intake: 'Intake',
-  active_search: 'Active Search',
-  offer_active: 'Offer Active',
-  under_contract: 'Under Contract',
-  pre_close: 'Pre-Close',
-  closing: 'Closing',
-  post_close: 'Post-Close',
-};
-
-const STAGE_ORDER = [
-  'intake',
-  'active_search',
-  'offer_active',
-  'under_contract',
-  'pre_close',
-  'closing',
-  'post_close',
-];
 
 const HEALTH_DOT: Record<string, string> = {
   green: 'bg-green-400',
@@ -204,7 +186,7 @@ function PipelineOverview({ deals }: { deals: Deal[] }) {
     deals: activeDeals.filter((d) => d.stage === stage),
   })).filter((g) => g.deals.length > 0);
 
-  // Derive agents from deals — no MOCK_USERS needed
+  // Derive agents from deals
   const agentMap = new Map<string, { name: string; email: string; deals: Deal[] }>();
   activeDeals.forEach((d) => {
     if (!d.agentId) return;

@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { VendorCategory } from "@/lib/data/mockVendors";
+import { VendorCategory } from "@/lib/vendor-categories";
 
 export type Vendor = {
   id: string;

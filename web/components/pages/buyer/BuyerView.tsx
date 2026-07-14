@@ -5,8 +5,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
-import { Deal, DealStage } from "@/lib/data/mockDeals";
-import { Task } from "@/lib/data/mockTasks";
+import { Deal, DealStage, Task } from "@/lib/types";
+import { STAGE_ORDER } from "@/lib/stages";
 import { useMyDeals } from "@/hooks/useMyDeals";
 import { useTasks } from "@/hooks/useTasks";
 import { useTaskCompletion } from "@/hooks/useTaskCompletion";
@@ -26,7 +26,7 @@ import PortalDealDocuments from "@/components/portal/PortalDealDocuments";
 import { useDocuments, getSigningUrl, requestUploadUrl, confirmUpload } from "@/hooks/useDocuments";
 import { uploadFileToStorage } from "@/lib/direct-upload";
 import ClientNotifications from "@/components/ClientNotifications";
-import { FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/data/mockFastPass";
+import { FAST_PASS_UPSELLS, FastPassUpsellId } from "@/lib/fast-pass-display";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -39,10 +39,6 @@ const BUYER_STAGE_LABELS: Record<DealStage, string> = {
   closing:        'Closing Day',
   post_close:     'Closed!',
 };
-
-const STAGE_ORDER: DealStage[] = [
-  'intake', 'active_search', 'offer_active', 'under_contract', 'pre_close', 'closing', 'post_close',
-];
 
 const TASK_STATUS_ICON: Record<string, React.ReactNode> = {
   completed:   <CheckCircle2 size={18} className="text-green-500 flex-shrink-0" />,

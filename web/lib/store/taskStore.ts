@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from 'zustand';
-import { Task } from "@/lib/data/mockTasks";
+import { Task } from "@/lib/types";
 
 // NOTE: real task creation persists via POST /api/deals/:id/tasks (see
 // TasksTab in DealDetail). The old client-only addTask/addedTasks/dismissTask

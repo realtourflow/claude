@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Deal } from "@/lib/data/mockDeals";
+import { Deal } from "@/lib/types";
 import { useAuthStore } from "@/lib/store/authStore";
 import { requestUploadUrl, confirmUpload, getDownloadUrl, deleteDocument, sendForSignatureByUserIds, getSigningUrl, refreshDocuSignStatus, setDisclosuresComplete, Document as ApiDocument } from "@/hooks/useDocuments";
 import { uploadFileToStorage } from "@/lib/direct-upload";

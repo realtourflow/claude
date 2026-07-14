@@ -8,7 +8,7 @@ import {
   SMOOTH_EXIT_UPSELLS,
   SmoothExitUpsellId,
   calcSmoothExitUpsellTotal,
-} from "@/lib/data/mockSmoothExit";
+} from "@/lib/smooth-exit-display";
 // Single source of truth for the handoff key — keeps writer and reader in sync.
 import { HANDOFF_KEY } from "./SmoothExitSurvey";
 

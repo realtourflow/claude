@@ -2,8 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { Task } from "@/lib/data/mockTasks";
-import { DealStage } from "@/lib/data/mockDeals";
+import { DealStage, Task } from "@/lib/types";
 import { apiTaskListSchema, type ApiTask } from "@/lib/schemas/task";
 import { checkWire } from "@/lib/schemas/wire";
 

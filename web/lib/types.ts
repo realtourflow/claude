@@ -1,32 +1,87 @@
 /**
- * Shared client-side entity types (#88).
+ * Shared client-side entity types (#88, #89).
  *
- * The authoritative `Deal` / `Task` client types used to live in the
- * mock-data files (`lib/data/mockDeals.ts` / `lib/data/mockTasks.ts`).
- * They now live here; the mock files re-export them so the existing
- * `from "@/lib/data/mockDeals"` import sites keep compiling. Rewriting
- * those import sites to point here is ticket #89's follow-up.
+ * The authoritative `Deal` / `Task` client types live here (they used to
+ * live in the retired mock-data layer under `lib/data/`).
  *
  * Wire (API) request/response contracts live in `lib/schemas/` as zod
  * schemas — this file is the client-side view model layer.
  */
-import type { FastPassEnrollment } from "./data/mockFastPass";
-import type { SmoothExitEnrollment } from "./data/mockSmoothExit";
+import type { DealStage, DealType } from "./stages";
+import type { FastPassUpsellId } from "./fast-pass-catalog";
 
-export type { FastPassEnrollment, SmoothExitEnrollment };
+export type { DealStage, DealType };
 
 export type DealStatus = 'active' | 'fallen_through';
 
-export type DealStage =
-  | 'intake'
-  | 'active_search'
-  | 'offer_active'
-  | 'under_contract'
-  | 'pre_close'
-  | 'closing'
-  | 'post_close';
+// ── Fast Pass enrollment (deal.fastPass) ─────────────────────────────────────
 
-export type DealType = 'buy' | 'sell';
+export type FastPassEnrollmentStatus = 'pending_payment' | 'active' | 'complete' | 'collected';
+
+export type FastPassPaymentOption = 'now' | 'at_closing' | 'seller_concession';
+
+export type FastPassSurveyAnswers = {
+  currentSituation: string;
+  targetMoveDate: string;
+  dateFlexibility: string;
+  moveSize: string;
+  moverPreference: string;
+  packingPreference: string;
+  utilities: string[];
+  notes: string;
+};
+
+export type FastPassEnrollment = {
+  enrolledAt: string;
+  status: FastPassEnrollmentStatus;
+  paymentOption: FastPassPaymentOption;
+  selectedUpsells: FastPassUpsellId[];
+  totalPaid: number;
+  surveyAnswers?: FastPassSurveyAnswers;
+};
+
+// ── Smooth Exit enrollment (deal.smoothExit) ─────────────────────────────────
+
+export type SmoothExitNextStep =
+  | 'buying_local'
+  | 'buying_out_of_state'
+  | 'downsizing'
+  | 'renting'
+  | 'retirement'
+  | 'family'
+  | 'not_sure';
+
+export type SmoothExitPaymentOption = 'from_proceeds' | 'buyer_concession';
+
+export type SmoothExitSurveyAnswers = {
+  nextStep: SmoothExitNextStep;
+  estimatedSalePrice: number;
+  moveOutDate: string;
+  needsBridgeFinancing: boolean;
+  moverPreference: string;
+  wantsDeepClean: boolean;
+  utilities: string[];
+  notes: string;
+};
+
+export type SmoothExitEnrollmentStatus = 'pending' | 'active' | 'complete';
+
+export type SmoothExitEnrollment = {
+  enrolledAt: string;
+  status: SmoothExitEnrollmentStatus;
+  estimatedSalePrice: number;
+  fee: number;
+  paymentOption: SmoothExitPaymentOption;
+  buyingNext: boolean;
+  nextStep?: SmoothExitNextStep;
+  surveyAnswers?: SmoothExitSurveyAnswers;
+  selectedUpsells?: string[];
+  upsellTotalCents?: number;
+  upsellsPaid?: boolean;
+};
+
+// ── Deal view model ──────────────────────────────────────────────────────────
+
 export type DealHealth = 'green' | 'yellow' | 'red';
 export type DealPriority = 'high' | 'medium' | 'low';
 

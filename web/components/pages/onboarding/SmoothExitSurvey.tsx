@@ -4,12 +4,11 @@ import { useState } from 'react';
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, CheckCircle2, Check } from 'lucide-react';
 import {
-  SmoothExitNextStep,
-  SmoothExitPaymentOption,
   NEXT_STEP_LABELS,
   nextStepQualifiesForBridge,
   calcSmoothExitFee,
-} from "@/lib/data/mockSmoothExit";
+} from "@/lib/smooth-exit-display";
+import type { SmoothExitNextStep, SmoothExitPaymentOption } from "@/lib/types";
 import { api } from "@/lib/api-client";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────

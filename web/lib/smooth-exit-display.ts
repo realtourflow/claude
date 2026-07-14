@@ -1,20 +1,17 @@
+// Smooth Exit marketing/display copy shown in the seller onboarding flow and
+// admin dashboard (formerly lib/data/mockSmoothExit.ts — renamed in #89; this
+// is live UI content, not mock data).
+//
+// Enrollment domain types (SmoothExitEnrollment etc.) live in lib/types.ts.
 import {
   SMOOTH_EXIT_UPSELL_PRICE_CENTS,
   type SmoothExitUpsellId,
-} from '../smooth-exit-catalog';
+} from './smooth-exit-catalog';
+import type { SmoothExitNextStep } from './types';
 
 export type { SmoothExitUpsellId };
 
 export const SMOOTH_EXIT_FEE_PERCENT = 0.01; // 1% of sale price
-
-export type SmoothExitNextStep =
-  | 'buying_local'
-  | 'buying_out_of_state'
-  | 'downsizing'
-  | 'renting'
-  | 'retirement'
-  | 'family'
-  | 'not_sure';
 
 export const NEXT_STEP_LABELS: Record<SmoothExitNextStep, string> = {
   buying_local: 'Buying another home (local)',
@@ -39,35 +36,6 @@ export const SMOOTH_EXIT_FEATURES: string[] = [
   'Title company communication through closing',
   'Proceeds wiring confirmation and closing-day support',
 ];
-
-export type SmoothExitPaymentOption = 'from_proceeds' | 'buyer_concession';
-
-export type SmoothExitSurveyAnswers = {
-  nextStep: SmoothExitNextStep;
-  estimatedSalePrice: number;
-  moveOutDate: string;
-  needsBridgeFinancing: boolean;
-  moverPreference: string;
-  wantsDeepClean: boolean;
-  utilities: string[];
-  notes: string;
-};
-
-export type SmoothExitEnrollmentStatus = 'pending' | 'active' | 'complete';
-
-export type SmoothExitEnrollment = {
-  enrolledAt: string;
-  status: SmoothExitEnrollmentStatus;
-  estimatedSalePrice: number;
-  fee: number;
-  paymentOption: SmoothExitPaymentOption;
-  buyingNext: boolean;
-  nextStep?: SmoothExitNextStep;
-  surveyAnswers?: SmoothExitSurveyAnswers;
-  selectedUpsells?: string[];
-  upsellTotalCents?: number;
-  upsellsPaid?: boolean;
-};
 
 export function calcSmoothExitFee(salePrice: number): number {
   return Math.round(salePrice * SMOOTH_EXIT_FEE_PERCENT);

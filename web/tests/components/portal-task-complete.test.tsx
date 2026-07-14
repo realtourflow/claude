@@ -18,7 +18,7 @@ import type { Mock } from "vitest";
 import type { ReactElement } from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Task } from "@/lib/data/mockTasks";
+import type { Task } from "@/lib/types";
 import type { MyDeal } from "@/hooks/useMyDeals";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────

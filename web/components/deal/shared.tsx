@@ -11,27 +11,11 @@
 
 import { useState } from "react";
 import { CheckCircle2, Loader2, AlertCircle, Circle } from "lucide-react";
-import { Deal, DealStage } from "@/lib/data/mockDeals";
+import { Deal, DealStage } from "@/lib/types";
 
-export const STAGE_LABELS: Record<DealStage, string> = {
-  intake: 'Intake',
-  active_search: 'Active Search',
-  offer_active: 'Offer Active',
-  under_contract: 'Under Contract',
-  pre_close: 'Pre-Close',
-  closing: 'Closing',
-  post_close: 'Post-Close',
-};
-
-export const STAGE_ORDER: DealStage[] = [
-  'intake',
-  'active_search',
-  'offer_active',
-  'under_contract',
-  'pre_close',
-  'closing',
-  'post_close',
-];
+// Stage constants live in lib/stages.ts (#89); re-exported here for the
+// deal tab/modal modules that already import them from this file.
+export { AGENT_STAGE_LABELS as STAGE_LABELS, STAGE_ORDER } from "@/lib/stages";
 
 export const STAGE_DRAFT_MESSAGE: Partial<Record<DealStage, (deal: Deal) => string>> = {
   active_search: (d) => d.type === 'buy'

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Deal } from "@/lib/data/mockDeals";
+import { Deal } from "@/lib/types";
 import { useAuthStore } from "@/lib/store/authStore";
 import { usePermission } from "@/permissions/usePermission";
 import { PERMISSIONS } from "@/permissions/permissions";

@@ -1,6 +1,6 @@
 "use client";
 
-import { Deal } from "@/lib/data/mockDeals";
+import { Deal } from "@/lib/types";
 import { MapPin, Calendar, Clock, CheckCircle2, Circle, Zap } from "lucide-react";
 import { STAGE_LABELS, HEALTH_BORDER, HEALTH_BADGE, ClosingDaysBadge } from "@/components/deal/shared";
 

@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DocumentsTab } from "@/components/pages/agent/DealDetail";
-import type { Deal } from "@/lib/data/mockDeals";
+import type { Deal } from "@/lib/types";
 import type { Document as ApiDocument } from "@/hooks/useDocuments";
 
 const getSigningUrl = vi.fn();

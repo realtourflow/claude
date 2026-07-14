@@ -6,11 +6,11 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { CheckCircle2, ChevronRight, ChevronLeft, Check } from 'lucide-react';
 import {
   FastPassUpsellId,
-  FastPassPaymentOption,
   FAST_PASS_UPSELLS,
   calcFastPassTotal,
   FAST_PASS_BASE_PRICE,
-} from "@/lib/data/mockFastPass";
+} from "@/lib/fast-pass-display";
+import type { FastPassPaymentOption } from "@/lib/types";
 import { api } from "@/lib/api-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────

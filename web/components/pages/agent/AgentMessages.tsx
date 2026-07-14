@@ -2,17 +2,8 @@
 
 import Link from "next/link";
 import { useDeals } from "@/hooks/useDeals";
+import { AGENT_STAGE_LABELS as STAGE_LABELS } from "@/lib/stages";
 import { MessageSquare, ArrowRight, MapPin } from 'lucide-react';
-
-const STAGE_LABELS: Record<string, string> = {
-  intake: 'Intake',
-  active_search: 'Active Search',
-  offer_active: 'Offer Active',
-  under_contract: 'Under Contract',
-  pre_close: 'Pre-Close',
-  closing: 'Closing',
-  post_close: 'Post-Close',
-};
 
 export default function AgentMessages() {
   const { deals, loading, error } = useDeals();

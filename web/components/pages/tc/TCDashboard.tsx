@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuthStore } from "@/lib/store/authStore";
-import { Deal, LoanMilestones } from "@/lib/data/mockDeals";
+import { Deal, LoanMilestones } from "@/lib/types";
+import { AGENT_STAGE_LABELS as STAGE_LABELS } from "@/lib/stages";
 import { useDeals } from "@/hooks/useDeals";
 import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType } from "@/hooks/useContingencies";
 import { AddContingencyForm } from "@/components/contingencies/AddContingencyForm";
@@ -60,16 +61,6 @@ const DOC_STATUS: Record<DocStatus, { label: string; style: string; dot: string;
 };
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
-
-const STAGE_LABELS: Record<string, string> = {
-  intake:           'Intake',
-  active_search:    'Active Search',
-  offer_active:     'Offer Active',
-  under_contract:   'Under Contract',
-  pre_close:        'Pre-Close',
-  closing:          'Closing',
-  post_close:       'Post-Close',
-};
 
 const HEALTH_BORDER: Record<string, string> = {
   green:  'border-l-green-400',

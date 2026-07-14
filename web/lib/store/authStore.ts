@@ -2,9 +2,17 @@
 
 import { create } from 'zustand';
 import { GroupId } from "@/permissions/groups";
-import { MockUser, MOCK_USERS } from "@/lib/data/mockUsers";
 
-export type AppUser = MockUser;
+/** The signed-in identity, populated from Auth0 via POST /api/users/sync. */
+export type AppUser = {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  groupId: GroupId;
+  role: string;
+  onboardingComplete: boolean;
+};
 
 const ROLE_TO_GROUP: Record<string, GroupId> = {
   agent: 'agent',
@@ -29,7 +37,6 @@ type AuthStore = {
   isLoaded: boolean;
   syncError: string | null;
   setFromAuth0: (id: string, name: string, email: string, role: string, onboardingComplete: boolean, avatar?: string) => void;
-  setActiveUser: (userId: string) => void;
   setSyncError: (err: string) => void;
   markOnboardingComplete: () => void;
 };
@@ -49,14 +56,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
         avatar: avatar || `https://i.pravatar.cc/100?u=${encodeURIComponent(id)}`,
         groupId,
         role: ROLE_DISPLAY[role] ?? role,
-        dealIds: [],
         onboardingComplete,
       },
     });
-  },
-  setActiveUser: (userId: string) => {
-    const user = MOCK_USERS.find((u) => u.id === userId);
-    if (user) set({ activeUser: user, isLoaded: true });
   },
   setSyncError: (err: string) => set({ syncError: err, isLoaded: true }),
   markOnboardingComplete: () =>
