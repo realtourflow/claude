@@ -137,6 +137,75 @@ describe("POST /api/deals", () => {
     const res = await createDealRoute(req);
     expect(res.status).toBe(400);
   });
+
+  it("403 when a buyer tries to create a deal — nothing written (#274)", async () => {
+    await createUser({ role: "buyer", auth0_id: "auth0|buyer-274" });
+    const req = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|buyer-274", ["buyer"]),
+      },
+      body: JSON.stringify({ title: "Sneaky buyer deal", type: "buy" }),
+    });
+    const res = await createDealRoute(req);
+    expect(res.status).toBe(403);
+    // No agent-owned deal was created for the non-agent caller.
+    expect(await prisma.deals.count()).toBe(0);
+  });
+
+  it("agent still creates a deal — happy path unchanged (#274)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|agent-274" });
+    const req = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|agent-274", ["agent"]),
+      },
+      body: JSON.stringify({ title: "456 Oak", type: "sell" }),
+    });
+    const res = await createDealRoute(req);
+    expect(res.status).toBe(201);
+    expect(await prisma.deals.count()).toBe(1);
+  });
+
+  it("admin may create a deal; tc and lending_partner are rejected 403 (#274)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin-274" });
+    const adminReq = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|admin-274", ["admin"]),
+      },
+      body: JSON.stringify({ title: "Admin-created deal", type: "buy" }),
+    });
+    expect((await createDealRoute(adminReq)).status).toBe(201);
+
+    await createUser({ role: "tc", auth0_id: "auth0|tc-274" });
+    const tcReq = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|tc-274", ["tc"]),
+      },
+      body: JSON.stringify({ title: "TC deal", type: "buy" }),
+    });
+    expect((await createDealRoute(tcReq)).status).toBe(403);
+
+    await createUser({ role: "lending_partner", auth0_id: "auth0|lp-274" });
+    const lpReq = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|lp-274", ["lending_partner"]),
+      },
+      body: JSON.stringify({ title: "Lending partner deal", type: "buy" }),
+    });
+    expect((await createDealRoute(lpReq)).status).toBe(403);
+
+    // Only the admin's deal made it into the table.
+    expect(await prisma.deals.count()).toBe(1);
+  });
 });
 
 describe("GET /api/deals/[id]", () => {
