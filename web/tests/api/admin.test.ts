@@ -8,6 +8,7 @@ import {
   POST as createPromoRoute,
 } from "@/app/api/admin/promo-codes/route";
 import { DELETE as deletePromoRoute } from "@/app/api/admin/promo-codes/[id]/route";
+import { POST as reviewBrokerageRoute } from "@/app/api/admin/brokerages/[id]/route";
 import { GET as auditLogRoute } from "@/app/api/admin/audit-log/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
@@ -254,5 +255,125 @@ describe("Audit log", () => {
     // A row with no deal LEFT JOINs to a null title (not an error).
     expect(byType["no_deal"].deal_title).toBeNull();
     expect(byType["no_deal"].actor_email).toBe("adminz@example.com");
+  });
+});
+
+describe("Brokerage review audit", () => {
+  async function pendingBrokerage(name: string, suggestedBy?: string) {
+    return prisma.brokerages.create({
+      data: { name, status: "pending", suggested_by: suggestedBy ?? null },
+      select: { id: true, name: true },
+    });
+  }
+
+  it("approve writes a brokerage_approve audit row with actor + target", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|agent" });
+    const b = await pendingBrokerage("Keller Williams Summit", agent.id);
+
+    const res = await reviewBrokerageRoute(
+      new Request(`http://localhost/api/admin/brokerages/${b.id}`, {
+        method: "POST",
+        headers: {
+          authorization: await authHeader("auth0|admin", ["admin"]),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "approve" }),
+      }),
+      { params: Promise.resolve({ id: b.id }) }
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe("active");
+
+    const rows = await prisma.audit_log.findMany({
+      where: { event_type: "brokerage_approve" },
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].target_id).toBe(b.id);
+    expect(rows[0].actor_id).toBe(admin.id);
+  });
+
+  it("reject writes a brokerage_reject audit row with actor + target", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const b = await pendingBrokerage("Bogus Brokerage LLC");
+
+    const res = await reviewBrokerageRoute(
+      new Request(`http://localhost/api/admin/brokerages/${b.id}`, {
+        method: "POST",
+        headers: {
+          authorization: await authHeader("auth0|admin", ["admin"]),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ action: "reject" }),
+      }),
+      { params: Promise.resolve({ id: b.id }) }
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe("rejected");
+
+    const rows = await prisma.audit_log.findMany({
+      where: { event_type: "brokerage_reject" },
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].target_id).toBe(b.id);
+    expect(rows[0].actor_id).toBe(admin.id);
+  });
+
+  it("audit-log endpoint filters on the two new brokerage event types", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const headers = {
+      authorization: await authHeader("auth0|admin", ["admin"]),
+      "content-type": "application/json",
+    };
+    const approved = await pendingBrokerage("Approve Co");
+    const rejected = await pendingBrokerage("Reject Co");
+
+    await reviewBrokerageRoute(
+      new Request(`http://localhost/api/admin/brokerages/${approved.id}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action: "approve" }),
+      }),
+      { params: Promise.resolve({ id: approved.id }) }
+    );
+    await reviewBrokerageRoute(
+      new Request(`http://localhost/api/admin/brokerages/${rejected.id}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action: "reject" }),
+      }),
+      { params: Promise.resolve({ id: rejected.id }) }
+    );
+
+    type AuditBody = {
+      entries: { event_type: string; target_id: string | null }[];
+      total: number;
+    };
+
+    const approveRes = await auditLogRoute(
+      new Request(
+        "http://localhost/api/admin/audit-log?event_type=brokerage_approve",
+        { headers: { authorization: await authHeader("auth0|admin", ["admin"]) } }
+      )
+    );
+    expect(approveRes.status).toBe(200);
+    const approveBody = (await approveRes.json()) as AuditBody;
+    expect(approveBody.total).toBe(1);
+    expect(approveBody.entries.length).toBe(1);
+    expect(approveBody.entries[0].event_type).toBe("brokerage_approve");
+    expect(approveBody.entries[0].target_id).toBe(approved.id);
+
+    const rejectRes = await auditLogRoute(
+      new Request(
+        "http://localhost/api/admin/audit-log?event_type=brokerage_reject",
+        { headers: { authorization: await authHeader("auth0|admin", ["admin"]) } }
+      )
+    );
+    expect(rejectRes.status).toBe(200);
+    const rejectBody = (await rejectRes.json()) as AuditBody;
+    expect(rejectBody.total).toBe(1);
+    expect(rejectBody.entries.length).toBe(1);
+    expect(rejectBody.entries[0].event_type).toBe("brokerage_reject");
+    expect(rejectBody.entries[0].target_id).toBe(rejected.id);
   });
 });
