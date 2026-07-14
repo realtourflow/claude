@@ -5,6 +5,7 @@ import { PATCH as activateRoute } from "@/app/api/users/[id]/activate/route";
 import { PATCH as deactivateRoute } from "@/app/api/users/[id]/deactivate/route";
 import { GET as listDealsRoute } from "@/app/api/deals/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
+import { isEmailUniqueViolation } from "@/lib/users";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
@@ -125,6 +126,50 @@ describe("POST /api/users/sync", () => {
     const body = (await res.json()) as { role: string; name: string };
     expect(body.role).toBe("agent");
     expect(body.name).toBe("Invited User");
+  });
+
+  // #277 — a second Auth0 identity presenting an already-used email must get a
+  // clean, recoverable 409, not the opaque 500 the raw unique violation caused.
+  it("returns 409 when a new sub presents an email already used by another user", async () => {
+    // An existing account already owns dup@example.com under a different sub.
+    await createUser({
+      auth0_id: "auth0|original-owner",
+      email: "dup@example.com",
+      name: "Original Owner",
+      role: "agent",
+    });
+    // syncBody authenticates as auth0|new-agent — a brand-new Auth0 identity —
+    // and tries to claim the same email.
+    const res = await syncRoute(
+      await syncBody({ email: "dup@example.com", name: "Impostor" })
+    );
+    expect(res.status).toBe(409);
+    const text = (await res.text()).toLowerCase();
+    expect(text).toContain("already exists");
+  });
+
+  // #277 Case 2 (unchanged happy path): a new sub + a fresh email still creates.
+  it("creates the user when both the sub and the email are new", async () => {
+    const res = await syncRoute(
+      await syncBody({ email: "fresh@example.com", name: "Fresh Agent" })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { email: string };
+    expect(body.email).toBe("fresh@example.com");
+  });
+
+  // #277 Case 3 (regression): re-syncing the SAME sub with its own email must
+  // update, never 409 — ON CONFLICT (auth0_id) owns that row's email, so the
+  // email-unique guard must not fire on a legitimate re-sync.
+  it("re-syncs an existing sub with its own email without a collision", async () => {
+    const first = await syncRoute(
+      await syncBody({ email: "keep@example.com", name: "Keeper" })
+    );
+    expect(first.status).toBe(200);
+    const second = await syncRoute(
+      await syncBody({ email: "keep@example.com", name: "Keeper Renamed" })
+    );
+    expect(second.status).toBe(200);
   });
 });
 
@@ -369,5 +414,77 @@ describe("GET /api/users — market + brokerage (admin)", () => {
     const row = rows.find((r) => r.id === agent.id);
     expect(row?.market).toBe("BALDWIN_GULF_COAST");
     expect(row?.brokerage).toBe("RE/MAX");
+  });
+});
+
+// #277 — the collision detector is pure, so exercise every error shape it must
+// recognize directly (the live DB only ever produces the P2010 branch below).
+describe("isEmailUniqueViolation", () => {
+  it("detects the real P2010 raw-query shape upsertUser throws", () => {
+    const err = {
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          name: "DriverAdapterError",
+          cause: {
+            originalCode: "23505",
+            kind: "UniqueConstraintViolation",
+            constraint: { fields: ["email"] },
+            originalMessage:
+              'duplicate key value violates unique constraint "users_email_key"',
+          },
+        },
+      },
+      message:
+        'Raw query failed. Code: `23505`. Message: `duplicate key value violates unique constraint "users_email_key"`',
+    };
+    expect(isEmailUniqueViolation(err)).toBe(true);
+  });
+
+  it("ignores a unique violation on a non-email field (e.g. auth0_id)", () => {
+    const err = {
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          cause: {
+            originalCode: "23505",
+            kind: "UniqueConstraintViolation",
+            constraint: { fields: ["auth0_id"] },
+          },
+        },
+      },
+    };
+    expect(isEmailUniqueViolation(err)).toBe(false);
+  });
+
+  it("detects a model-style P2002 targeting email", () => {
+    expect(isEmailUniqueViolation({ code: "P2002", meta: { target: ["email"] } })).toBe(true);
+  });
+
+  it("ignores a P2002 targeting a different field", () => {
+    expect(
+      isEmailUniqueViolation({ code: "P2002", meta: { target: ["auth0_id"] } })
+    ).toBe(false);
+  });
+
+  it("detects a bare pg 23505 passthrough on the email constraint", () => {
+    expect(isEmailUniqueViolation({ code: "23505", constraint: "users_email_key" })).toBe(true);
+  });
+
+  it("falls back to the message when the nested meta shape is absent", () => {
+    const err = {
+      code: "P2010",
+      message:
+        'Raw query failed. Code: `23505`. Message: `duplicate key value violates unique constraint "users_email_key"`',
+    };
+    expect(isEmailUniqueViolation(err)).toBe(true);
+  });
+
+  it("returns false for unrelated errors and non-objects", () => {
+    expect(isEmailUniqueViolation(new Error("connection refused"))).toBe(false);
+    expect(isEmailUniqueViolation({ code: "P2025" })).toBe(false);
+    expect(isEmailUniqueViolation(null)).toBe(false);
+    expect(isEmailUniqueViolation("boom")).toBe(false);
+    expect(isEmailUniqueViolation(undefined)).toBe(false);
   });
 });
