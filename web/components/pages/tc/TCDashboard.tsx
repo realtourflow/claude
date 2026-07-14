@@ -228,7 +228,8 @@ type DeadlineEntry = {
   source: 'task' | 'checklist' | 'contingency';
 };
 
-function Deadlines() {
+// Exported for tests (tests/components/TCDeadlines.test.tsx).
+export function Deadlines() {
   const deals            = useMyDeals();
   const { tasks }        = useAgentTasks();
   const allContingencies = useAllContingenciesForDeals(deals.map((d) => d.id));

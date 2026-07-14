@@ -143,7 +143,7 @@ const ADMIN_NAV = [
   { label: 'Settings', icon: Settings, href: '/admin/settings' },
 ];
 
-const TC_NAV = [
+export const TC_NAV = [
   { label: 'Overview',         icon: FolderOpen,    href: '/tc'              },
   { label: 'Documents',        icon: FileText,      href: '/tc/documents'    },
   { label: 'Loan Milestones',  icon: ClipboardList, href: '/tc/disclosures'  },
