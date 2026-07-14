@@ -12,10 +12,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { MyDeal } from "@/hooks/useMyDeals";
 import type { Offer } from "@/hooks/useOffers";
+import type { AppNotification } from "@/hooks/useNotifications";
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 vi.mock("next/navigation", () => ({
@@ -65,6 +66,19 @@ vi.mock("@/hooks/useOffers", () => ({
     refresh: vi.fn(),
     addOffer: vi.fn(),
     removeOffer: vi.fn(),
+  }),
+}));
+
+// The notifications source (#294) — each case controls what the bell returns and
+// inspects the per-notification markRead spy.
+let mockNotifications: AppNotification[] = [];
+const mockMarkRead = vi.fn();
+vi.mock("@/hooks/useNotifications", () => ({
+  useNotifications: () => ({
+    notifications: mockNotifications,
+    markRead: mockMarkRead,
+    markAllRead: vi.fn(),
+    refresh: vi.fn(),
   }),
 }));
 
@@ -120,6 +134,19 @@ function makeOffer(overrides: Partial<Offer> = {}): Offer {
   };
 }
 
+function makeNotif(overrides: Partial<AppNotification> = {}): AppNotification {
+  return {
+    id: "notif-1",
+    title: "New message from your agent",
+    body: "Take a look when you get a chance.",
+    type: "new_message",
+    dealId: DEAL_ID,
+    read: false,
+    createdAt: "just now",
+    ...overrides,
+  };
+}
+
 function renderSeller(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
@@ -128,6 +155,8 @@ function renderSeller(ui: ReactElement) {
 beforeEach(() => {
   sessionStorage.clear();
   mockOffers = [];
+  mockNotifications = [];
+  mockMarkRead.mockClear();
   dealOverrides = {};
 });
 
@@ -224,5 +253,51 @@ describe("SellerView at under_contract — Buyer's Progress from the deal payloa
 
     expect(screen.getByText(/your agent will update the buyer/i)).toBeTruthy();
     expect(screen.queryByText("Current")).toBeNull();
+  });
+});
+
+// ─── Messages tab unread badge (#294) ────────────────────────────────────────
+// The Messages tab badge was hard-coded to msgCount={0}, so a seller never saw
+// an unread-message count. Unread-for-a-deal is derived from the notifications
+// the bell already loads: type === 'new_message' && dealId === deal.id && !read.
+// Opening the Messages tab marks exactly those notifications read.
+
+describe("SellerView — Messages tab unread badge (#294)", () => {
+  it("shows the real unread new_message count for this deal on the Messages tab", () => {
+    mockNotifications = [makeNotif()]; // one unread new_message for this deal
+    renderSeller(<SellerView />);
+
+    const messagesTab = screen.getByRole("button", { name: /messages/i });
+    expect(messagesTab).toHaveTextContent("1");
+  });
+
+  it("does not badge the Messages tab when there are no unread messages for this deal", () => {
+    mockNotifications = [
+      makeNotif({ id: "read-msg", read: true }),                  // already read
+      makeNotif({ id: "other-deal", dealId: "some-other-deal" }), // different deal
+      makeNotif({ id: "other-type", type: "task_assigned" }),     // not a message
+    ];
+    renderSeller(<SellerView />);
+
+    const messagesTab = screen.getByRole("button", { name: /messages/i });
+    expect(messagesTab).not.toHaveTextContent("1");
+  });
+
+  it("marks only this deal's unread new_message notifications read when the Messages tab opens", () => {
+    mockNotifications = [
+      makeNotif({ id: "this-msg", type: "new_message", dealId: DEAL_ID, read: false }),
+      makeNotif({ id: "other-deal-msg", type: "new_message", dealId: "some-other-deal", read: false }),
+      makeNotif({ id: "other-type", type: "task_assigned", dealId: DEAL_ID, read: false }),
+      makeNotif({ id: "already-read", type: "new_message", dealId: DEAL_ID, read: true }),
+    ];
+    renderSeller(<SellerView />);
+
+    fireEvent.click(screen.getByRole("button", { name: /messages/i }));
+
+    expect(mockMarkRead).toHaveBeenCalledWith("this-msg");
+    expect(mockMarkRead).not.toHaveBeenCalledWith("other-deal-msg");
+    expect(mockMarkRead).not.toHaveBeenCalledWith("other-type");
+    expect(mockMarkRead).not.toHaveBeenCalledWith("already-read");
+    expect(mockMarkRead).toHaveBeenCalledTimes(1);
   });
 });

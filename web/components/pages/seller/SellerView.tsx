@@ -8,6 +8,7 @@ import { STAGE_ORDER } from "@/lib/stages";
 import ClientNotifications from "@/components/ClientNotifications";
 import { BUYER_STATUS_STEPS } from "@/lib/buyer-status";
 import { useMyDeals } from "@/hooks/useMyDeals";
+import { useNotifications } from "@/hooks/useNotifications";
 import PortalDealDocuments from "@/components/portal/PortalDealDocuments";
 import { useTasks } from "@/hooks/useTasks";
 import { useTaskCompletion } from "@/hooks/useTaskCompletion";
@@ -982,7 +983,8 @@ export default function SellerView() {
     return false;
   });
 
-  // Notifications are pulled via <ClientNotifications /> which uses useNotifications hook
+  // Notifications feed both <ClientNotifications /> and the Messages tab badge below.
+  const { notifications, markRead } = useNotifications();
   const { deals, loading: dealsLoading, error: dealsError, refresh: refreshDeals } = useMyDeals();
   const deal = deals.find((d) => d.type === 'sell');
   const { tasks, refresh: refreshTasks } = useTasks(deal?.id ?? '');
@@ -1031,6 +1033,17 @@ export default function SellerView() {
   const firstName = activeUser?.name.split(' ')[0] ?? 'there';
   const isFallenThrough = deal.status === 'fallen_through';
 
+  // Unread "new_message" notifications for THIS deal drive the Messages tab badge.
+  const unreadMessageNotifications = notifications.filter(
+    (n) => n.dealId === deal.id && n.type === 'new_message' && !n.read,
+  );
+  const handleTabChange = (t: Tab) => {
+    setActiveTab(t);
+    // Opening Messages clears the badge — mark this deal's unread messages read.
+    if (t === 'messages') {
+      unreadMessageNotifications.forEach((n) => { void markRead(n.id); });
+    }
+  };
 
   return (
     <div className="mx-auto max-w-lg space-y-4 pb-10">
@@ -1115,9 +1128,9 @@ export default function SellerView() {
         <>
           <TabBar
             active={activeTab}
-            onChange={setActiveTab}
+            onChange={handleTabChange}
             taskCount={openTasks.length}
-            msgCount={0}
+            msgCount={unreadMessageNotifications.length}
           />
           {activeTab === 'tasks' && (
             <div className="space-y-2">
