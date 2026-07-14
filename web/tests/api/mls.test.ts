@@ -7,6 +7,7 @@ import { GET as searchRoute } from "@/app/api/deals/[id]/listings/search/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import {
   setSimplyretsForTesting,
+  SimplyRetsAuthError,
   type SimplyRetsClient,
   type SearchParams,
 } from "@/lib/simplyrets";
@@ -146,10 +147,12 @@ describe("PATCH /api/me/mls", () => {
     expect(row?.mls_secret).toBe("real-secret");
   });
 
-  it("validates creds against SimplyRETS before saving; 400 + nothing saved when invalid", async () => {
+  it("real 401 (SimplyRetsAuthError) → 400 invalid + nothing saved", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // A genuine auth rejection is a typed SimplyRetsAuthError (what the real
+    // client throws on a 401) — this must still be reported as invalid creds.
     setSimplyretsForTesting(
-      fakeClient({ throwErr: new Error("invalid MLS credentials") })
+      fakeClient({ throwErr: new SimplyRetsAuthError("invalid MLS credentials") })
     );
 
     const res = await patchMlsRoute(
@@ -163,6 +166,7 @@ describe("PATCH /api/me/mls", () => {
       })
     );
     expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/invalid/i);
 
     const row = await prisma.users.findUnique({
       where: { id: agent.id },
@@ -170,6 +174,73 @@ describe("PATCH /api/me/mls", () => {
     });
     expect(row?.mls_key).toBeNull();
     expect(row?.mls_secret).toBeNull();
+  });
+
+  it("a transient outage (5xx/timeout) → 502 temporarily-unavailable, NOT 400 invalid (#309)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    void agent;
+    // A 5xx / network / timeout surfaces as a generic (non-auth) Error. The
+    // agent's credentials may be perfectly valid — they must not be told they
+    // are wrong just because SimplyRETS is down.
+    setSimplyretsForTesting(
+      fakeClient({
+        throwErr: new Error("simplyrets: 503 Service Unavailable"),
+      })
+    );
+
+    const res = await patchMlsRoute(
+      new Request("http://localhost/api/me/mls", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        // Valid-shaped credentials — the only problem is the outage.
+        body: JSON.stringify({ key: "real-key", secret: "real-secret" }),
+      })
+    );
+
+    // Distinct from the 400 invalid-credentials path.
+    expect(res.status).toBe(502);
+    const text = await res.text();
+    expect(text).not.toMatch(/invalid/i);
+    expect(text).toMatch(/unavailable|try again/i);
+  });
+
+  it("an outage does NOT clear or overwrite previously-saved creds (#309)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Agent already has working creds on file.
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { mls_key: "old-key", mls_secret: "old-secret" },
+    });
+
+    // They try to update to new creds while SimplyRETS is having an outage.
+    setSimplyretsForTesting(
+      fakeClient({
+        throwErr: new Error("simplyrets: 500 Internal Server Error"),
+      })
+    );
+
+    const res = await patchMlsRoute(
+      new Request("http://localhost/api/me/mls", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({ key: "new-key", secret: "new-secret" }),
+      })
+    );
+    expect(res.status).toBe(502);
+
+    // Prior saved state is untouched — not cleared, not overwritten.
+    const row = await prisma.users.findUnique({
+      where: { id: agent.id },
+      select: { mls_key: true, mls_secret: true },
+    });
+    expect(row?.mls_key).toBe("old-key");
+    expect(row?.mls_secret).toBe("old-secret");
   });
 
   it("empty key/secret disconnects: creds nulled, connected:false (no validation call)", async () => {

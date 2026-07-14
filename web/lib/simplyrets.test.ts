@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { DefaultSimplyRetsClient, type FetchLike } from "@/lib/simplyrets";
+import {
+  DefaultSimplyRetsClient,
+  SimplyRetsAuthError,
+  type FetchLike,
+} from "@/lib/simplyrets";
 
 // Exercise the REAL DefaultSimplyRetsClient (the new code) with an injected
 // fetch, so the Basic-auth header, query-string building, and response→MLSListing
@@ -90,18 +94,27 @@ describe("DefaultSimplyRetsClient.search", () => {
     ]);
   });
 
-  it("throws 'invalid MLS credentials' on 401", async () => {
+  it("throws a typed SimplyRetsAuthError on 401", async () => {
     const fakeFetch: FetchLike = async () =>
       new Response("unauthorized", { status: 401, statusText: "Unauthorized" });
     const client = new DefaultSimplyRetsClient(fakeFetch);
+    // Message preserved for humans...
     await expect(client.search("k", "s", {})).rejects.toThrow(/invalid MLS credentials/);
+    // ...and typed so callers can branch on it (issue #309).
+    await expect(client.search("k", "s", {})).rejects.toBeInstanceOf(
+      SimplyRetsAuthError
+    );
   });
 
-  it("throws on any other non-2xx", async () => {
+  it("throws a generic (non-auth) error on any other non-2xx", async () => {
     const fakeFetch: FetchLike = async () =>
       new Response("boom", { status: 500, statusText: "Internal Server Error" });
     const client = new DefaultSimplyRetsClient(fakeFetch);
     await expect(client.search("k", "s", {})).rejects.toThrow(/simplyrets: 500/);
+    // A 5xx is an outage, NOT bad credentials — must not be a SimplyRetsAuthError.
+    await expect(client.search("k", "s", {})).rejects.not.toBeInstanceOf(
+      SimplyRetsAuthError
+    );
   });
 
   it("honors a custom status + limit", async () => {
