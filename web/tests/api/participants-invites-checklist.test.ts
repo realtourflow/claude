@@ -28,6 +28,7 @@ import { POST as claimInviteRoute } from "@/app/api/invites/[token]/claim/route"
 import { GET as getInviteRoleRoute } from "@/app/api/invites/role/route";
 import { GET as myDealsRoute } from "@/app/api/me/deals/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
+import { resetEnvForTesting } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
@@ -424,16 +425,27 @@ describe("Deal invites", () => {
   });
 
   it("/invites/role returns role from users table or open invite, else ''", async () => {
-    await createUser({ email: "existing@example.com", role: "admin" });
-    const r1 = await getInviteRoleRoute(
-      new Request("http://localhost/api/invites/role?email=existing@example.com")
-    );
-    expect((await r1.json()).role).toBe("admin");
+    // The route is now shared-secret gated (#271); the Auth0 Post-Login Action
+    // sends the token in the x-invite-role-token header. Set it just for this
+    // lookup test and restore env afterward.
+    const TOKEN = "test-invite-role-secret";
+    process.env.INVITE_ROLE_SECRET = TOKEN;
+    resetEnvForTesting();
+    const withToken = (email: string) =>
+      new Request(`http://localhost/api/invites/role?email=${email}`, {
+        headers: { "x-invite-role-token": TOKEN },
+      });
+    try {
+      await createUser({ email: "existing@example.com", role: "admin" });
+      const r1 = await getInviteRoleRoute(withToken("existing@example.com"));
+      expect((await r1.json()).role).toBe("admin");
 
-    const r2 = await getInviteRoleRoute(
-      new Request("http://localhost/api/invites/role?email=nobody@example.com")
-    );
-    expect((await r2.json()).role).toBe("");
+      const r2 = await getInviteRoleRoute(withToken("nobody@example.com"));
+      expect((await r2.json()).role).toBe("");
+    } finally {
+      delete process.env.INVITE_ROLE_SECRET;
+      resetEnvForTesting();
+    }
   });
 });
 
