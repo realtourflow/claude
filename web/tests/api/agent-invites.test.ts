@@ -236,14 +236,15 @@ describe("POST /api/agent-invites/[token]/claim — claim", () => {
     const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const seeded = await seedInvite(admin.id, { email: "invitee@example.com" });
 
+    // #272 — the claim is bound to the invited email, so the caller presents it.
     const req = await claimReq(seeded.token, "auth0|newagent", ["agent"], {
-      email: "claimed@example.com",
+      email: "invitee@example.com",
       name: "Claimed Agent",
     });
     const res = await claimRoute(req, tokenCtx(seeded.token));
     expect(res.status).toBe(200);
     const user = (await res.json()) as { id: string; email: string; role: string };
-    expect(user.email).toBe("claimed@example.com");
+    expect(user.email).toBe("invitee@example.com");
     expect(user.role).toBe("agent");
 
     const invite = await prisma.agent_invites.findUnique({
@@ -261,15 +262,28 @@ describe("POST /api/agent-invites/[token]/claim — claim", () => {
     expect(dbUser?.role).toBe("agent");
   });
 
-  it("9. falls back to the invited email when body omits it", async () => {
+  it("9. omitting the email → 400 (claim is bound to the invited email, #272)", async () => {
     const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
     const seeded = await seedInvite(admin.id, { email: "invited@example.com" });
 
+    // #272 — the pre-fix fallback ("no email → use the invited email") is gone;
+    // the caller must present the invited email, so an omitted email is a 400
+    // and no account is provisioned / invite burned.
     const req = await claimReq(seeded.token, "auth0|fallback", ["agent"], {});
     const res = await claimRoute(req, tokenCtx(seeded.token));
-    expect(res.status).toBe(200);
-    const user = (await res.json()) as { email: string };
-    expect(user.email).toBe("invited@example.com");
+    expect(res.status).toBe(400);
+
+    const dbUser = await prisma.users.findUnique({
+      where: { auth0_id: "auth0|fallback" },
+      select: { id: true },
+    });
+    expect(dbUser).toBeNull();
+
+    const invite = await prisma.agent_invites.findUnique({
+      where: { id: seeded.id },
+      select: { claimed_at: true },
+    });
+    expect(invite?.claimed_at).toBeNull();
   });
 
   it("10. already-claimed invite → 409", async () => {
@@ -280,7 +294,11 @@ describe("POST /api/agent-invites/[token]/claim — claim", () => {
       claimedBy: claimer.id,
     });
 
-    const req = await claimReq(seeded.token, "auth0|newagent", ["agent"], {});
+    // #272 — present the invited (default) email so the lookup finds the invite
+    // and reaches the already-claimed check.
+    const req = await claimReq(seeded.token, "auth0|newagent", ["agent"], {
+      email: "invitee@example.com",
+    });
     const res = await claimRoute(req, tokenCtx(seeded.token));
     expect(res.status).toBe(409);
   });
@@ -291,7 +309,11 @@ describe("POST /api/agent-invites/[token]/claim — claim", () => {
       expiresAt: new Date(Date.now() - 60 * 1000),
     });
 
-    const req = await claimReq(seeded.token, "auth0|newagent", ["agent"], {});
+    // #272 — present the invited (default) email so the lookup finds the invite
+    // and reaches the expiry check.
+    const req = await claimReq(seeded.token, "auth0|newagent", ["agent"], {
+      email: "invitee@example.com",
+    });
     const res = await claimRoute(req, tokenCtx(seeded.token));
     expect(res.status).toBe(410);
   });
@@ -480,6 +502,97 @@ describe("POST /api/agent-invites/[token]/claim — existing accounts (#224)", (
     });
     expect(invite?.claimed_at).not.toBeNull();
     expect(invite?.claimed_by).toBe(out.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #272 — the agent-invite claim must be bound to the INVITED email
+// (mirror of the client-invite claim). #224/#225 closed account-hijack, but a
+// brand-new authenticated user who obtains an unclaimed token could still
+// self-provision `agent` under an arbitrary email. The claim must only succeed
+// when the caller presents the invited email.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/agent-invites/[token]/claim — email binding (#272)", () => {
+  it("22. brand-new caller with a NON-matching email → rejected, no agent account created, invite not burned", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const seeded = await seedInvite(admin.id, { email: "intended-agent@example.com" });
+
+    const req = await claimReq(seeded.token, "auth0|attacker", [], {
+      email: "attacker@example.com",
+      name: "Attacker",
+    });
+    const res = await claimRoute(req, tokenCtx(seeded.token));
+    // Mismatched email → the invite lookup misses (mirrors the client claim).
+    expect([404, 409]).toContain(res.status);
+
+    // No agent account was provisioned for the attacker.
+    const dbUser = await prisma.users.findUnique({
+      where: { auth0_id: "auth0|attacker" },
+      select: { id: true, role: true },
+    });
+    expect(dbUser).toBeNull();
+
+    // The invite is still claimable by the real invitee.
+    const invite = await prisma.agent_invites.findUnique({
+      where: { id: seeded.id },
+      select: { claimed_at: true, claimed_by: true },
+    });
+    expect(invite?.claimed_at).toBeNull();
+    expect(invite?.claimed_by).toBeNull();
+  });
+
+  it("23. brand-new caller with the INVITED email → 200, agent account created, invite claimed", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const seeded = await seedInvite(admin.id, { email: "intended-agent@example.com" });
+
+    const req = await claimReq(seeded.token, "auth0|intended", [], {
+      email: "intended-agent@example.com",
+      name: "Intended Agent",
+    });
+    const res = await claimRoute(req, tokenCtx(seeded.token));
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as { id: string; role: string; email: string };
+    expect(out.role).toBe("agent");
+    expect(out.email).toBe("intended-agent@example.com");
+
+    const invite = await prisma.agent_invites.findUnique({
+      where: { id: seeded.id },
+      select: { claimed_at: true, claimed_by: true },
+    });
+    expect(invite?.claimed_at).not.toBeNull();
+    expect(invite?.claimed_by).toBe(out.id);
+  });
+
+  it("24. existing non-agent presenting the invited email → still 409 (#225 guard intact), invite not burned", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const seeded = await seedInvite(admin.id, { email: "intended-agent@example.com" });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer-guard",
+      email: "buyer@example.com",
+      name: "Betty Buyer",
+    });
+
+    const req = await claimReq(seeded.token, "auth0|buyer-guard", ["buyer"], {
+      email: "intended-agent@example.com",
+      name: "Betty Buyer",
+    });
+    const res = await claimRoute(req, tokenCtx(seeded.token));
+    expect(res.status).toBe(409);
+
+    // The #225 guard still fires: role unchanged, not promoted to agent.
+    const row = await prisma.users.findUnique({
+      where: { id: buyer.id },
+      select: { role: true },
+    });
+    expect(row?.role).toBe("buyer");
+
+    const invite = await prisma.agent_invites.findUnique({
+      where: { id: seeded.id },
+      select: { claimed_at: true },
+    });
+    expect(invite?.claimed_at).toBeNull();
   });
 });
 
