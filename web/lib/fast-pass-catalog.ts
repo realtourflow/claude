@@ -16,6 +16,16 @@
  */
 export const FAST_PASS_BASE_PRICE_CENTS = 297700;
 
+/**
+ * "Pay at closing" defers the Fast Pass charge to the closing table, and buyers
+ * pay a 15% premium for that convenience. The premium is a property of the
+ * payment *timing*, not the products, so it multiplies the whole basket
+ * (base + upsells) exactly once — never the upsells on their own. Only the
+ * `at_closing` option carries it (the survey shows a `+15%` badge on that
+ * option and no other); `now` and `seller_concession` are unmarked.
+ */
+export const AT_CLOSING_PREMIUM = 1.15;
+
 export const FAST_PASS_UPSELL_PRICE_CENTS = {
   utility_setup: 9700,
   refi_monitoring: 14700,
@@ -38,14 +48,28 @@ export function isFastPassUpsellId(key: string): key is FastPassUpsellId {
 
 /**
  * Server-side total for a Fast Pass enrollment: base fee + the selected
- * upsells. Duplicate keys count once (pass a deduped set or rely on this to
- * collapse them). Callers must validate each key with isFastPassUpsellId
- * first — unknown keys here would be silently skipped.
+ * upsells, then the deferral premium if the buyer pays at closing. Duplicate
+ * keys count once (pass a deduped set or rely on this to collapse them).
+ * Callers must validate each key with isFastPassUpsellId first — unknown keys
+ * here would be silently skipped.
+ *
+ * `paymentOption` is the whitelisted enrollment option (`now` | `at_closing` |
+ * `seller_concession`). Only `at_closing` adds AT_CLOSING_PREMIUM, applied to
+ * the FULL basket exactly once; every other value (including `undefined`)
+ * prices the plain basket. Typed as `string` because the route validates the
+ * whitelist before calling — this stays the single source of the markup so the
+ * survey never re-derives it (#280).
  */
-export function computeFastPassTotalCents(upsells: Iterable<FastPassUpsellId>): number {
+export function computeFastPassTotalCents(
+  upsells: Iterable<FastPassUpsellId>,
+  paymentOption?: string
+): number {
   let total = FAST_PASS_BASE_PRICE_CENTS;
   for (const key of new Set(upsells)) {
     total += FAST_PASS_UPSELL_PRICE_CENTS[key];
+  }
+  if (paymentOption === "at_closing") {
+    total = Math.round(total * AT_CLOSING_PREMIUM);
   }
   return total;
 }
