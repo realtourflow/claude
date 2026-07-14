@@ -11,6 +11,7 @@ import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
 import { enqueuePushDealClosingEvent } from "@/lib/jobs";
 import { seedStandardContingencies } from "@/lib/contingency-seed";
+import { seedStageAutoTasks } from "@/lib/stage-task-seed";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -37,7 +38,7 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     // Look up current stage + ownership.
     const current = await prisma.deals.findFirst({
       where: { id: dealId, agent_id: userId },
-      select: { stage: true },
+      select: { stage: true, type: true, title: true },
     });
     if (!current) return error("deal not found", 404);
 
@@ -86,6 +87,21 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
       } catch (err) {
         console.error("contingency auto-seed failed", err);
       }
+    }
+
+    // Auto-seed the stage's AI tasks (#87). Moved off the browser, which used
+    // to loop POST /tasks after the advance — a tab closed mid-loop left an
+    // advanced deal with no tasks, and non-UI callers skipped seeding entirely.
+    // Idempotent + best-effort, mirroring the contingency seed above: a failure
+    // here must never fail the stage change. clientName mirrors the client
+    // mapping (Deal.clientName = deals.title, see hooks/useDeals.ts).
+    try {
+      await seedStageAutoTasks(dealId, newStage, {
+        type: current.type,
+        clientName: current.title,
+      });
+    } catch (err) {
+      console.error("stage auto-task seed failed", err);
     }
 
     // Side-effect fan-out (audit + notifications + calendar push) is AWAITED,
