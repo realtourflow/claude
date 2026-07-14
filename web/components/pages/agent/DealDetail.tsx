@@ -65,6 +65,7 @@ import {
   ShieldOff,
 } from 'lucide-react';
 import MetroMap from "@/components/MetroMap";
+import IntakeCard from "@/components/intake/IntakeCard";
 import { MOCK_USERS } from "@/lib/data/mockUsers";
 import { BUYER_STATUS_STEPS } from "@/lib/buyer-status";
 import { useDealStageStore } from "@/lib/store/dealStageStore";
@@ -2025,6 +2026,9 @@ function OverviewTab({ deal, tasks, onRefresh }: { deal: Deal; tasks: Task[]; on
 
       {/* Team & Participants — add co-agent / client by email, remove added participants */}
       <TeamParticipantsCard deal={deal} />
+
+      {/* Client onboarding intake — persisted questionnaire answers (#175) */}
+      <IntakeCard dealId={deal.id} />
 
       {/* Contingency deadlines — under_contract and beyond (#186) */}
       {['under_contract', 'pre_close', 'closing', 'post_close'].includes(deal.stage) && (
