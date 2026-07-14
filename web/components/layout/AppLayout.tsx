@@ -24,6 +24,7 @@ import {
   Sliders,
   ClipboardList,
   UserPlus,
+  User,
   Users,
   LogOut,
   Bell,
@@ -143,13 +144,13 @@ const ADMIN_NAV = [
   { label: 'Settings', icon: Settings, href: '/admin/settings' },
 ];
 
-const TC_NAV = [
+export const TC_NAV = [
   { label: 'Overview',         icon: FolderOpen,    href: '/tc'              },
   { label: 'Documents',        icon: FileText,      href: '/tc/documents'    },
   { label: 'Loan Milestones',  icon: ClipboardList, href: '/tc/disclosures'  },
   { label: 'Checklists',       icon: CheckSquare,   href: '/tc/checklists'   },
   { label: 'Calendar',         icon: Calendar,      href: '/tc/calendar'     },
-  { label: 'Contacts',         icon: MessageSquare, href: '/tc/messages'     },
+  { label: 'Contacts',         icon: User,          href: '/tc/messages'     },
   { label: 'Settings',         icon: Settings,      href: '/tc/settings'     },
 ];
 
