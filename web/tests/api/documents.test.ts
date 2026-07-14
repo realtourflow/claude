@@ -161,6 +161,13 @@ describe("POST /api/deals/[id]/documents", () => {
         file_size: 12345,
       }),
     });
+    // The upload actually happened: a 12345-byte application/pdf blob exists at
+    // the confirmed key. Confirm now verifies the blob before inserting (#276).
+    storage.seed(
+      `deals/${deal.id}/123/contract.pdf`,
+      new Uint8Array(12345),
+      "application/pdf"
+    );
     const res = await createDocRoute(req, ctx(deal.id));
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
@@ -171,6 +178,67 @@ describe("POST /api/deals/[id]/documents", () => {
     expect(body.name).toBe("contract.pdf");
     expect(body.uploader_name).toBe("Agent A");
     expect(body.file_size).toBe(12345);
+  });
+
+  it("rejects a confirm when no blob exists at the key (no dangling row)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    // Nothing is seeded at this key: the upload failed or never happened, so
+    // getBlobSize throws. The confirm must reject rather than insert a row that
+    // dangles over a non-existent blob (#276).
+    const req = new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        name: "ghost.pdf",
+        s3_key: `deals/${deal.id}/123/ghost.pdf`,
+        mime_type: "application/pdf",
+        file_size: 999999,
+      }),
+    });
+    const res = await createDocRoute(req, ctx(deal.id));
+    expect(res.status).toBe(404);
+    const count = await prisma.documents.count({ where: { deal_id: deal.id } });
+    expect(count).toBe(0);
+  });
+
+  it("stores the blob-observed size and content-type, not the client's values", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|a",
+      name: "Agent A",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    const key = `deals/${deal.id}/123/contract.pdf`;
+    // The blob actually written is 2048 bytes of image/png. The client confirm
+    // body below LIES about both size and mime — the server must trust the blob,
+    // not the body (#276).
+    storage.seed(key, new Uint8Array(2048), "image/png");
+    const req = new Request(`http://localhost/api/deals/${deal.id}/documents`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        name: "contract.pdf",
+        s3_key: key,
+        mime_type: "application/pdf",
+        file_size: 12345,
+      }),
+    });
+    const res = await createDocRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { file_size: number; mime_type: string };
+    expect(body.file_size).toBe(2048);
+    expect(body.mime_type).toBe("image/png");
+    // And that's what actually persisted — not the client's 12345 / pdf.
+    const row = await prisma.documents.findFirst({ where: { deal_id: deal.id } });
+    expect(Number(row!.file_size)).toBe(2048);
+    expect(row!.mime_type).toBe("image/png");
   });
 
   it("400 when name or s3_key missing", async () => {
@@ -234,6 +302,12 @@ describe("POST /api/deals/[id]/documents", () => {
         file_size: 4321,
       }),
     });
+    // The buyer's upload landed: seed the blob the confirm now verifies (#276).
+    storage.seed(
+      `deals/${deal.id}/123/preapproval.pdf`,
+      new Uint8Array(4321),
+      "application/pdf"
+    );
     const res = await createDocRoute(req, ctx(deal.id));
     expect(res.status).toBe(201);
     const body = (await res.json()) as {

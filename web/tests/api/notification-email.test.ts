@@ -4,6 +4,7 @@ import { POST as createDocumentRoute } from "@/app/api/deals/[id]/documents/rout
 import { POST as createTaskRoute } from "@/app/api/deals/[id]/tasks/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setEmailForTesting } from "@/lib/email";
+import { setStorageForTesting } from "@/lib/blob-storage";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
@@ -16,11 +17,16 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await truncateAll();
+  // Document confirm now verifies the uploaded blob before inserting (#276).
+  // These are notification tests, not blob-existence tests, so install the
+  // recording backend with a default size — every confirmed key resolves.
+  setStorageForTesting()!.defaultSize = 1024;
 });
 
 afterEach(() => {
-  // Reset the seam so a stub from one test never leaks into the next.
+  // Reset the seams so a stub from one test never leaks into the next.
   setEmailForTesting(undefined);
+  setStorageForTesting(false);
 });
 
 function ctx(id: string) {

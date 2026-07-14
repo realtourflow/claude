@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { canReadDeal, hasDealAccess } from "@/lib/deals";
 import { emailDocumentUploaded } from "@/lib/notification-email";
+import { getBlobSize, getBlobContentType } from "@/lib/blob-storage";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -53,8 +54,8 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
 type CreateBody = {
   name?: string;
   s3_key?: string;
-  mime_type?: string;
-  file_size?: number;
+  // NOTE: the client may still send mime_type / file_size, but they are NOT
+  // trusted or read — the confirm reads both from the actual blob (#276).
 };
 
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
@@ -84,12 +85,28 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       return error("s3_key does not belong to this deal", 400);
     }
 
+    // Verify the blob was actually written before recording a row for it —
+    // otherwise a failed or skipped upload leaves a dangling document (#276).
+    // getBlobSize is a HEAD that throws when the object is missing; that throw
+    // is the existence gate. The size and content-type are read from the blob
+    // and are AUTHORITATIVE: the client-supplied file_size/mime_type are not
+    // trusted (only the display name is). Size is read first because the blob
+    // backend's content-type read does not throw on a missing key.
+    let fileSize: number;
+    let mimeType: string;
+    try {
+      fileSize = await getBlobSize(body.s3_key);
+      mimeType = await getBlobContentType(body.s3_key);
+    } catch {
+      return error("upload not found", 404);
+    }
+
     const rows = await prisma.$queryRaw<DocumentRow[]>`
       WITH inserted AS (
         INSERT INTO documents (deal_id, uploaded_by, name, s3_key, mime_type, file_size)
         VALUES (${dealId}::uuid, ${userId}::uuid, ${body.name}, ${body.s3_key},
-                ${body.mime_type ?? "application/octet-stream"},
-                ${body.file_size ?? 0})
+                ${mimeType},
+                ${fileSize})
         RETURNING id, deal_id, uploaded_by, name, s3_key, mime_type, file_size, created_at,
                   docusign_envelope_id, docusign_status, docusign_sent_at
       )
