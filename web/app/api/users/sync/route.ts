@@ -1,6 +1,6 @@
 import { error, json, withAuth } from "@/lib/http";
 import { EmailConflictError, getPersistedRole, upsertUser } from "@/lib/users";
-import type { Role } from "@/lib/roles";
+import { ROLES, resolveRole, type Role } from "@/lib/roles";
 
 type SyncBody = {
   email?: string;
@@ -22,7 +22,20 @@ export async function POST(req: Request): Promise<Response> {
     // claim previously persisted. No role anywhere = 403.
     let role: Role | null = null;
     if (claims.roles.length > 0) {
-      role = claims.roles[0] as Role;
+      // Resolve the claim to the single most-privileged RECOGNIZED role
+      // (precedence documented in lib/roles.ts). A claim carrying only
+      // unrecognized roles is a misconfigured/typo'd Auth0 role — reject it
+      // with a clear 400 instead of casting it straight to Role and letting the
+      // user_role enum reject it downstream as an opaque 500 (#308).
+      role = resolveRole(claims.roles);
+      if (!role) {
+        return error(
+          `unrecognized role claim (${JSON.stringify(
+            claims.roles
+          )}); expected one of: ${ROLES.join(", ")}`,
+          400
+        );
+      }
     } else {
       role = await getPersistedRole(claims.sub);
     }
