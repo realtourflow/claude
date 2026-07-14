@@ -1,20 +1,36 @@
 "use client";
 
+import { useMemo } from "react";
 import { Deal, DealStage, Task } from "@/lib/types";
 import MetroMap from "@/components/MetroMap";
 import { CheckCircle2, AlertCircle, Zap } from "lucide-react";
 import { STAGE_LABELS, STAGE_ORDER } from "@/components/deal/shared";
+import { useStageHistory } from "@/hooks/useStageHistory";
 
-const DEAL_STAGE_DAYS: Record<string, Partial<Record<DealStage, number>>> = {
-  'deal-smith':    { intake: 3,  active_search: 21, offer_active: 4 },
-  'deal-garcia':   { intake: 2 },
-  'deal-williams': { intake: 5,  active_search: 18, offer_active: 7, under_contract: 22, pre_close: 8 },
-  'deal-johnson':  { intake: 9 },
-  'deal-chen':     { intake: 4,  active_search: 19, offer_active: 6, under_contract: 14, pre_close: 11 },
-};
+const MS_PER_DAY = 86_400_000;
 
 export function TimelineTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
   const currentStageIndex = STAGE_ORDER.indexOf(deal.stage);
+
+  // Real per-stage durations from deal_stage_history (#256): the gap between
+  // consecutive transitions, and created_at -> the first transition for the
+  // initial stage. Keyed by the stage that was departed (each row's
+  // from_stage). The current stage has no departure row yet, so it shows the
+  // live "so far" counter below instead of a finished duration.
+  const { history } = useStageHistory(deal.id);
+  const stageDays = useMemo(() => {
+    const out: Partial<Record<DealStage, number>> = {};
+    let prev = new Date(deal.timeline.createdAt).getTime();
+    for (const row of history) {
+      const t = new Date(row.changed_at).getTime();
+      const days = Math.round((t - prev) / MS_PER_DAY);
+      if (row.from_stage && Number.isFinite(days)) {
+        out[row.from_stage as DealStage] = Math.max(0, days);
+      }
+      prev = t;
+    }
+    return out;
+  }, [history, deal.timeline.createdAt]);
 
   return (
     <div className="space-y-3">
@@ -72,9 +88,9 @@ export function TimelineTab({ deal, tasks }: { deal: Deal; tasks: Task[] }) {
                       {deal.timeline.daysInStage}d so far
                     </span>
                   )}
-                  {isPast && DEAL_STAGE_DAYS[deal.id]?.[stage] !== undefined && (
+                  {isPast && stageDays[stage] !== undefined && (
                     <span className="text-[11px] font-medium text-gray-400">
-                      {DEAL_STAGE_DAYS[deal.id][stage]}d
+                      {`${stageDays[stage]}d`}
                     </span>
                   )}
                 </div>
