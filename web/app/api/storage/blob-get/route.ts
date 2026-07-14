@@ -18,6 +18,20 @@ export const maxDuration = 60;
 // The three key namespaces the app reads (see lib/s3 key generators).
 const ALLOWED_PREFIXES = ALLOWED_KEY_PREFIXES;
 
+// Content types safe to render inline so the browser can PREVIEW them instead of
+// forcing a download (#310). Deliberately a NARROW ALLOWLIST, never a denylist:
+// anything not listed here — office docs, archives, unknown/octet-stream, and
+// crucially text/html and image/svg+xml (which a browser would EXECUTE →
+// stored-XSS / drive-by) — is served as `attachment`. Add a type here only after
+// confirming the browser renders it as inert, non-scriptable content.
+const INLINE_PREVIEWABLE_TYPES = new Set<string>([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
 export async function GET(req: Request): Promise<Response> {
   if (!storageConfigured()) return error("blob storage not configured", 404);
 
@@ -42,11 +56,23 @@ export async function GET(req: Request): Promise<Response> {
     return error("file not found", 404);
   }
 
-  const filename = key.split("/").pop() || "download";
+  const filename = (key.split("/").pop() || "download").replace(/"/g, "");
+  // Preview safe types inline; force everything else (office docs, unknown, and
+  // especially html/svg — XSS risk) to download. Normalize first: drop any
+  // `; charset=…` parameter and lowercase, so a variant like `TEXT/HTML` or
+  // `image/jpeg; charset=binary` is classified correctly. Allowlist match means
+  // an unknown/empty type can never slip through as inline.
+  const baseType = (contentType || "").split(";")[0].trim().toLowerCase();
+  const disposition = INLINE_PREVIEWABLE_TYPES.has(baseType) ? "inline" : "attachment";
+
   return new Response(new Uint8Array(bytes), {
     headers: {
       "content-type": contentType || "application/octet-stream",
-      "content-disposition": `attachment; filename="${filename.replace(/"/g, "")}"`,
+      "content-disposition": `${disposition}; filename="${filename}"`,
+      // Stop the browser from MIME-sniffing a declared safe type into an
+      // executable one — pins rendering to the content-type above (defense in
+      // depth for the inline allowlist).
+      "x-content-type-options": "nosniff",
       // Capability URLs are single-use-ish (short TTL) and per-key; don't let a shared
       // cache hold private document bytes.
       "cache-control": "private, no-store",
