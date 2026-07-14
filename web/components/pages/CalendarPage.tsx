@@ -5,7 +5,7 @@ import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useAgentTasks } from "@/hooks/useTasks";
 import { useAllContingenciesForDeals } from "@/hooks/useContingencies";
-import { Calendar, Copy, Check, ExternalLink, CalendarClock, Clock, Shield, CalendarDays } from 'lucide-react';
+import { Calendar, Copy, Check, ExternalLink, CalendarClock, Clock, Shield, CalendarDays, RefreshCw } from 'lucide-react';
 
 type CalEntry = {
   id: string;
@@ -43,6 +43,23 @@ function daysUntil(dateStr: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return Math.round((d.getTime() - today.getTime()) / 86_400_000);
+}
+
+// The Subscribe/Copy/.ics controls only need the feed + webcal URLs.
+export type CalUrl = { feed_url: string; webcal_url: string };
+
+// GET /api/me/calendar-url may return either the legacy { url, token } shape or
+// the richer { feed_url, webcal_url, token } one. POST .../rotate returns the
+// same. Normalize either into { feed_url, webcal_url } so the controls always
+// have real hrefs and rotation can re-fetch without caring which shape it gets.
+type CalUrlResponse = { feed_url?: string; webcal_url?: string; url?: string; token?: string };
+
+export function normalizeCalUrl(r: CalUrlResponse | null | undefined): CalUrl | null {
+  if (!r) return null;
+  const feed_url = r.feed_url ?? r.url;
+  if (!feed_url) return null;
+  const webcal_url = r.webcal_url ?? feed_url.replace(/^https?:\/\//, 'webcal://');
+  return { feed_url, webcal_url };
 }
 
 const TYPE_META = {
@@ -108,13 +125,14 @@ export default function CalendarPage() {
   const { tasks }  = useAgentTasks();
   const contingencies = useAllContingenciesForDeals(deals.map((d) => d.id));
 
-  const [calUrl, setCalUrl] = useState<{ feed_url: string; webcal_url: string } | null>(null);
+  const [calUrl, setCalUrl] = useState<CalUrl | null>(null);
   const [copied, setCopied] = useState(false);
+  const [rotating, setRotating] = useState(false);
   const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
 
   useEffect(() => {
-    api.get<{ feed_url: string; webcal_url: string }>('/me/calendar-url')
-      .then(setCalUrl)
+    api.get<CalUrlResponse>('/me/calendar-url')
+      .then((r) => setCalUrl(normalizeCalUrl(r)))
       .catch(() => {});
   }, []);
 
@@ -195,6 +213,27 @@ export default function CalendarPage() {
     });
   }
 
+  async function rotateUrl() {
+    if (rotating) return;
+    // Rotation invalidates the current link immediately, so confirm first —
+    // a stray click shouldn't silently break an agent's existing subscription.
+    if (typeof window !== 'undefined' && !window.confirm(
+      'Rotate your calendar link? The current link stops working immediately and you’ll need to re-subscribe with the new one.'
+    )) return;
+    setRotating(true);
+    try {
+      await api.post('/me/calendar-url/rotate', {});
+      // Re-fetch so the Subscribe/Copy/.ics controls reflect the new token.
+      const fresh = await api.get<CalUrlResponse>('/me/calendar-url');
+      setCalUrl(normalizeCalUrl(fresh));
+      setCopied(false);
+    } catch {
+      // Best-effort: leave the existing URL in place if rotate/refetch fails.
+    } finally {
+      setRotating(false);
+    }
+  }
+
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -228,6 +267,14 @@ export default function CalendarPage() {
               >
                 <ExternalLink size={12} /> .ics
               </a>
+              <button
+                onClick={rotateUrl}
+                disabled={rotating}
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                title="Rotate link — immediately invalidates the current URL if it has leaked"
+              >
+                <RefreshCw size={12} className={rotating ? 'animate-spin' : ''} /> {rotating ? 'Rotating…' : 'Rotate link'}
+              </button>
             </>
           )}
         </div>
