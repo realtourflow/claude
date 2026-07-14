@@ -26,6 +26,10 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
         select: { stage: true },
       });
       if (deal && CHECKLIST_ELIGIBLE_STAGES.has(deal.stage)) {
+        // Two concurrent first-opens can both see count === 0 (#90).
+        // skipDuplicates emits ON CONFLICT DO NOTHING, so the loser of that
+        // race no-ops against the partial unique index on (deal_id, label)
+        // WHERE NOT is_custom and both callers read the winner's rows below.
         await prisma.checklist_items.createMany({
           data: DEFAULT_CHECKLIST_ITEMS.map((d, i) => ({
             deal_id: dealId,
@@ -34,6 +38,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
             assigned_to: d.assignedTo,
             sort_order: i,
           })),
+          skipDuplicates: true,
         });
       }
     }

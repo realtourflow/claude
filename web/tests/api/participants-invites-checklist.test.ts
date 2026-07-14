@@ -112,6 +112,36 @@ describe("Checklist", () => {
     expect(items.length).toBe(17);
   });
 
+  it("two concurrent first loads seed the defaults exactly once (#90)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+    const makeReq = async () =>
+      new Request(`http://localhost/api/deals/${deal.id}/checklist`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      });
+
+    // Two racing first-opens: both handlers run count() before either
+    // createMany commits. Without the partial unique index + conflict-tolerant
+    // seed this double-seeds (34 rows).
+    const [resA, resB] = await Promise.all([
+      listChecklistRoute(await makeReq(), ctx({ id: deal.id })),
+      listChecklistRoute(await makeReq(), ctx({ id: deal.id })),
+    ]);
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+
+    const count = await prisma.checklist_items.count({
+      where: { deal_id: deal.id },
+    });
+    expect(count).toBe(17);
+
+    // Both callers see the winner's items.
+    const itemsA = (await resA.json()) as { label: string }[];
+    const itemsB = (await resB.json()) as { label: string }[];
+    expect(itemsA.length).toBe(17);
+    expect(itemsB.length).toBe(17);
+  });
+
   it("does NOT auto-seed for deals still in intake", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
