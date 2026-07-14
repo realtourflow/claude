@@ -21,6 +21,14 @@ export async function GET(req: Request): Promise<Response> {
 
 export async function POST(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
+    // Deal creation is restricted to agents (and admins). Every other role
+    // (buyer/seller/tc/lending_partner) would otherwise create a deal owned
+    // by themselves as agent_id. Reject before doing any work (#274). Client
+    // deals are created via the invite flow, not this endpoint.
+    if (!hasRole(claims.roles, ["agent", "admin"])) {
+      return error("only agents can create deals", 403);
+    }
+
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found — call /users/sync first", 404);
 
