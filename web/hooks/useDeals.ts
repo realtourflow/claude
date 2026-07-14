@@ -4,62 +4,19 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { extractClosingDate } from "@/lib/arive-dates";
 import { AriveTracker, AriveKeyDates, Deal, DealStage, LoanMilestones, FastPassEnrollment, SmoothExitEnrollment } from "@/lib/data/mockDeals";
+import {
+  apiDealSchema,
+  apiDealListSchema,
+  type ApiDeal,
+  type FastPassApiData,
+  type SmoothExitApiData,
+} from "@/lib/schemas/deal";
+import { checkWire } from "@/lib/schemas/wire";
 
-export type ApiDeal = {
-  id: string;
-  agent_id: string;
-  type: 'buy' | 'sell';
-  stage: string;
-  health: 'green' | 'yellow' | 'red';
-  title: string;
-  address: string | null;
-  /** Postgres DECIMAL serialized as text by the API (`price::text`). */
-  price: string | null;
-  arive_linked: boolean;
-  arive_loan_id?: string | null;
-  arive_milestones?: AriveTracker[] | null;
-  arive_key_dates?: AriveKeyDates | null;
-  arive_loan_status?: string | null;
-  notes?: string | null;
-  fee_status?: string;
-  fee_amount_cents?: number;
-  fee_paid_at?: string | null;
-  fast_pass?: FastPassApiData | null;
-  smooth_exit?: SmoothExitApiData | null;
-  pre_approved?: boolean;
-  baa_signed?: boolean;
-  disclosures_complete?: boolean;
-  /** Agent-set "Buyer's Progress" step shown on the seller portal (#184). */
-  buyer_status?: string | null;
-  /** Postgres DECIMAL serialized as text by the API (`commission_pct::text`). */
-  commission_pct?: string | null;
-  created_at: string;
-  updated_at: string;
-  agent_name?: string;
-  agent_email?: string;
-  agent_phone?: string | null;
-  open_task_count?: number;
-  overdue_task_count?: number;
-};
-
-type FastPassApiData = {
-  status: string;
-  payment_option: string;
-  selected_upsells?: string[];
-  total_cents?: number;
-  enrolled_at?: string;
-};
-
-type SmoothExitApiData = {
-  status: string;
-  payment_option: string;
-  estimated_sale_price?: number;
-  fee_cents?: number;
-  enrolled_at?: string;
-  selected_upsells?: string[];
-  upsell_total_cents?: number;
-  upsells_paid?: boolean;
-};
+// The wire type is inferred from the zod schema (#88) — one contract for
+// the server boundary and this adapter, instead of a hand-maintained copy
+// that can lie about string-vs-number (#85).
+export type { ApiDeal };
 
 function fastPassFromApi(d: FastPassApiData): FastPassEnrollment {
   return {
@@ -210,8 +167,10 @@ export function useDeal(id: string | undefined): {
   const query = useQuery({
     queryKey: ['deal', id],
     queryFn: async () => {
+      // Dev/test-only wire check (#88): warns when the response drifts from
+      // the schema; a no-op passthrough in production.
       const raw = await api.get<ApiDeal>(`/deals/${id}`);
-      return apiDealToFrontend(raw);
+      return apiDealToFrontend(checkWire(apiDealSchema, raw, "GET /api/deals/:id"));
     },
     enabled: Boolean(id),
   });
@@ -239,7 +198,7 @@ export function useDeals(): {
     queryKey: ['deals'],
     queryFn: async () => {
       const raw = await api.get<ApiDeal[]>('/deals');
-      return raw.map(apiDealToFrontend);
+      return checkWire(apiDealListSchema, raw, 'GET /api/deals').map(apiDealToFrontend);
     },
   });
 
