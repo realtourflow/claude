@@ -32,10 +32,32 @@ export type CalendarEvent = {
   allDay: boolean;
 };
 
+/** A date range to read external events for (inclusive start, exclusive end). */
+export type EventWindow = {
+  start: Date;
+  end: Date;
+};
+
+/**
+ * A normalized external calendar event read back from a connected provider.
+ * Read-only in RealTourFlow — surfaced as availability / busy markers.
+ */
+export type ExternalEvent = {
+  /** Provider-native event id. */
+  id: string;
+  /** Which calendar it came from ("google_calendar" | "microsoft_calendar"). */
+  provider: string;
+  summary: string;
+  start: Date;
+  end: Date;
+  allDay: boolean;
+};
+
 export type CalendarProvider = {
   readonly provider: string;
   upsert(userId: string, ev: CalendarEvent): Promise<void>;
   delete(userId: string, internalUid: string): Promise<void>;
+  listEvents(userId: string, window: EventWindow): Promise<ExternalEvent[]>;
 };
 
 // ─── HTTP seam ──────────────────────────────────────────────────────────
@@ -116,6 +138,10 @@ type ProviderConfig = {
   refreshForm: (refreshToken: string) => URLSearchParams;
   /** Microsoft rotates refresh tokens on refresh; Google does not. */
   rotatesRefreshToken: boolean;
+  /** Full GET URL (incl. query string) that lists events within `window`. */
+  listUrl: (window: EventWindow) => string;
+  /** Parse the provider's list response into normalized ExternalEvents. */
+  parseEvents: (data: unknown) => ExternalEvent[];
 };
 
 /**
@@ -237,11 +263,42 @@ async function deleteEvent(
   throw new Error(`${cfg.provider} DELETE returned ${res.status}: ${await safeText(res)}`);
 }
 
+/**
+ * Read external events for a window from one provider. Mirrors the write
+ * path's token handling: no token → [] (best-effort, zero HTTP); expired +
+ * unrefreshable → []; a non-2xx list response is logged and yields [] so one
+ * provider being down never breaks the merged view.
+ */
+async function readEvents(
+  cfg: ProviderConfig,
+  userId: string,
+  window: EventWindow
+): Promise<ExternalEvent[]> {
+  const tok = await loadToken(userId, cfg.provider);
+  if (!tok) return [];
+  const accessToken = await ensureFresh(cfg, userId, tok);
+  if (!accessToken) return [];
+
+  const res = await http()(cfg.listUrl(window), {
+    method: "GET",
+    headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" },
+  });
+  if (!res.ok) {
+    console.warn(
+      `calendar: ${cfg.provider} list events returned ${res.status} for user ${userId}`
+    );
+    return [];
+  }
+  const data = (await res.json()) as unknown;
+  return cfg.parseEvents(data);
+}
+
 function makeProvider(cfg: ProviderConfig): CalendarProvider {
   return {
     provider: cfg.provider,
     upsert: (userId, ev) => upsertEvent(cfg, userId, ev),
     delete: (userId, internalUid) => deleteEvent(cfg, userId, internalUid),
+    listEvents: (userId, window) => readEvents(cfg, userId, window),
   };
 }
 
@@ -265,9 +322,45 @@ function googlePayload(ev: CalendarEvent): Record<string, unknown> {
   return body;
 }
 
+const GOOGLE_EVENTS_URL =
+  "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+
+/** Google Calendar list response → normalized events. */
+function parseGoogleEvents(data: unknown): ExternalEvent[] {
+  const items = (data as { items?: unknown[] })?.items;
+  if (!Array.isArray(items)) return [];
+  const out: ExternalEvent[] = [];
+  for (const raw of items) {
+    const it = raw as {
+      id?: string;
+      summary?: string;
+      status?: string;
+      start?: { dateTime?: string; date?: string };
+      end?: { dateTime?: string; date?: string };
+    };
+    if (!it.id || it.status === "cancelled") continue;
+    const allDay = !!it.start?.date;
+    const startStr = it.start?.dateTime ?? it.start?.date;
+    if (!startStr) continue;
+    const endStr = it.end?.dateTime ?? it.end?.date ?? startStr;
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    if (Number.isNaN(start.getTime())) continue;
+    out.push({
+      id: it.id,
+      provider: "google_calendar",
+      summary: it.summary?.trim() || "Busy",
+      start,
+      end: Number.isNaN(end.getTime()) ? start : end,
+      allDay,
+    });
+  }
+  return out;
+}
+
 const googleConfig: ProviderConfig = {
   provider: "google_calendar",
-  eventsUrl: "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+  eventsUrl: GOOGLE_EVENTS_URL,
   buildPayload: googlePayload,
   tokenUrl: () => "https://oauth2.googleapis.com/token",
   refreshForm: (refreshToken) =>
@@ -278,6 +371,17 @@ const googleConfig: ProviderConfig = {
       grant_type: "refresh_token",
     }),
   rotatesRefreshToken: false,
+  listUrl: (w) => {
+    const qs = new URLSearchParams({
+      timeMin: w.start.toISOString(),
+      timeMax: w.end.toISOString(),
+      singleEvents: "true",
+      orderBy: "startTime",
+      maxResults: "250",
+    });
+    return `${GOOGLE_EVENTS_URL}?${qs.toString()}`;
+  },
+  parseEvents: parseGoogleEvents,
 };
 
 export const googleProvider: CalendarProvider = makeProvider(googleConfig);
@@ -298,6 +402,51 @@ function microsoftPayload(ev: CalendarEvent): Record<string, unknown> {
   return body;
 }
 
+const MS_CALENDAR_VIEW_URL = "https://graph.microsoft.com/v1.0/me/calendarView";
+
+/**
+ * Graph returns naive datetimes plus a `timeZone` (default "UTC"). We don't
+ * send a Prefer:outlook.timezone header, so times come back in UTC — append a
+ * Z when the string carries no zone so `new Date()` reads it as UTC.
+ */
+function parseGraphDate(d?: { dateTime?: string; timeZone?: string }): Date | null {
+  if (!d?.dateTime) return null;
+  let s = d.dateTime;
+  const hasZone = /([zZ])$|[+-]\d{2}:?\d{2}$/.test(s);
+  if (!hasZone && (d.timeZone ?? "UTC").toUpperCase() === "UTC") s = `${s}Z`;
+  const parsed = new Date(s);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/** Microsoft Graph calendarView response → normalized events. */
+function parseMicrosoftEvents(data: unknown): ExternalEvent[] {
+  const value = (data as { value?: unknown[] })?.value;
+  if (!Array.isArray(value)) return [];
+  const out: ExternalEvent[] = [];
+  for (const raw of value) {
+    const it = raw as {
+      id?: string;
+      subject?: string;
+      isAllDay?: boolean;
+      isCancelled?: boolean;
+      start?: { dateTime?: string; timeZone?: string };
+      end?: { dateTime?: string; timeZone?: string };
+    };
+    if (!it.id || it.isCancelled) continue;
+    const start = parseGraphDate(it.start);
+    if (!start) continue;
+    out.push({
+      id: it.id,
+      provider: "microsoft_calendar",
+      summary: it.subject?.trim() || "Busy",
+      start,
+      end: parseGraphDate(it.end) ?? start,
+      allDay: !!it.isAllDay,
+    });
+  }
+  return out;
+}
+
 const microsoftConfig: ProviderConfig = {
   provider: "microsoft_calendar",
   eventsUrl: "https://graph.microsoft.com/v1.0/me/events",
@@ -313,6 +462,16 @@ const microsoftConfig: ProviderConfig = {
       scope: "Calendars.ReadWrite offline_access User.Read",
     }),
   rotatesRefreshToken: true,
+  listUrl: (w) => {
+    const qs = new URLSearchParams({
+      startDateTime: w.start.toISOString(),
+      endDateTime: w.end.toISOString(),
+      $orderby: "start/dateTime",
+      $top: "250",
+    });
+    return `${MS_CALENDAR_VIEW_URL}?${qs.toString()}`;
+  },
+  parseEvents: parseMicrosoftEvents,
 };
 
 export const microsoftProvider: CalendarProvider = makeProvider(microsoftConfig);
@@ -345,6 +504,43 @@ export async function fanOutUpsert(userId: string, ev: CalendarEvent): Promise<v
   if (errors.length > 0) {
     throw new AggregateError(errors, `calendar upsert failed for ${errors.length} provider(s)`);
   }
+}
+
+/**
+ * Read events from ONE provider for a window. Returns [] when the agent has no
+ * token for that provider or the provider is unknown — never throws for the
+ * "not connected" case.
+ */
+export async function listEvents(
+  userId: string,
+  provider: string,
+  window: EventWindow
+): Promise<ExternalEvent[]> {
+  const p = providers().find((x) => x.provider === provider);
+  if (!p) return [];
+  return p.listEvents(userId, window);
+}
+
+/**
+ * Read + merge external events across every connected provider, sorted by
+ * start time. Best-effort per provider: one provider failing (or being
+ * disconnected) never blocks the others — its slice is just empty.
+ */
+export async function fanInEvents(
+  userId: string,
+  window: EventWindow
+): Promise<ExternalEvent[]> {
+  const slices = await Promise.all(
+    providers().map(async (p) => {
+      try {
+        return await p.listEvents(userId, window);
+      } catch (err) {
+        console.error(`calendar read from ${p.provider} for user ${userId} failed`, err);
+        return [] as ExternalEvent[];
+      }
+    })
+  );
+  return slices.flat().sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
 /** Delete from every connected calendar. Same attempt-all-then-throw contract as fanOutUpsert. */

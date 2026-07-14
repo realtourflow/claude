@@ -5,15 +5,38 @@ import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useAgentTasks } from "@/hooks/useTasks";
 import { useAllContingenciesForDeals } from "@/hooks/useContingencies";
-import { Calendar, Copy, Check, ExternalLink, CalendarClock, Clock, Shield } from 'lucide-react';
+import { Calendar, Copy, Check, ExternalLink, CalendarClock, Clock, Shield, CalendarDays } from 'lucide-react';
 
 type CalEntry = {
   id: string;
   date: string;
   title: string;
   sub: string;
-  type: 'closing' | 'task' | 'contingency';
+  type: 'closing' | 'task' | 'contingency' | 'external';
 };
+
+// External (read-only) events pulled back from a connected Google/Outlook
+// calendar. Dates arrive as ISO strings (see /api/me/calendar/events).
+type ExternalEvent = {
+  id: string;
+  provider: string;
+  summary: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+};
+
+const PROVIDER_LABEL: Record<string, string> = {
+  google_calendar: 'Google',
+  microsoft_calendar: 'Outlook',
+};
+
+function timeLabel(ev: ExternalEvent): string {
+  const provider = PROVIDER_LABEL[ev.provider] ?? 'Calendar';
+  if (ev.allDay) return `${provider} · All day`;
+  const t = new Date(ev.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `${provider} · ${t}`;
+}
 
 function daysUntil(dateStr: string): number {
   const d = new Date(dateStr);
@@ -26,6 +49,7 @@ const TYPE_META = {
   closing:     { dot: 'bg-brand-navy',  label: 'Closing',     icon: CalendarClock },
   task:        { dot: 'bg-blue-400',    label: 'Task',        icon: Clock },
   contingency: { dot: 'bg-amber-400',   label: 'Contingency', icon: Shield },
+  external:    { dot: 'bg-gray-400',    label: 'Busy',        icon: CalendarDays },
 };
 
 // Hoisted to module scope so they're not re-created every CalendarPage
@@ -86,10 +110,23 @@ export default function CalendarPage() {
 
   const [calUrl, setCalUrl] = useState<{ feed_url: string; webcal_url: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [externalEvents, setExternalEvents] = useState<ExternalEvent[]>([]);
 
   useEffect(() => {
     api.get<{ feed_url: string; webcal_url: string }>('/me/calendar-url')
       .then(setCalUrl)
+      .catch(() => {});
+  }, []);
+
+  // Read-only external events from connected Google/Outlook calendars, next
+  // 30 days. Best-effort: unconnected agents just get an empty list.
+  useEffect(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(start.getTime() + 30 * 86_400_000);
+    const qs = `?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`;
+    api.get<{ events: ExternalEvent[] }>(`/me/calendar/events${qs}`)
+      .then((r) => setExternalEvents(r.events ?? []))
       .catch(() => {});
   }, []);
 
@@ -128,6 +165,16 @@ export default function CalendarPage() {
       title: c.label,
       sub: deal?.clientName ?? '',
       type: 'contingency',
+    });
+  });
+
+  externalEvents.forEach((ev) => {
+    entries.push({
+      id: `ext-${ev.provider}-${ev.id}`,
+      date: ev.start.slice(0, 10),
+      title: ev.summary || 'Busy',
+      sub: timeLabel(ev),
+      type: 'external',
     });
   });
 
