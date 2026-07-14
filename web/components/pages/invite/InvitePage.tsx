@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useAuth0 } from '@auth0/auth0-react';
-import { api } from "@/lib/api-client";
+import { api, ApiError } from "@/lib/api-client";
 import { Home, UserPlus, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 type InviteDetails = {
@@ -32,6 +32,11 @@ export default function InvitePage() {
 
   const invite = query.data ?? null;
   const loading = query.isLoading;
+  // #278 — the GET returns 410 for an expired, unclaimed invite. Surface that as
+  // a distinct state (before the generic error branch) so the user sees an
+  // "ask your agent to resend" message instead of an Accept button that would
+  // only dead-end after they've already created an Auth0 account.
+  const isExpired = query.error instanceof ApiError && query.error.status === 410;
   const error: string | null = !token
     ? 'Invalid invite link'
     : query.error instanceof Error
@@ -54,6 +59,20 @@ export default function InvitePage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-brand-bg">
         <Loader2 size={28} className="animate-spin text-brand-navy/40" />
+      </div>
+    );
+  }
+
+  if (isExpired) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-brand-bg p-6">
+        <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl p-8 text-center">
+          <AlertCircle size={40} className="mx-auto mb-4 text-amber-400" />
+          <h1 className="text-lg font-bold text-brand-navy mb-2">Invite expired</h1>
+          <p data-testid="invite-expired" className="text-sm text-gray-400">
+            This invite link has expired. Ask your agent to resend it and you&apos;ll get a fresh link to accept.
+          </p>
+        </div>
       </div>
     );
   }
