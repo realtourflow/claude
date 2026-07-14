@@ -11,6 +11,7 @@ import { useDocuments } from "@/hooks/useDocuments";
 import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType } from "@/hooks/useContingencies";
 import { AddContingencyForm } from "@/components/contingencies/AddContingencyForm";
 import { useChecklist, ChecklistAssignee } from "@/hooks/useChecklist";
+import { useAllChecklistsForDeals } from "@/hooks/useAllChecklists";
 import { useAgentTasks } from "@/hooks/useTasks";
 import { usePermission } from "@/permissions/usePermission";
 import { PERMISSIONS } from "@/permissions/permissions";
@@ -230,9 +231,10 @@ type DeadlineEntry = {
 
 // Exported for tests (tests/components/TCDeadlines.test.tsx).
 export function Deadlines() {
-  const deals            = useMyDeals();
-  const { tasks }        = useAgentTasks();
-  const allContingencies = useAllContingenciesForDeals(deals.map((d) => d.id));
+  const deals             = useMyDeals();
+  const { tasks }         = useAgentTasks();
+  const allContingencies  = useAllContingenciesForDeals(deals.map((d) => d.id));
+  const allChecklistItems = useAllChecklistsForDeals(deals.map((d) => d.id));
 
   const taskEntries: DeadlineEntry[] = tasks
     .filter((t) => t.dueDate && t.status !== 'completed')
@@ -246,7 +248,20 @@ export function Deadlines() {
       source: 'task' as const,
     }));
 
-  const checklistEntries: DeadlineEntry[] = [];
+  // Checklist due dates were silently dropped (#302): this used to be a
+  // hardcoded []. Surface every unchecked checklist item that has a due date,
+  // mirroring how taskEntries/contingencyEntries are built.
+  const checklistEntries: DeadlineEntry[] = allChecklistItems
+    .filter((i) => i.dueDate && !i.checked)
+    .map((i) => ({
+      id: i.id,
+      dealId: i.dealId,
+      title: i.label,
+      dueDate: i.dueDate!,
+      assignedTo: i.assignedTo,
+      status: 'pending' as const,
+      source: 'checklist' as const,
+    }));
 
   const contingencyEntries: DeadlineEntry[] = allContingencies
     .filter((c) => c.status === 'active' && c.deadline)

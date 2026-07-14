@@ -24,6 +24,7 @@ import {
   Sliders,
   ClipboardList,
   UserPlus,
+  User,
   Users,
   LogOut,
   Bell,
@@ -149,7 +150,7 @@ export const TC_NAV = [
   { label: 'Loan Milestones',  icon: ClipboardList, href: '/tc/disclosures'  },
   { label: 'Checklists',       icon: CheckSquare,   href: '/tc/checklists'   },
   { label: 'Calendar',         icon: Calendar,      href: '/tc/calendar'     },
-  { label: 'Contacts',         icon: MessageSquare, href: '/tc/messages'     },
+  { label: 'Contacts',         icon: User,          href: '/tc/messages'     },
   { label: 'Settings',         icon: Settings,      href: '/tc/settings'     },
 ];
 
