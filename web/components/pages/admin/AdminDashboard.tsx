@@ -1990,6 +1990,8 @@ const EVENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   config_update:   { label: 'Config Updated',  color: 'bg-purple-100 text-purple-700' },
   promo_create:    { label: 'Promo Created',   color: 'bg-amber-100 text-amber-700' },
   promo_delete:    { label: 'Promo Deleted',   color: 'bg-red-100 text-red-600' },
+  brokerage_approve: { label: 'Brokerage Approved', color: 'bg-green-100 text-green-700' },
+  brokerage_reject:  { label: 'Brokerage Rejected', color: 'bg-red-100 text-red-600' },
 };
 
 const EVENT_TYPE_OPTIONS = [
@@ -2001,6 +2003,8 @@ const EVENT_TYPE_OPTIONS = [
   { value: 'config_update',   label: 'Config Updates' },
   { value: 'promo_create',    label: 'Promo Creations' },
   { value: 'promo_delete',    label: 'Promo Deletions' },
+  { value: 'brokerage_approve', label: 'Brokerage Approvals' },
+  { value: 'brokerage_reject',  label: 'Brokerage Rejections' },
 ];
 
 function describeEntry(e: ReturnType<typeof useAuditLog>['entries'][number]): string {
@@ -2021,6 +2025,14 @@ function describeEntry(e: ReturnType<typeof useAuditLog>['entries'][number]): st
       return `${actor} created promo code${code ? ` "${code}"` : ''}`;
     }
     case 'promo_delete': return `${actor} deleted a promo code`;
+    case 'brokerage_approve': {
+      const name = e.metadata?.name as string | null;
+      return `${actor} approved brokerage${name ? ` "${name}"` : ''}`;
+    }
+    case 'brokerage_reject': {
+      const name = e.metadata?.name as string | null;
+      return `${actor} rejected brokerage${name ? ` "${name}"` : ''}`;
+    }
     default: return `${actor} performed ${e.eventType}`;
   }
 }
