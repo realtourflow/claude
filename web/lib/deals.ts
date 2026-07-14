@@ -1,19 +1,39 @@
 import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "./db";
 import { hasRole } from "./roles";
+import {
+  DEFAULT_STAGE_THRESHOLDS,
+  getStageThresholds,
+  type StageThresholds,
+} from "./system-config";
 
 /**
- * Health CASE expression. Ported verbatim from the legacy Go backend.
+ * Health CASE expression. Ported verbatim from the legacy Go backend, then
+ * wired to the admin-editable per-stage thresholds (#305).
  *
  * Red    = any incomplete task with a past due_date.
  * Yellow = deal has been in current stage longer than the stage threshold AND has
  *          incomplete tasks.
  * Green  = otherwise.
  *
+ * The per-stage day thresholds come from System Config
+ * (system_config.stage_thresholds), falling back to DEFAULT_STAGE_THRESHOLDS.
+ * They are bound as query PARAMETERS (never string-interpolated), so this stays
+ * injection-safe. Read the thresholds ONCE per request via `getStageThresholds()`
+ * and pass them in — the expression runs inside a correlated subquery per deal
+ * row, so it must not re-read config itself.
+ *
  * Use as a column expression inside SELECTs that include the `deals` table:
- *   SELECT ${healthExpr} AS health, ... FROM deals ...
+ *   const thresholds = await getStageThresholds();
+ *   SELECT ${healthExpr(thresholds)} AS health, ... FROM deals ...
+ *
+ * Called with no argument it uses DEFAULT_STAGE_THRESHOLDS — i.e. exactly the
+ * pre-#305 hard-coded behavior.
  */
-export const healthExpr = Prisma.sql`
+export function healthExpr(
+  thresholds: StageThresholds = DEFAULT_STAGE_THRESHOLDS
+): Prisma.Sql {
+  return Prisma.sql`
 CASE
   WHEN EXISTS (
     SELECT 1 FROM tasks t
@@ -28,13 +48,13 @@ CASE
     deals.created_at
   ))) / 86400)::INT >
     CASE deals.stage
-      WHEN 'intake'          THEN 5
-      WHEN 'active_search'   THEN 30
-      WHEN 'offer_active'    THEN 10
-      WHEN 'under_contract'  THEN 35
-      WHEN 'pre_close'       THEN 10
-      WHEN 'closing'         THEN 5
-      WHEN 'post_close'      THEN 21
+      WHEN 'intake'          THEN ${thresholds.intake}::int
+      WHEN 'active_search'   THEN ${thresholds.active_search}::int
+      WHEN 'offer_active'    THEN ${thresholds.offer_active}::int
+      WHEN 'under_contract'  THEN ${thresholds.under_contract}::int
+      WHEN 'pre_close'       THEN ${thresholds.pre_close}::int
+      WHEN 'closing'         THEN ${thresholds.closing}::int
+      WHEN 'post_close'      THEN ${thresholds.post_close}::int
       ELSE 30
     END
   AND EXISTS (
@@ -45,6 +65,7 @@ CASE
   ELSE 'green'
 END
 `;
+}
 
 export type DealRow = {
   id: string;
@@ -91,6 +112,9 @@ export async function listDealsForUser(
   userId: string,
   opts: { isAdmin: boolean; isTC: boolean }
 ): Promise<DealWithStats[]> {
+  // Read the admin-editable stage thresholds ONCE per list call — never per row
+  // (the health CASE runs as a correlated subquery for every deal).
+  const thresholds = await getStageThresholds();
   const filter = opts.isAdmin
     ? Prisma.sql``
     : opts.isTC
@@ -100,7 +124,7 @@ export async function listDealsForUser(
 
   return prisma.$queryRaw<DealWithStats[]>`
     SELECT deals.id, deals.agent_id, deals.type::text AS type, deals.stage::text AS stage,
-           ${healthExpr} AS health,
+           ${healthExpr(thresholds)} AS health,
            deals.title, deals.address, deals.price::text AS price, deals.arive_linked,
            deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
            deals.fee_status, deals.fee_amount_cents, deals.fee_paid_at,
@@ -128,9 +152,10 @@ export async function getDealForAgent(
   dealId: string,
   agentId: string
 ): Promise<DealRow | null> {
+  const thresholds = await getStageThresholds();
   const rows = await prisma.$queryRaw<DealRow[]>`
     SELECT id, agent_id, type::text AS type, stage::text AS stage,
-           ${healthExpr} AS health,
+           ${healthExpr(thresholds)} AS health,
            title, address, price::text AS price, arive_linked,
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,
@@ -149,9 +174,10 @@ export async function getDealForAgent(
  * Same SELECT as `getDealForAgent` so both paths return an identical shape.
  */
 export async function getDealById(dealId: string): Promise<DealRow | null> {
+  const thresholds = await getStageThresholds();
   const rows = await prisma.$queryRaw<DealRow[]>`
     SELECT id, agent_id, type::text AS type, stage::text AS stage,
-           ${healthExpr} AS health,
+           ${healthExpr(thresholds)} AS health,
            title, address, price::text AS price, arive_linked,
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,

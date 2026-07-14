@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { error, json, withAuth } from "@/lib/http";
 import { resolveUserId } from "@/lib/users";
 import { healthExpr } from "@/lib/deals";
+import { getStageThresholds } from "@/lib/system-config";
 
 // GET /api/me/deals — deals where the caller is a participant.
 export async function GET(req: Request): Promise<Response> {
@@ -10,6 +11,10 @@ export async function GET(req: Request): Promise<Response> {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
     void Prisma; // ensure import remains for $queryRaw types
+
+    // Admin-editable stage thresholds (#305), read once for this request so the
+    // client portal's health matches the agent-facing lists.
+    const thresholds = await getStageThresholds();
 
     // Full portal payload (#171): the buyer/seller portals read pre-approval,
     // BAA, Fast Pass / Smooth Exit, and ARIVE loan state from this endpoint.
@@ -44,7 +49,7 @@ export async function GET(req: Request): Promise<Response> {
       }[]
     >`
       SELECT deals.id, deals.agent_id, deals.type::text AS type, deals.stage::text AS stage,
-             ${healthExpr} AS health,
+             ${healthExpr(thresholds)} AS health,
              deals.title, deals.address, deals.price::text AS price,
              deals.arive_linked,
              deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,

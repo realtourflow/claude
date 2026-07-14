@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { GET as listDeals, POST as createDealRoute } from "@/app/api/deals/route";
 import { GET as getDealRoute } from "@/app/api/deals/[id]/route";
 import { PATCH as advanceStageRoute } from "@/app/api/deals/[id]/stage/route";
@@ -7,8 +7,10 @@ import { PATCH as commissionRoute } from "@/app/api/deals/[id]/commission/route"
 import { PATCH as flagsRoute } from "@/app/api/deals/[id]/flags/route";
 import { PATCH as buyerStatusRoute } from "@/app/api/deals/[id]/buyer-status/route";
 import { GET as myDealsRoute } from "@/app/api/me/deals/route";
+import { PUT as putConfig } from "@/app/api/admin/config/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import type { DealStage } from "@/lib/stages";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal, createTask } from "../helpers/factories";
@@ -999,6 +1001,246 @@ describe("PATCH /api/deals/[id]/flags", () => {
     const row = await prisma.deals.findUnique({ where: { id: deal.id } });
     expect(row?.pre_approved).toBe(true);
     expect(row?.baa_signed).toBe(true);
+  });
+});
+
+describe("deal health honors System Config stage_thresholds (#305)", () => {
+  // system_config is NOT cleared by truncateAll (tests/helpers/db.ts preserves
+  // it), and the suite shares one DB with fileParallelism:false. Isolate every
+  // case explicitly: start AND end with an empty config row so neither these
+  // tests nor any file that runs after this one see a stray override.
+  beforeEach(async () => {
+    await prisma.system_config.deleteMany({});
+  });
+  afterEach(async () => {
+    await prisma.system_config.deleteMany({});
+  });
+
+  // Backdate a deal so the health CASE sees it as `daysAgo` days into its
+  // current stage. Factory deals have no deal_stage_history rows, so the
+  // expression falls back to created_at — which is what we set here. Ages are
+  // always chosen 2+ days clear of a threshold so FLOOR(days) never straddles it.
+  async function ageDeal(dealId: string, daysAgo: number) {
+    const when = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+    await prisma.deals.update({
+      where: { id: dealId },
+      data: { created_at: when },
+    });
+  }
+
+  // The shipped defaults — must equal the pre-#305 hard-coded CASE values.
+  const DEFAULT_THRESHOLDS = {
+    intake: 5,
+    active_search: 30,
+    offer_active: 10,
+    under_contract: 35,
+    pre_close: 10,
+    closing: 5,
+    post_close: 21,
+  };
+
+  // Save a full SystemConfig via the real admin PUT endpoint (mirrors the UI).
+  async function saveConfig(stageThresholds: Record<string, number>) {
+    await createUser({ role: "admin", auth0_id: "auth0|admin-cfg-305" });
+    const req = new Request("http://localhost/api/admin/config", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|admin-cfg-305", ["admin"]),
+      },
+      body: JSON.stringify({
+        config: {
+          stage_thresholds: stageThresholds,
+          closing_fee_amount: 500,
+          fast_pass_base_price: 1500,
+          smooth_exit_pct: 1.0,
+        },
+      }),
+    });
+    const res = await putConfig(req);
+    expect(res.status).toBe(200);
+  }
+
+  // ── Case 1: a saved threshold actually changes health. FAILS on pre-#305
+  //    code, which ignores system_config and hard-codes intake=5.
+  it("lowering the intake threshold flips a 3-day-old intake deal to yellow", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake", title: "Wired" });
+    await ageDeal(deal.id, 3);
+    // One incomplete task (no due date ⇒ not overdue ⇒ not red) so the yellow
+    // branch is reachable.
+    await createTask({ deal_id: deal.id, status: "pending" });
+
+    // Baseline with NO saved config: 3 days < default intake threshold (5) ⇒ green.
+    const before = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(before.status).toBe(200);
+    expect(((await before.json()) as { health: string }).health).toBe("green");
+
+    // Admin lowers the intake threshold to 1 day via System Config.
+    await saveConfig({ ...DEFAULT_THRESHOLDS, intake: 1 });
+
+    // Same 3-day-old deal is now past its (1-day) intake threshold ⇒ yellow.
+    const after = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(after.status).toBe(200);
+    expect(((await after.json()) as { health: string }).health).toBe("yellow");
+  });
+
+  it("the lowered threshold also changes health in the deals LIST (hot path)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake", title: "ListWired" });
+    await ageDeal(deal.id, 3);
+    await createTask({ deal_id: deal.id, status: "pending" });
+    await saveConfig({ ...DEFAULT_THRESHOLDS, intake: 1 });
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; health: string }[];
+    expect(body.find((d) => d.title === "ListWired")?.health).toBe("yellow");
+  });
+
+  // ── Case 2 (CRITICAL regression guard): with NO config row, health is
+  //    byte-for-byte the shipped defaults across EVERY stage, both sides of
+  //    each threshold. This must pass before AND after the change.
+  it("with no saved config, every stage uses the shipped default thresholds", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+
+    const cases: { title: string; stage: DealStage; age: number; want: string }[] = [
+      { title: "intake-young", stage: "intake", age: 3, want: "green" }, // 3 < 5
+      { title: "intake-old", stage: "intake", age: 10, want: "yellow" }, // 10 > 5
+      { title: "search-young", stage: "active_search", age: 20, want: "green" }, // 20 < 30
+      { title: "search-old", stage: "active_search", age: 40, want: "yellow" }, // 40 > 30
+      { title: "offer-young", stage: "offer_active", age: 5, want: "green" }, // 5 < 10
+      { title: "offer-old", stage: "offer_active", age: 15, want: "yellow" }, // 15 > 10
+      { title: "uc-young", stage: "under_contract", age: 20, want: "green" }, // 20 < 35
+      { title: "uc-old", stage: "under_contract", age: 45, want: "yellow" }, // 45 > 35
+      { title: "pre-young", stage: "pre_close", age: 5, want: "green" }, // 5 < 10
+      { title: "pre-old", stage: "pre_close", age: 15, want: "yellow" }, // 15 > 10
+      { title: "closing-young", stage: "closing", age: 3, want: "green" }, // 3 < 5
+      { title: "closing-old", stage: "closing", age: 10, want: "yellow" }, // 10 > 5
+      { title: "post-young", stage: "post_close", age: 10, want: "green" }, // 10 < 21
+      { title: "post-old", stage: "post_close", age: 25, want: "yellow" }, // 25 > 21
+    ];
+
+    for (const c of cases) {
+      const d = await createDeal({ agent_id: agent.id, stage: c.stage, title: c.title });
+      await ageDeal(d.id, c.age);
+      await createTask({ deal_id: d.id, status: "pending" });
+    }
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; health: string }[];
+    const byTitle = Object.fromEntries(body.map((d) => [d.title, d.health]));
+    for (const c of cases) {
+      expect(byTitle[c.title], `${c.title} (${c.stage} @ ${c.age}d)`).toBe(c.want);
+    }
+  });
+
+  it("with no config, a past-threshold deal with NO incomplete tasks stays green", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake", title: "OldNoTasks" });
+    await ageDeal(deal.id, 30); // far past intake's 5-day default…
+    // …but no incomplete tasks, so the yellow branch cannot fire.
+
+    const res = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(((await res.json()) as { health: string }).health).toBe("green");
+  });
+
+  it("with no config, an overdue task is red regardless of stage age (red precedence)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake", title: "Overdue" });
+    await ageDeal(deal.id, 1); // 1 day: well UNDER intake's 5-day default
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await createTask({ deal_id: deal.id, status: "pending", due_date: yesterday });
+
+    const res = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(((await res.json()) as { health: string }).health).toBe("red");
+  });
+
+  // ── Robustness: a partial / absent stage_thresholds override must fall back
+  //    to the shipped default PER STAGE, never leave a stage unthresholded.
+  it("a partial stage_thresholds override falls back to defaults for unset stages", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Only intake overridden (to 1). active_search must still use its 30 default.
+    await saveConfig({ intake: 1 });
+
+    const intakeDeal = await createDeal({ agent_id: agent.id, stage: "intake", title: "PartIntake" });
+    await ageDeal(intakeDeal.id, 3);
+    await createTask({ deal_id: intakeDeal.id, status: "pending" });
+
+    const searchDeal = await createDeal({ agent_id: agent.id, stage: "active_search", title: "PartSearch" });
+    await ageDeal(searchDeal.id, 20); // 20 < 30 default ⇒ still green
+    await createTask({ deal_id: searchDeal.id, status: "pending" });
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      })
+    );
+    const body = (await res.json()) as { title: string; health: string }[];
+    const byTitle = Object.fromEntries(body.map((d) => [d.title, d.health]));
+    expect(byTitle["PartIntake"]).toBe("yellow"); // 3 > 1 (override applied)
+    expect(byTitle["PartSearch"]).toBe("green"); // 20 < 30 (default fallback)
+  });
+
+  it("a saved config with no stage_thresholds key at all uses every default", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Admin saved only a fee setting; stage_thresholds is entirely absent.
+    await createUser({ role: "admin", auth0_id: "auth0|admin-nofld" });
+    const putReq = new Request("http://localhost/api/admin/config", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|admin-nofld", ["admin"]),
+      },
+      body: JSON.stringify({ config: { closing_fee_amount: 500 } }),
+    });
+    expect((await putConfig(putReq)).status).toBe(200);
+
+    const young = await createDeal({ agent_id: agent.id, stage: "intake", title: "NoFldYoung" });
+    await ageDeal(young.id, 3);
+    await createTask({ deal_id: young.id, status: "pending" });
+    const old = await createDeal({ agent_id: agent.id, stage: "intake", title: "NoFldOld" });
+    await ageDeal(old.id, 10);
+    await createTask({ deal_id: old.id, status: "pending" });
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      })
+    );
+    const body = (await res.json()) as { title: string; health: string }[];
+    const byTitle = Object.fromEntries(body.map((d) => [d.title, d.health]));
+    expect(byTitle["NoFldYoung"]).toBe("green"); // 3 < 5 default
+    expect(byTitle["NoFldOld"]).toBe("yellow"); // 10 > 5 default
   });
 });
 
