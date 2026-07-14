@@ -212,6 +212,140 @@ describe("FF1 — notification emails (Resend)", () => {
     expect(sent[0].html).toContain(`/buyer/${buyer.id}`);
   });
 
+  // #293 — a CLIENT uploading (the "please upload your pre-approval" reply)
+  // must reach the deal's agent. On the common single-participant deal the old
+  // recipient set (clients minus the uploader) was EMPTY → nobody was emailed
+  // and the request-a-doc loop dead-ended silently.
+  it("2b. CLIENT upload (sole participant) → emails the deal's agent (#293)", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/documents`,
+      "auth0|buyer",
+      ["buyer"],
+      { name: "PreApproval.pdf", s3_key: `deals/${deal.id}/1/preapproval.pdf` }
+    );
+    const res = await createDocumentRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+
+    // The agent is notified — previously the recipient set was empty here.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("agent@example.com");
+    expect(sent[0].to).not.toBe("buyer@example.com");
+    // Agent recipient links to the agent deal route (not a client portal).
+    expect(sent[0].html).toContain(`/agent/deals/${deal.id}`);
+  });
+
+  // #293 guard — an AGENT's own upload must NOT self-notify; only the clients
+  // hear about it (unchanged from before).
+  it("2c. AGENT upload → only clients emailed, never the agent (no self-notify; #293)", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer1 = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer1",
+      email: "buyer1@example.com",
+    });
+    const buyer2 = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer2",
+      email: "buyer2@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer1.id, role: "buyer" },
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer2.id, role: "buyer" },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/documents`,
+      "auth0|agent",
+      ["agent"],
+      { name: "Disclosures.pdf", s3_key: `deals/${deal.id}/1/disclosures.pdf` }
+    );
+    const res = await createDocumentRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+
+    const recipients = sent.map((e) => e.to);
+    expect(recipients).toHaveLength(2);
+    expect(recipients).toContain("buyer1@example.com");
+    expect(recipients).toContain("buyer2@example.com");
+    expect(recipients).not.toContain("agent@example.com");
+  });
+
+  // #293 — a CLIENT upload on a deal with a co-buyer must reach BOTH the
+  // co-buyer AND the agent, and never the uploader, with no duplicate sends.
+  it("2d. CLIENT upload with a co-buyer → co-buyer AND agent emailed, no dupes (#293)", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer1 = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer1",
+      email: "buyer1@example.com",
+    });
+    const buyer2 = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer2",
+      email: "buyer2@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer1.id, role: "buyer" },
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer2.id, role: "buyer" },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    // buyer1 uploads.
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/documents`,
+      "auth0|buyer1",
+      ["buyer"],
+      { name: "PreApproval.pdf", s3_key: `deals/${deal.id}/1/preapproval.pdf` }
+    );
+    const res = await createDocumentRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+
+    const recipients = sent.map((e) => e.to);
+    // The co-buyer AND the agent — but never the uploader.
+    expect(recipients).toHaveLength(2);
+    expect(recipients).toContain("buyer2@example.com");
+    expect(recipients).toContain("agent@example.com");
+    expect(recipients).not.toContain("buyer1@example.com");
+    // No address emailed twice.
+    expect(new Set(recipients).size).toBe(recipients.length);
+  });
+
   it("3. task created with an assignee → emails the assignee", async () => {
     const agent = await createUser({
       role: "agent",

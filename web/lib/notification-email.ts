@@ -178,7 +178,20 @@ export async function emailNewMessage(input: {
   });
 }
 
-/** Document uploaded/confirmed: email the deal's client(s). Never the uploader. */
+/**
+ * Document uploaded/confirmed: email the deal's client(s) AND the deal's agent.
+ * Never the uploader.
+ *
+ * The agent belongs in the recipient set whenever they are not the uploader
+ * (#293): when a CLIENT uploads (the "please upload your pre-approval" reply),
+ * the agent is the party waiting on it, yet the old client-only fan-out left
+ * them out entirely — and on the common single-participant deal the recipient
+ * set (clients minus the uploader) was empty, so nobody was emailed and the
+ * request-a-doc loop dead-ended silently. When the AGENT uploads, `agent.id ===
+ * uploaderId` so they are skipped and only the clients hear about it (unchanged,
+ * no self-notify). fanOut dedupes by email, so an agent who is somehow also a
+ * client participant is never emailed twice.
+ */
 export async function emailDocumentUploaded(input: {
   req: Request;
   dealId: string;
@@ -195,6 +208,14 @@ export async function emailDocumentUploaded(input: {
       email: c.email,
       url: recipientUrl(origin, c.role, c.user_id, dealId),
     }));
+
+  const agent = await dealAgent(dealId);
+  if (agent && agent.id !== uploaderId) {
+    recipients.push({
+      email: agent.email,
+      url: recipientUrl(origin, "agent", agent.id, dealId),
+    });
+  }
 
   await fanOut(recipients, {
     subject: "A document was shared on your RealTourFlow deal",
