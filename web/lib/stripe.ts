@@ -18,6 +18,12 @@ type StripeLike = {
       create: (
         params: Stripe.Checkout.SessionCreateParams
       ) => Promise<Pick<Stripe.Checkout.Session, "id" | "url">>;
+      // Optional so existing test stubs that only stub `create` still satisfy
+      // the type (backward-compatible seam). The real Stripe client always has
+      // it; only routes that call retrieveCheckoutSession need a stub for it.
+      retrieve?: (
+        id: string
+      ) => Promise<Pick<Stripe.Checkout.Session, "id" | "url" | "status">>;
     };
   };
   webhooks: {
@@ -77,6 +83,36 @@ export async function createCheckoutSession(
     metadata: { deal_id: input.dealId, type: "closing_fee" },
   });
   return { id: session.id, url: session.url ?? null };
+}
+
+export type CheckoutSessionSnapshot = {
+  id: string;
+  url: string | null;
+  // Stripe's session status ('open' | 'complete' | 'expired') or null. Indexed
+  // access (not `Session.Status`) — the namespace isn't reachable through the
+  // default import.
+  status: Stripe.Checkout.Session["status"];
+};
+
+/**
+ * Fetch the live status of an existing Checkout Session. Lets a caller tell an
+ * abandoned/`expired` session (safe to replace) from one still `open` (must be
+ * reused — minting a second payable session would double-charge). Used by the
+ * closing-fee checkout route (#282).
+ */
+export async function retrieveCheckoutSession(
+  sessionId: string
+): Promise<CheckoutSessionSnapshot> {
+  const sessions = client().checkout.sessions;
+  if (!sessions.retrieve) {
+    throw new Error("checkout.sessions.retrieve is not available");
+  }
+  const session = await sessions.retrieve(sessionId);
+  return {
+    id: session.id,
+    url: session.url ?? null,
+    status: session.status ?? null,
+  };
 }
 
 export type CreateUpsellCheckoutInput = {
