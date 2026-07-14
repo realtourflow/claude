@@ -555,6 +555,158 @@ describe("PATCH /api/deals/[id]/stage — auto-task seeding (#87)", () => {
   });
 });
 
+describe("PATCH /api/deals/[id]/stage — same-stage no-op + skipped gate (#263)", () => {
+  async function patchStage(
+    dealId: string,
+    token: string,
+    stage: string,
+    opts: { force?: boolean } = {}
+  ) {
+    const qs = opts.force ? "?force=true" : "";
+    const req = new Request(`http://localhost/api/deals/${dealId}/stage${qs}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: token },
+      body: JSON.stringify({ stage }),
+    });
+    return advanceStageRoute(req, ctx(dealId));
+  }
+
+  it("same-stage PATCH is a no-op — no history, notification, or audit rows", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      stage: "active_search",
+      type: "buy",
+      title: "Jane Buyer",
+    });
+    // A participant so the stage fan-out WOULD write a notification if it ran.
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    // PATCH to the stage the deal is already in (double-clicked confirm / retry).
+    const res = await patchStage(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage: string };
+    expect(body.stage).toBe("active_search");
+
+    // No junk written: the from===to history row, the audit row, and the
+    // "moved forward" participant notification are all skipped.
+    expect(
+      await prisma.deal_stage_history.count({ where: { deal_id: deal.id } })
+    ).toBe(0);
+    expect(
+      await prisma.notifications.count({
+        where: { deal_id: deal.id, type: "stage_change" },
+      })
+    ).toBe(0);
+    expect(
+      await prisma.audit_log.count({
+        where: { deal_id: deal.id, event_type: "stage_change" },
+      })
+    ).toBe(0);
+  });
+
+  it("a high-priority 'skipped' task does not block a forward advance", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await createTask({
+      deal_id: deal.id,
+      priority: "high",
+      status: "skipped",
+      stage_context: "intake",
+      title: "Explicitly skipped",
+    });
+
+    const res = await patchStage(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    // skipped == closed (matches deals.ts open-count / health semantics), so
+    // the blocking gate lets the advance through.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage: string };
+    expect(body.stage).toBe("active_search");
+    expect(
+      await prisma.deal_stage_history.count({ where: { deal_id: deal.id } })
+    ).toBe(1);
+  });
+
+  it("a high-priority 'pending' task still blocks (gate regression guard)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await createTask({
+      deal_id: deal.id,
+      priority: "high",
+      status: "pending",
+      stage_context: "intake",
+      title: "Still open",
+    });
+
+    const res = await patchStage(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      gate: boolean;
+      blocking_tasks: { title: string }[];
+    };
+    expect(body.gate).toBe(true);
+    expect(body.blocking_tasks[0].title).toBe("Still open");
+    // A blocked advance wrote nothing.
+    expect(
+      await prisma.deal_stage_history.count({ where: { deal_id: deal.id } })
+    ).toBe(0);
+  });
+
+  it("a real advance still writes one history row, seeds tasks, notifies participants", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      stage: "intake",
+      type: "buy",
+      title: "Jane Buyer",
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const res = await patchStage(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    expect(res.status).toBe(200);
+
+    // Exactly one history row for the real transition.
+    const history = await prisma.deal_stage_history.findMany({
+      where: { deal_id: deal.id },
+    });
+    expect(history.length).toBe(1);
+    expect(history[0].from_stage).toBe("intake");
+    expect(history[0].to_stage).toBe("active_search");
+
+    // Buy-side auto-tasks seeded.
+    expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(3);
+
+    // Participant notified of the move.
+    expect(
+      await prisma.notifications.count({
+        where: { user_id: buyer.id, deal_id: deal.id, type: "stage_change" },
+      })
+    ).toBe(1);
+  });
+});
+
 describe("PATCH /api/deals/[id]/notes", () => {
   it("updates notes for the owning agent", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });

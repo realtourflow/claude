@@ -39,13 +39,29 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     });
     if (!current) return error("deal not found", 404);
 
+    // Same-stage PATCH is a no-op (#263). A double-clicked confirm or a retry
+    // targeting the stage the deal is ALREADY in must not run the transaction —
+    // otherwise it writes a from===to deal_stage_history row, an audit row, a
+    // "moved forward" notification to every participant, and a calendar push,
+    // spamming clients and polluting history. Return the fresh deal so the
+    // caller still gets current state (retry-safe). No seed needed: a deal
+    // already in this stage was seeded when it advanced in.
+    if (current.stage === newStage) {
+      const fresh = await getDealForAgent(dealId, userId);
+      return json(fresh);
+    }
+
     // Blocking-task gate (skipped on force).
     if (!force && isForwardAdvance(current.stage, newStage)) {
       const blocking = await prisma.tasks.findMany({
         where: {
           deal_id: dealId,
           priority: "high",
-          status: { not: "completed" },
+          // 'skipped' is closed, not open (#263) — mirrors deals.ts open-count
+          // + healthExpr, the iCal feed, and calendar push, all of which treat
+          // NOT IN ('completed','skipped') as the open set. A task the agent
+          // explicitly skipped must not 422 the advance.
+          status: { notIn: ["completed", "skipped"] },
           OR: [{ stage_context: current.stage }, { stage_context: null }],
         },
         select: { id: true, title: true },
