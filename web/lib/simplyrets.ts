@@ -36,6 +36,22 @@ export type SimplyRetsClient = {
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
+/**
+ * Thrown when SimplyRETS rejects the supplied MLS key/secret with 401
+ * Unauthorized — i.e. the credentials are genuinely wrong. Callers branch on
+ * this (`instanceof`) to tell a real auth failure apart from a transient outage
+ * (5xx / timeout / network), which surfaces as a generic `Error` instead.
+ *
+ * See issue #309: during an outage an agent with correct credentials must NOT
+ * be told their credentials are invalid.
+ */
+export class SimplyRetsAuthError extends Error {
+  constructor(message = "invalid MLS credentials") {
+    super(message);
+    this.name = "SimplyRetsAuthError";
+  }
+}
+
 // The subset of the SimplyRETS /properties response we read. Mirrors the Go
 // Listing struct's json tags in simplyrets/client.go.
 type SimplyRetsListing = {
@@ -105,9 +121,12 @@ export class DefaultSimplyRetsClient implements SimplyRetsClient {
     });
 
     if (res.status === 401) {
-      throw new Error("invalid MLS credentials");
+      // A genuine auth rejection — typed so callers can distinguish it from a
+      // transient outage below (issue #309) without string-matching.
+      throw new SimplyRetsAuthError("invalid MLS credentials");
     }
     if (!res.ok) {
+      // 5xx / other non-2xx = SimplyRETS is failing, NOT the agent's creds.
       throw new Error(`simplyrets: ${res.status} ${res.statusText}`);
     }
 
