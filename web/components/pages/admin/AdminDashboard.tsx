@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useUsers, AppUser } from "@/hooks/useUsers";
+import { useAgentInvites, AgentInvite } from "@/hooks/useAgentInvites";
 import { useSystemConfig, usePromoCodes, useAuditLog, SystemConfig, CreatePromoCodeInput } from "@/hooks/useAdmin";
 import { Deal } from "@/lib/types";
 import { FormReview } from "@/components/pages/admin/FormReview";
@@ -1233,7 +1234,112 @@ function InviteAgentModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function UserManagement() {
+// Lists agent invites (pending / claimed) and lets an admin revoke an
+// unclaimed one. The GET/DELETE endpoints already existed — this is the UI
+// that finally calls them (#304). A claimed invite exposes no Revoke action.
+function AgentInvitesSection() {
+  const { invites, loading, error, revokeInvite } = useAgentInvites();
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  // Snapshot "now" once (lazy init) so the expiry check stays pure across renders.
+  const [now] = useState(() => Date.now());
+
+  async function handleRevoke(invite: AgentInvite) {
+    setRevokingId(invite.id);
+    try {
+      await revokeInvite(invite.id);
+    } catch {
+      // leave the row in place if the revoke fails
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  function fmtDate(iso: string) {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+      ? '—'
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  return (
+    <section>
+      <div className="mb-3 flex items-center gap-2">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400">Agent Invites</h2>
+        {invites.length > 0 && (
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{invites.length}</span>
+        )}
+      </div>
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="px-5 py-6 text-center text-sm text-gray-400">Loading invites…</div>
+        ) : error ? (
+          <div className="px-5 py-6 text-center text-sm text-red-500">{error}</div>
+        ) : invites.length === 0 ? (
+          <div className="px-5 py-6 text-center text-sm text-gray-400">No agent invites yet.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-400">
+                <th className="px-5 py-3">Invitee</th>
+                <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3">Sent</th>
+                <th className="px-5 py-3">Expires</th>
+                <th className="px-5 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invites.map((inv) => {
+                const expired = !inv.claimed && new Date(inv.expiresAt).getTime() < now;
+                return (
+                  <tr key={inv.id} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
+                    <td className="px-5 py-3">
+                      <div className="font-semibold text-brand-navy text-sm">{inv.name || '—'}</div>
+                      <a href={`mailto:${inv.email}`} className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-navy transition-colors">
+                        <Mail size={11} /> {inv.email}
+                      </a>
+                    </td>
+                    <td className="px-5 py-3">
+                      {inv.claimed ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">
+                          <ShieldCheck size={11} /> Claimed
+                        </span>
+                      ) : expired ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-600">
+                          <Clock size={11} /> Expired
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                          <Clock size={11} /> Pending
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-xs text-gray-500">{fmtDate(inv.createdAt)}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">{fmtDate(inv.expiresAt)}</td>
+                    <td className="px-5 py-3 text-right">
+                      {inv.claimed ? (
+                        <span className="text-xs text-gray-300">—</span>
+                      ) : (
+                        <button
+                          onClick={() => handleRevoke(inv)}
+                          disabled={revokingId === inv.id}
+                          className="inline-flex items-center gap-1 rounded-lg border border-red-100 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          <Trash2 size={11} /> {revokingId === inv.id ? 'Revoking…' : 'Revoke'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export function UserManagement() {
   const { users, loading, deactivateUser, activateUser } = useUsers();
   const [showInviteModal, setShowInviteModal] = useState(false);
 
@@ -1379,6 +1485,8 @@ function UserManagement() {
           </section>
         );
       })}
+
+      <AgentInvitesSection />
 
       <div className="rounded-xl border-2 border-dashed border-gray-200 px-5 py-6 text-center">
         <UserPlus size={20} className="mx-auto mb-2 text-gray-300" />
