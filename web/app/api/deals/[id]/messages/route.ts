@@ -7,7 +7,7 @@ import {
   listMessages,
 } from "@/lib/messages";
 import { createNotification } from "@/lib/notifications";
-import { emailNewMessage } from "@/lib/notification-email";
+import { emailNewMessage, recipientUrl } from "@/lib/notification-email";
 import { prisma } from "@/lib/db";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -115,9 +115,12 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
             channel === "internal"
               ? { deal_id: dealId, role: "tc" }
               : { deal_id: dealId },
-          select: { user_id: true },
+          select: { user_id: true, role: true },
         });
-        const recipientIds = new Set(participants.map((p) => p.user_id));
+        // Track each recipient's role RELATIVE TO THIS DEAL so the notification
+        // gets a role-appropriate deep-link href (#291) instead of '#'.
+        const roleByRecipient = new Map<string, string>();
+        for (const p of participants) roleByRecipient.set(p.user_id, p.role);
         if (channel === "internal") {
           // The poster IS the deal agent here, so their own tc_user_id is the
           // deal's linked TC.
@@ -125,16 +128,17 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
             where: { id: userId },
             select: { tc_user_id: true },
           });
-          if (agentRow?.tc_user_id) recipientIds.add(agentRow.tc_user_id);
+          if (agentRow?.tc_user_id) roleByRecipient.set(agentRow.tc_user_id, "tc");
         }
-        recipientIds.delete(userId); // never notify the sender
-        for (const recipientId of recipientIds) {
+        roleByRecipient.delete(userId); // never notify the sender
+        for (const [recipientId, role] of roleByRecipient) {
           await createNotification({
             userId: recipientId,
             title,
             body: snippet,
             kind: "new_message",
             dealId,
+            href: recipientUrl("", role, recipientId, dealId),
           });
         }
       } else if (access.agentId) {
@@ -144,6 +148,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
           body: snippet,
           kind: "new_message",
           dealId,
+          href: recipientUrl("", "agent", access.agentId, dealId),
         });
       }
     } catch (err) {
