@@ -3,11 +3,13 @@ import {
   it,
   expect,
   beforeAll,
+  afterAll,
   beforeEach,
   afterEach,
 } from "vitest";
 import { POST as syncAriveRoute } from "@/app/api/deals/[id]/arive/sync/route";
 import { POST as ariveWebhook } from "@/app/api/arive/webhook/route";
+import { resetEnvForTesting } from "@/lib/env";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setAriveForTesting, type AriveClient } from "@/lib/arive";
 import { setCalendarHttpForTesting } from "@/lib/calendar";
@@ -16,9 +18,20 @@ import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal } from "../helpers/factories";
 
+const ARIVE_WEBHOOK_TOKEN = "test-arive-webhook-secret";
+
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
   setVerifyOptionsForTesting(verifyOpts);
+  // The webhook is fail-closed (#270) — configure the shared secret so the
+  // webhook-sync test can authenticate.
+  process.env.ARIVE_WEBHOOK_SECRET = ARIVE_WEBHOOK_TOKEN;
+  resetEnvForTesting();
+});
+
+afterAll(() => {
+  delete process.env.ARIVE_WEBHOOK_SECRET;
+  resetEnvForTesting();
 });
 
 afterEach(() => {
@@ -110,7 +123,10 @@ describe("ARIVE → calendar push", () => {
 
     const req = new Request("http://localhost/api/arive/webhook", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "x-arive-token": ARIVE_WEBHOOK_TOKEN,
+      },
       body: JSON.stringify({ loanId: "loan-1" }),
     });
     const res = await ariveWebhook(req);
