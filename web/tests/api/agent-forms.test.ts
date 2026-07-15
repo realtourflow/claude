@@ -5,7 +5,7 @@ import {
   listAgentFormsForAgent,
   agentFormViewer,
 } from "@/lib/agent-forms";
-import { POST as createForm } from "@/app/api/me/forms/route";
+import { GET as listMyForms, POST as createForm } from "@/app/api/me/forms/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setFieldMapperForTesting } from "@/lib/form-ai/mapper";
@@ -178,6 +178,61 @@ describe("agent-forms resolver", () => {
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ label: "Mine", board: "" });
     expect(list[0].roles).toEqual(["seller"]);
+  });
+});
+
+// #295 — the My Forms list is the agent's only view of a review outcome, but it
+// never returned review_notes, so a rejected form showed a bare "Rejected" chip
+// with no reason. The list endpoint now selects and returns review_notes.
+describe("GET /api/me/forms — surfaces review_notes (#295)", () => {
+  async function seedOwned(
+    agentId: string,
+    o: { status: string; review_notes?: string | null; label?: string }
+  ): Promise<void> {
+    await prisma.uploaded_forms.create({
+      data: {
+        agent_id: agentId,
+        label: o.label ?? "Purchase Agreement",
+        side: "buy",
+        status: o.status,
+        review_notes: o.review_notes ?? null,
+        source_s3_key: "k",
+        source_file_name: "pa.pdf",
+        attested_by: agentId,
+        attestation_statement: "x",
+        file_sha256: "deadbeef",
+      },
+    });
+  }
+
+  async function listReq(sub: string): Promise<Response> {
+    return listMyForms(
+      new Request("http://localhost/api/me/forms", {
+        headers: { authorization: await authHeader(sub, ["agent"]) },
+      })
+    );
+  }
+
+  it("returns the admin's review_notes for a rejected form", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await seedOwned(agent.id, { status: "rejected", review_notes: "signature block cut off" });
+
+    const res = await listReq("auth0|a");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ status: string; review_notes: string | null }>;
+    expect(body).toHaveLength(1);
+    expect(body[0].status).toBe("rejected");
+    expect(body[0].review_notes).toBe("signature block cut off");
+  });
+
+  it("returns review_notes as null when there is no note", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await seedOwned(agent.id, { status: "ready" });
+
+    const res = await listReq("auth0|a");
+    const body = (await res.json()) as Array<{ review_notes: string | null }>;
+    expect(body).toHaveLength(1);
+    expect(body[0].review_notes).toBeNull();
   });
 });
 

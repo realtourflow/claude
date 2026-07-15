@@ -57,6 +57,9 @@ type FormListRow = {
   created_at: Date;
   field_count: number;
   needs_review_count: number;
+  // The admin's rejection reason (#295) — surfaced under the "Rejected" chip in
+  // My Forms so an agent learns WHY, not just THAT, their form was rejected.
+  review_notes: string | null;
 };
 
 function serializeListRow(r: FormListRow) {
@@ -69,6 +72,7 @@ function serializeListRow(r: FormListRow) {
     created_at: r.created_at.toISOString(),
     field_count: Number(r.field_count),
     needs_review_count: Number(r.needs_review_count),
+    review_notes: r.review_notes,
   };
 }
 
@@ -82,6 +86,7 @@ export async function GET(req: Request): Promise<Response> {
 
       const rows = await prisma.$queryRaw<FormListRow[]>`
         SELECT f.id, f.label, f.side, f.status, f.source_file_name, f.created_at,
+               f.review_notes,
                COUNT(ff.id)::int AS field_count,
                COUNT(ff.id) FILTER (WHERE ff.needs_review)::int AS needs_review_count
         FROM uploaded_forms f

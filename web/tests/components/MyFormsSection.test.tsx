@@ -33,6 +33,7 @@ function form(overrides: Partial<UploadedForm> = {}): UploadedForm {
     fileName: "pa.pdf",
     fieldCount: 12,
     needsReviewCount: 0,
+    reviewNotes: null,
     createdAt: "2026-07-01T00:00:00.000Z",
     ...overrides,
   };
@@ -97,5 +98,55 @@ describe("MyFormsSection status chips", () => {
     expect(screen.getByText("Ready")).toBeInTheDocument();
     expect(screen.getByText("Rejected")).toBeInTheDocument();
     expect(screen.getByText("Archived")).toBeInTheDocument();
+  });
+});
+
+// #295 — a rejected form must show WHY, not just a bare "Rejected" chip. The row
+// surfaces the admin's review_notes when the form is rejected and a note exists.
+describe("MyFormsSection rejection reason (#295)", () => {
+  it("shows the rejection reason on a rejected form", () => {
+    mockForms([
+      form({
+        id: "f-rej",
+        label: "Bad Scan PA",
+        status: "rejected",
+        reviewNotes: "signature block cut off",
+      }),
+    ]);
+
+    render(<MyFormsSection />);
+
+    expect(screen.getByText("Bad Scan PA")).toBeInTheDocument();
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+    // The admin's stated reason is visible on the row.
+    expect(screen.getByText(/signature block cut off/)).toBeInTheDocument();
+  });
+
+  it("shows no reason text when a rejected form has no note", () => {
+    mockForms([
+      form({ id: "f-rej2", label: "Rejected, No Note", status: "rejected", reviewNotes: null }),
+    ]);
+
+    render(<MyFormsSection />);
+
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+    expect(screen.queryByText(/signature block cut off/)).not.toBeInTheDocument();
+  });
+
+  it("does NOT show review_notes on a non-rejected form even if present", () => {
+    // Defensive: a stale note on a re-approved form must not leak into the UI.
+    mockForms([
+      form({
+        id: "f-ok",
+        label: "Ready Again",
+        status: "ready",
+        reviewNotes: "was rejected earlier",
+      }),
+    ]);
+
+    render(<MyFormsSection />);
+
+    expect(screen.getByText("Ready")).toBeInTheDocument();
+    expect(screen.queryByText(/was rejected earlier/)).not.toBeInTheDocument();
   });
 });
