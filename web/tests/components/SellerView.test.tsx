@@ -82,6 +82,7 @@ vi.mock("@/hooks/useNotifications", () => ({
   }),
 }));
 
+import { postMessage } from "@/hooks/useMessages";
 import SellerView from "@/components/pages/seller/SellerView";
 
 const DEAL_ID = "5f0f6f6a-9b1c-4f6e-8a2d-3c4b5a697e01";
@@ -158,6 +159,7 @@ beforeEach(() => {
   mockNotifications = [];
   mockMarkRead.mockClear();
   dealOverrides = {};
+  vi.mocked(postMessage).mockReset();
 });
 
 describe("SellerView at offer_active — offers are real, never fabricated (#182)", () => {
@@ -299,5 +301,85 @@ describe("SellerView — Messages tab unread badge (#294)", () => {
     expect(mockMarkRead).not.toHaveBeenCalledWith("other-type");
     expect(mockMarkRead).not.toHaveBeenCalledWith("already-read");
     expect(mockMarkRead).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ─── Seller portal papercuts (#262) ──────────────────────────────────────────
+// Three small dead-or-wrong UI behaviors in SellerView:
+//   1. an offer's close date rendered as a raw ISO string ("2026-08-15T00:00…Z");
+//   2. the referral-modal "Copy" button had no onClick (nothing was copied);
+//   3. MessagesTab swallowed send failures ({ ...catch {} }) — no user feedback.
+
+describe("SellerView — offer close date is a friendly, timezone-safe date (#262)", () => {
+  it("renders 'Aug 15, 2026' for a UTC-midnight ISO close date, never the raw ISO, even in a negative-offset timezone", () => {
+    const originalTZ = process.env.TZ;
+    // US Pacific (UTC-8/-7). A naive `new Date(iso)` would render the day BEFORE
+    // (Aug 14) here — the whole point of formatting the date part directly.
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      mockOffers = [makeOffer({ closeDate: "2026-08-15T00:00:00.000Z" })];
+      renderSeller(<SellerView />);
+
+      expect(screen.getByText(/Aug 15, 2026/)).toBeTruthy();
+      // Never the raw ISO, and never shifted a day back to the 14th.
+      expect(screen.queryByText(/2026-08-15T/)).toBeNull();
+      expect(screen.queryByText(/Aug 14, 2026/)).toBeNull();
+    } finally {
+      process.env.TZ = originalTZ;
+    }
+  });
+
+  it("also formats a plain date-only close date ('2026-08-14') without shifting the day", () => {
+    const originalTZ = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      mockOffers = [makeOffer({ closeDate: "2026-08-14" })];
+      renderSeller(<SellerView />);
+
+      expect(screen.getByText(/Aug 14, 2026/)).toBeTruthy();
+      expect(screen.queryByText(/Aug 13, 2026/)).toBeNull();
+    } finally {
+      process.env.TZ = originalTZ;
+    }
+  });
+});
+
+describe("SellerView — referral 'Copy' button actually copies (#262)", () => {
+  it("copies the referral URL to the clipboard and shows 'Copied' feedback", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    dealOverrides = { stage: "post_close" };
+    renderSeller(<SellerView />);
+
+    // Open the referral modal, then click Copy.
+    fireEvent.click(screen.getByRole("button", { name: /refer a friend/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+
+    expect(writeText).toHaveBeenCalledWith("realtourflow.com/refer");
+    // Feedback: the button flips to a "Copied" state.
+    expect(await screen.findByRole("button", { name: /copied/i })).toBeTruthy();
+  });
+});
+
+describe("SellerView — message send failures are surfaced, draft preserved (#262)", () => {
+  it("shows a role='alert' error and keeps the draft when postMessage rejects", async () => {
+    vi.mocked(postMessage).mockRejectedValueOnce(new Error("network down"));
+    renderSeller(<SellerView />);
+
+    // Open the Messages tab, type a draft, and send via Enter.
+    fireEvent.click(screen.getByRole("button", { name: /messages/i }));
+    const input = screen.getByPlaceholderText(/message your agent/i);
+    fireEvent.change(input, { target: { value: "Please call me back" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // The failure is surfaced to the seller…
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent ?? "").toMatch(/fail|again|try/i);
+    // …and the draft is not lost, so they can retry.
+    expect(screen.getByPlaceholderText(/message your agent/i)).toHaveValue("Please call me back");
   });
 });
