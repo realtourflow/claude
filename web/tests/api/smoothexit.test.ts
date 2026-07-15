@@ -483,6 +483,270 @@ describe("POST /api/deals/[id]/smoothexit", () => {
   });
 });
 
+describe("POST /api/deals/[id]/smoothexit — re-enrollment after payment (#260)", () => {
+  const PAID_AT = "2026-03-01T12:00:00.000Z";
+  const ENROLLED_AT = "2026-02-28T09:00:00.000Z";
+
+  // Seed a smooth_exit that a completed Stripe checkout would have left behind:
+  // the webhook (stripe/webhook/route.ts) flips upsells_paid=true and stamps
+  // upsells_paid_at + upsells_checkout_session_id. Done directly via Prisma so
+  // the paid timestamps are deterministic and assertable.
+  async function seedPaidEnrollment(
+    dealId: string,
+    selected: string[],
+    upsellTotalCents: number
+  ): Promise<void> {
+    await prisma.deals.update({
+      where: { id: dealId },
+      data: {
+        smooth_exit: {
+          status: "active",
+          payment_option: "from_proceeds",
+          estimated_sale_price: 500000,
+          fee_cents: 500000,
+          survey_answers: { goal: "downsize" },
+          selected_upsells: selected,
+          upsell_total_cents: upsellTotalCents,
+          upsells_paid: true,
+          upsells_paid_at: PAID_AT,
+          upsells_checkout_session_id: "cs_paid_original",
+          enrolled_at: ENROLLED_AT,
+        },
+      },
+    });
+  }
+
+  it("re-POSTing the same paid enrollment keeps upsells_paid + original upsells_paid_at, and does NOT re-charge (no checkout_url)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "999 Paid Way" });
+    // staging_consult = 24700, already paid.
+    await seedPaidEnrollment(deal.id, ["staging_consult"], 24700);
+
+    let stripeCalled = false;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async () => {
+            stripeCalled = true;
+            return { id: "cs_should_not_happen", url: "https://stripe.test/nope" };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/smoothexit`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        payment_option: "from_proceeds",
+        estimated_sale_price: 500000,
+        fee_cents: 500000,
+        survey_answers: { goal: "downsize" },
+        // Same single upsell that was already paid for.
+        selected_upsells: ["staging_consult"],
+        upsell_total_cents: 24700,
+      }),
+    });
+    const res = await smoothExitRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok?: boolean; checkout_url?: string };
+    expect(json.ok).toBe(true);
+    // No new upsells → no second checkout for services already paid for.
+    expect(json.checkout_url).toBeUndefined();
+    expect(stripeCalled).toBe(false);
+
+    // The payment record survives: upsells_paid stays true with the ORIGINAL
+    // upsells_paid_at + session id, and enrolled_at is not reset.
+    const rows = await prisma.$queryRaw<
+      {
+        upsells_paid: boolean;
+        upsells_paid_at: string | null;
+        upsells_checkout_session_id: string | null;
+        enrolled_at: string | null;
+        selected_upsells: unknown;
+      }[]
+    >`
+      SELECT (smooth_exit->>'upsells_paid')::boolean     AS upsells_paid,
+             smooth_exit->>'upsells_paid_at'             AS upsells_paid_at,
+             smooth_exit->>'upsells_checkout_session_id' AS upsells_checkout_session_id,
+             smooth_exit->>'enrolled_at'                 AS enrolled_at,
+             smooth_exit->'selected_upsells'             AS selected_upsells
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].upsells_paid).toBe(true);
+    expect(rows[0].upsells_paid_at).toBe(PAID_AT);
+    expect(rows[0].upsells_checkout_session_id).toBe("cs_paid_original");
+    expect(rows[0].enrolled_at).toBe(ENROLLED_AT);
+    expect(rows[0].selected_upsells).toEqual(["staging_consult"]);
+  });
+
+  it("re-POSTing a paid enrollment with ONE new upsell charges only the new upsell; selected_upsells is the union, payment record preserved", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "777 Delta Dr" });
+    // staging_consult = 24700, already paid.
+    await seedPaidEnrollment(deal.id, ["staging_consult"], 24700);
+
+    let captured: Stripe.Checkout.SessionCreateParams | undefined;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async (params: Stripe.Checkout.SessionCreateParams) => {
+            captured = params;
+            return {
+              id: "cs_smoothexit_delta",
+              url: "https://stripe.test/checkout/cs_smoothexit_delta",
+            };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/smoothexit`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        payment_option: "from_proceeds",
+        estimated_sale_price: 500000,
+        fee_cents: 500000,
+        survey_answers: { goal: "downsize" },
+        // Keep the paid staging_consult, ADD photography_upgrade (19700).
+        selected_upsells: ["staging_consult", "photography_upgrade"],
+        // Client claims the full 44400; server must only charge the delta.
+        upsell_total_cents: 44400,
+      }),
+    });
+    const res = await smoothExitRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok?: boolean; checkout_url?: string };
+    expect(json.checkout_url).toBe(
+      "https://stripe.test/checkout/cs_smoothexit_delta"
+    );
+
+    // Stripe is charged ONLY for the newly-added photography_upgrade (19700),
+    // NOT the already-paid staging_consult.
+    expect(captured).toBeDefined();
+    expect(captured!.line_items?.[0]?.price_data?.unit_amount).toBe(19700);
+
+    // The payment record for the first upsell is preserved, and selected_upsells
+    // stores the union (paid + newly-added). upsell_total_cents reflects the
+    // cumulative catalog value of the union (24700 + 19700).
+    const rows = await prisma.$queryRaw<
+      {
+        upsells_paid: boolean;
+        upsells_paid_at: string | null;
+        enrolled_at: string | null;
+        upsell_total_cents: string;
+        selected_upsells: string[];
+      }[]
+    >`
+      SELECT (smooth_exit->>'upsells_paid')::boolean AS upsells_paid,
+             smooth_exit->>'upsells_paid_at'         AS upsells_paid_at,
+             smooth_exit->>'enrolled_at'             AS enrolled_at,
+             smooth_exit->>'upsell_total_cents'      AS upsell_total_cents,
+             smooth_exit->'selected_upsells'         AS selected_upsells
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].upsells_paid).toBe(true);
+    expect(rows[0].upsells_paid_at).toBe(PAID_AT);
+    expect(rows[0].enrolled_at).toBe(ENROLLED_AT);
+    expect([...rows[0].selected_upsells].sort()).toEqual([
+      "photography_upgrade",
+      "staging_consult",
+    ]);
+    expect(rows[0].upsell_total_cents).toBe("44400");
+  });
+
+  it("first-time enrollment (no existing smooth_exit) is unchanged — upsells_paid false, full selection priced, fresh enrolled_at", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "111 First St" });
+
+    let captured: Stripe.Checkout.SessionCreateParams | undefined;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async (params: Stripe.Checkout.SessionCreateParams) => {
+            captured = params;
+            return {
+              id: "cs_smoothexit_first",
+              url: "https://stripe.test/checkout/cs_smoothexit_first",
+            };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/smoothexit`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        payment_option: "from_proceeds",
+        estimated_sale_price: 600000,
+        fee_cents: 600000,
+        survey_answers: { goal: "downsize" },
+        // staging_consult (24700) + photography_upgrade (19700) = 44400
+        selected_upsells: ["staging_consult", "photography_upgrade"],
+        upsell_total_cents: 44400,
+      }),
+    });
+    const res = await smoothExitRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok?: boolean; checkout_url?: string };
+    expect(json.checkout_url).toBe(
+      "https://stripe.test/checkout/cs_smoothexit_first"
+    );
+
+    // No prior enrollment → the whole selection is charged.
+    expect(captured).toBeDefined();
+    expect(captured!.line_items?.[0]?.price_data?.unit_amount).toBe(44400);
+
+    const rows = await prisma.$queryRaw<
+      {
+        upsells_paid: boolean;
+        upsell_total_cents: string;
+        enrolled_at: string | null;
+        selected_upsells: string[];
+      }[]
+    >`
+      SELECT (smooth_exit->>'upsells_paid')::boolean AS upsells_paid,
+             smooth_exit->>'upsell_total_cents'      AS upsell_total_cents,
+             smooth_exit->>'enrolled_at'             AS enrolled_at,
+             smooth_exit->'selected_upsells'         AS selected_upsells
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].upsells_paid).toBe(false);
+    expect(rows[0].upsell_total_cents).toBe("44400");
+    expect(rows[0].enrolled_at).toBeTruthy();
+    expect([...rows[0].selected_upsells].sort()).toEqual([
+      "photography_upgrade",
+      "staging_consult",
+    ]);
+  });
+});
+
 describe("POST /api/deals/[id]/smoothexit — malformed body validation (#88)", () => {
   async function enroll(dealId: string, body: string) {
     const r = new Request(`http://localhost/api/deals/${dealId}/smoothexit`, {
