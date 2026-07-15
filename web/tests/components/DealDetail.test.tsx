@@ -125,10 +125,6 @@ vi.mock("@/lib/store/authStore", () => ({
   },
 }));
 
-vi.mock("@/lib/store/taskStore", () => ({
-  useTaskStore: () => ({ reassign: vi.fn(), effectiveAssignee: () => undefined }),
-}));
-
 vi.mock("@/permissions/usePermission", () => ({
   usePermission: () => ({
     can: () => true,
