@@ -25,6 +25,7 @@ type EmailLike = {
       to: string | string[];
       subject: string;
       html: string;
+      headers?: Record<string, string>;
     }) => Promise<EmailResult>;
   };
   // Contacts/Audiences API — used to add waitlist signups to a Resend Audience
@@ -177,6 +178,22 @@ export type SendNotificationInput = {
 };
 
 /**
+ * The `List-Unsubscribe` header value (#292). Every notification email carries
+ * one so mail clients surface a standards-compliant opt-out (RFC 2369) and
+ * deliverability doesn't suffer. We point it at a `mailto:` on the sending
+ * identity (parsed out of RESEND_FROM's `Name <addr>` form) — a single,
+ * role-agnostic target that works for every recipient, including buyers/sellers
+ * who have no in-app Settings page. The functional opt-out is the Settings →
+ * Notifications toggle, which the send is now gated on.
+ */
+function listUnsubscribeHeader(): string {
+  const from = env().RESEND_FROM;
+  const match = from.match(/<([^>]+)>/);
+  const address = (match ? match[1] : from).trim();
+  return `<mailto:${address}?subject=unsubscribe>`;
+}
+
+/**
  * Delivers a generic deal-activity notification — a new message, a shared
  * document, or a task assignment. Shares the email client + HTML template style
  * of sendInviteEmail (heading, body paragraph, a button linking to the deal).
@@ -214,6 +231,7 @@ export async function sendNotificationEmail(
     to,
     subject,
     html,
+    headers: { "List-Unsubscribe": listUnsubscribeHeader() },
   });
   if (error) throw new Error(`Resend send failed: ${error.message}`);
 }
