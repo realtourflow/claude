@@ -1,12 +1,18 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { PDFDocument } from "pdf-lib";
 import {
   getAgentFormConfig,
   listAgentFormsForAgent,
   agentFormViewer,
 } from "@/lib/agent-forms";
+import { POST as createForm } from "@/app/api/me/forms/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
+import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
+import { setFieldMapperForTesting } from "@/lib/form-ai/mapper";
+import { flatFingerprint } from "@/lib/known-forms";
+import type { FieldMapper } from "@/lib/form-ai/types";
 import { prisma } from "@/lib/db";
-import { getTestSigner } from "../helpers/jwt";
+import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser } from "../helpers/factories";
 
@@ -172,5 +178,171 @@ describe("agent-forms resolver", () => {
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ label: "Mine", board: "" });
     expect(list[0].roles).toEqual(["seller"]);
+  });
+});
+
+// #287 — a corrupt / non-PDF upload (e.g. a JPEG renamed .pdf, or a truncated
+// PDF) used to throw an unexplained 500 AND orphan the stored blob, because the
+// route's catch only handled the two typed errors and rethrew everything else
+// WITHOUT deleting the object. The bundle path never parsed at all, so a corrupt
+// bundle was accepted (201, pending_split) and only failed later at admin split.
+// The route now validates the bytes parse as a PDF right after fetching them —
+// one gate covering BOTH the flat and bundle paths.
+describe("POST /api/me/forms — corrupt/non-PDF upload (#287)", () => {
+  let storage: TestStorage;
+  let FILLABLE: Uint8Array;
+  let FLAT: Uint8Array;
+
+  // A non-PDF payload: JPEG magic bytes + filler. pdf-lib's load() throws (there
+  // is no %PDF header) — exactly the upload that used to 500 and orphan the blob.
+  const GARBAGE = new Uint8Array([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+    0x01, 0x00, 0x6e, 0x6f, 0x74, 0x2d, 0x61, 0x2d, 0x70, 0x64, 0x66,
+  ]);
+
+  // Deterministic stand-in for the real Claude mapper (fillable regression path):
+  // maps the first field, declines the rest. Guarantees no real Anthropic call.
+  const fakeMapper: FieldMapper = {
+    proposeMappings: async ({ fields }) =>
+      fields.map((_, i) =>
+        i === 0
+          ? { coreKey: "buyer_name", role: "Buyer", confidence: 0.95, rationale: "named buyer" }
+          : { coreKey: null, role: null, confidence: 0, rationale: "" }
+      ),
+  };
+
+  beforeAll(async () => {
+    const fdoc = await PDFDocument.create();
+    const page = fdoc.addPage([612, 792]);
+    fdoc
+      .getForm()
+      .createTextField("buyer_name")
+      .addToPage(page, { x: 72, y: 700, width: 200, height: 18 });
+    FILLABLE = await fdoc.save();
+
+    const gdoc = await PDFDocument.create();
+    gdoc.addPage([612, 792]);
+    FLAT = await gdoc.save();
+  });
+
+  beforeEach(() => {
+    // truncateAll already ran (top-level beforeEach). Install a fresh recording
+    // Blob backend + the fake mapper; both are torn down in afterEach.
+    storage = setStorageForTesting()!;
+    setFieldMapperForTesting(fakeMapper);
+  });
+
+  afterEach(() => {
+    setStorageForTesting(false);
+    setFieldMapperForTesting(undefined);
+  });
+
+  // Uploading requires a declared company + market (the profile gate) — give the
+  // agent both so the corrupt-PDF gate (not the profile gate) is what fires.
+  async function onboard(agentId: string) {
+    await prisma.users.update({
+      where: { id: agentId },
+      data: { brokerage: "ARC Realty", market: "BIRMINGHAM_AAR", markets: ["BIRMINGHAM_AAR"] },
+    });
+  }
+
+  const KEY = (agentId: string) => `agent-forms/${agentId}/123/listing.pdf`;
+
+  async function postForm(agentId: string, sub: string, extra: Record<string, unknown> = {}) {
+    return new Request("http://localhost/api/me/forms", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader(sub, ["agent"]),
+      },
+      body: JSON.stringify({
+        label: "Listing",
+        side: "sell",
+        file_name: "listing.pdf",
+        s3_key: KEY(agentId),
+        mime_type: "application/pdf",
+        attestation: true,
+        ...extra,
+      }),
+    });
+  }
+
+  it("Case 1: a non-PDF on the flat path → 400 friendly message, deletes the blob, persists nothing", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
+    storage.seed(KEY(agent.id), GARBAGE);
+
+    const res = await createForm(await postForm(agent.id, "auth0|a"));
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/readable PDF/);
+    // The orphan bug: the blob must be deleted, and nothing persisted.
+    expect(storage.deletes).toContain(KEY(agent.id));
+    expect(await prisma.uploaded_forms.count()).toBe(0);
+  });
+
+  it("Case 2: a non-PDF with bundle:true → 400 + blob deleted (no stuck pending_split)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
+    storage.seed(KEY(agent.id), GARBAGE);
+
+    const res = await createForm(await postForm(agent.id, "auth0|a", { bundle: true }));
+    // Validated at UPLOAD time, not deferred to admin split.
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/readable PDF/);
+    expect(storage.deletes).toContain(KEY(agent.id));
+    expect(await prisma.uploaded_forms.count()).toBe(0);
+  });
+
+  it("Case 3a: a valid FILLABLE PDF still returns 201 (regression — blob kept)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
+    storage.seed(KEY(agent.id), FILLABLE);
+
+    const res = await createForm(await postForm(agent.id, "auth0|a"));
+    expect(res.status).toBe(201);
+    expect(storage.deletes).not.toContain(KEY(agent.id));
+    expect(await prisma.uploaded_forms.count()).toBe(1);
+  });
+
+  it("Case 3b: a valid FLAT PDF (recognized) still returns 201 (regression — no vision/AI)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
+    storage.seed(KEY(agent.id), FLAT);
+    // A recognized flat form reaches 201 with no AI mapper and no vision — a
+    // deterministic proof the PDF gate passes a valid FLAT upload untouched. (The
+    // flat + form_type → vision 201 path is covered by forms-vision-detect.test.ts.)
+    await prisma.known_forms.create({
+      data: {
+        label: "Known Flat",
+        side: "sell",
+        board: "",
+        purpose: "",
+        fingerprint: flatFingerprint(FLAT),
+        field_count: 1,
+        page_count: 1,
+        fields: [
+          {
+            detected_name: "buyer_name",
+            detected_type: "text",
+            effective_type: "text",
+            page_number: 1,
+            pos_x: 72,
+            pos_y: 700,
+            width: 200,
+            height: 18,
+            core_key: "buyer_name",
+            role: "Buyer",
+            needs_review: false,
+          },
+        ],
+        role_mapping: { buyer: "Buyer" },
+        active: true,
+      },
+    });
+
+    const res = await createForm(await postForm(agent.id, "auth0|a"));
+    expect(res.status).toBe(201);
+    expect(storage.deletes).not.toContain(KEY(agent.id));
+    expect(await prisma.uploaded_forms.count()).toBe(1);
   });
 });
