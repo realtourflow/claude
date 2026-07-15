@@ -555,7 +555,7 @@ function PromotionManager({
 type FormTypeOpt = { key: string; label: string; side: string };
 type SplitPart = { start: string; end: string; formType: string; label: string; side: string };
 type SplitResult = {
-  created: { id: string; label: string }[];
+  created: { id: string; label: string; already_existed?: boolean }[];
   failed: { label: string; error: string }[];
 };
 
@@ -619,14 +619,17 @@ function BundleSplit({
     parts.every((p) => p.start && p.end && p.formType && p.label.trim());
 
   if (result) {
+    const partial = result.failed.length > 0;
     return (
       <div className="space-y-3">
-        <h2 className="text-lg font-bold text-brand-navy">Split complete</h2>
+        <h2 className="text-lg font-bold text-brand-navy">
+          {partial ? "Some parts still need splitting" : "Split complete"}
+        </h2>
         <p className="text-sm text-green-700">
           Created {result.created.length} form{result.created.length !== 1 ? "s" : ""} — now in the
           Pending queue for review.
         </p>
-        {result.failed.length > 0 && (
+        {partial && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             <p className="font-semibold">{result.failed.length} part(s) failed:</p>
             <ul className="mt-1 list-disc pl-5">
@@ -636,6 +639,17 @@ function BundleSplit({
                 </li>
               ))}
             </ul>
+            <p className="mt-2 text-red-800">
+              This bundle is still in the Pending queue. Fix the issue and re-split it — submit
+              every range again and the forms that already succeeded won&apos;t be duplicated.
+            </p>
+            <button
+              type="button"
+              onClick={() => setResult(null)}
+              className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+            >
+              Re-split this bundle
+            </button>
           </div>
         )}
       </div>

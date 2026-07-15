@@ -15,6 +15,7 @@ import {
   FormTypeRequiredError,
   FormDetectEnqueueError,
 } from "@/lib/create-uploaded-form";
+import { sha256Hex } from "@/lib/uploaded-forms";
 
 // Loading + slicing a multi-form bundle PDF is heavier than a JSON call — and
 // each flat child kicks off an INLINE vision detect (#193) that runs via
@@ -119,12 +120,18 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
     // Carve each part into its own PDF, store it, and process it like a fresh
     // upload. Best-effort per child so one bad part doesn't sink the whole split.
-    const created: { id: string; label: string }[] = [];
+    // `already_existed` children were skipped by the re-split duplicate guard —
+    // they count as succeeded (no failure) so a full re-submit still archives.
+    const created: { id: string; label: string; already_existed?: boolean }[] = [];
     const failed: { label: string; error: string }[] = [];
     for (const r of resolved) {
       let childBytes: Uint8Array;
       try {
-        const childDoc = await PDFDocument.create();
+        // `updateMetadata: false` keeps the carve deterministic (pdf-lib otherwise
+        // stamps CreationDate/ModDate into each save) — a re-carve of the same
+        // pages yields byte-identical output, which is what makes the file_sha256
+        // duplicate guard below reliable on re-split.
+        const childDoc = await PDFDocument.create({ updateMetadata: false });
         const indices: number[] = [];
         for (let pg = r.start - 1; pg <= r.end - 1; pg++) indices.push(pg);
         const copied = await childDoc.copyPages(srcDoc, indices);
@@ -132,6 +139,21 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         childBytes = await childDoc.save();
       } catch {
         failed.push({ label: r.label, error: "could not extract those pages" });
+        continue;
+      }
+
+      // Re-split guard: if this exact carve already produced a child for this
+      // agent (byte-identical → same hash), skip it instead of duplicating. Lets
+      // an admin re-submit ALL ranges to retry the failed parts without cloning
+      // the children that already succeeded. (`uploaded_forms` has no bundle-link
+      // column, so file_sha256 is the join key — see #285.)
+      const childSha = sha256Hex(childBytes);
+      const dupe = await prisma.uploaded_forms.findFirst({
+        where: { agent_id: bundle.agent_id, file_sha256: childSha },
+        select: { id: true, label: true },
+      });
+      if (dupe) {
+        created.push({ id: dupe.id, label: dupe.label, already_existed: true });
         continue;
       }
 
@@ -170,10 +192,11 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       }
     }
 
-    // Archive the bundle once at least one child exists (the admin re-uploads any
-    // failed part individually rather than re-splitting, which would duplicate the
-    // children that already succeeded).
-    if (created.length > 0) {
+    // Archive the bundle ONLY when every part landed (#285). On partial failure it
+    // stays `pending_split` and visible in the admin Pending queue, so the failed
+    // ranges can be re-split — the sha256 guard above keeps that re-split from
+    // duplicating the children that already succeeded.
+    if (failed.length === 0) {
       await prisma.uploaded_forms.update({
         where: { id },
         data: { status: "split", reviewed_by: adminId, reviewed_at: new Date() },
