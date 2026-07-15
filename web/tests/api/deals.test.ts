@@ -435,6 +435,86 @@ describe("PATCH /api/deals/[id]/stage", () => {
   });
 });
 
+describe("PATCH /api/deals/[id]/stage — direction-aware notifications (#267)", () => {
+  async function patchStage(dealId: string, token: string, stage: string) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/stage`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: token,
+      },
+      body: JSON.stringify({ stage }),
+    });
+    return advanceStageRoute(req, ctx(dealId));
+  }
+
+  it("retreat notifies participants with neutral copy, NOT 'moved forward' (#267)", async () => {
+    // A busted contract retreats under_contract → active_search. The buyer must
+    // not get a cheerful "moved forward" push about the worst news.
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const token = await authHeader("auth0|a", ["agent"]);
+    const res = await patchStage(deal.id, token, "active_search");
+    expect(res.status).toBe(200);
+
+    const notes = await prisma.notifications.findMany({
+      where: { deal_id: deal.id, user_id: buyer.id, type: "stage_change" },
+    });
+    expect(notes.length).toBe(1);
+    expect(notes[0].title).not.toContain("moved forward");
+    expect(notes[0].title).toBe("Your deal's stage was updated");
+    // Neutral, non-celebratory body — client-facing STAGE_LABELS label.
+    expect(notes[0].body).toBe("Stage: Property Search");
+  });
+
+  it("forward advance keeps the exact 'moved forward' copy (regression)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const token = await authHeader("auth0|a", ["agent"]);
+    const res = await patchStage(deal.id, token, "active_search");
+    expect(res.status).toBe(200);
+
+    const notes = await prisma.notifications.findMany({
+      where: { deal_id: deal.id, user_id: buyer.id, type: "stage_change" },
+    });
+    expect(notes.length).toBe(1);
+    expect(notes[0].title).toBe("Your deal has moved forward");
+    expect(notes[0].body).toBe("New stage: Property Search");
+  });
+
+  it("retreat with zero participants → 200, no notifications, no crash (#267)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+
+    const token = await authHeader("auth0|a", ["agent"]);
+    const res = await patchStage(deal.id, token, "active_search");
+    expect(res.status).toBe(200);
+
+    const notes = await prisma.notifications.findMany({
+      where: { deal_id: deal.id },
+    });
+    expect(notes.length).toBe(0);
+
+    // History is still written for the retreat (design principle).
+    const history = await prisma.deal_stage_history.findMany({
+      where: { deal_id: deal.id },
+    });
+    expect(history.length).toBe(1);
+    expect(history[0].from_stage).toBe("under_contract");
+    expect(history[0].to_stage).toBe("active_search");
+  });
+});
+
 describe("PATCH /api/deals/[id]/stage — auto-task seeding (#87)", () => {
   async function advance(dealId: string, token: string, stage: string) {
     const req = new Request(`http://localhost/api/deals/${dealId}/stage`, {
