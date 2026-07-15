@@ -2,7 +2,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { error, json, withAuth } from "@/lib/http";
 import { resolveUserId } from "@/lib/users";
-import { healthExpr } from "@/lib/deals";
+import { healthExpr, stageEnteredAtExpr } from "@/lib/deals";
 import { getStageThresholds } from "@/lib/system-config";
 
 // GET /api/me/deals — deals where the caller is a participant.
@@ -43,6 +43,7 @@ export async function GET(req: Request): Promise<Response> {
         buyer_status: string | null;
         created_at: Date;
         updated_at: Date;
+        stage_entered_at: Date;
         agent_name: string;
         agent_email: string;
         agent_phone: string | null;
@@ -57,6 +58,7 @@ export async function GET(req: Request): Promise<Response> {
              deals.pre_approved, deals.baa_signed, deals.disclosures_complete,
              deals.buyer_status,
              deals.created_at, deals.updated_at,
+             ${stageEnteredAtExpr} AS stage_entered_at,
              u.name AS agent_name, u.email AS agent_email, u.phone AS agent_phone
       FROM deals
       JOIN deal_participants dp ON dp.deal_id = deals.id AND dp.user_id = ${userId}::uuid

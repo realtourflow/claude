@@ -139,9 +139,17 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
       createdAt: d.created_at,
       closingDate: closingDate ?? undefined,
       daysToClose,
+      // Anchor "days in stage" to when the deal entered its current stage (the
+      // server health anchor), NOT updated_at — which ANY unrelated write
+      // (notes, commission, fee checkout, buyer-status, ARIVE sync) bumps,
+      // resetting the count to 0 (#257). Falls back to created_at when the wire
+      // omits stage_entered_at (e.g. the create response).
       daysInStage: Math.max(
         0,
-        Math.floor((Date.now() - new Date(d.updated_at).getTime()) / 86_400_000),
+        Math.floor(
+          (Date.now() - new Date(d.stage_entered_at ?? d.created_at).getTime()) /
+            86_400_000,
+        ),
       ),
     },
     flags: d.arive_linked ? ['mountain_mortgage'] : [],

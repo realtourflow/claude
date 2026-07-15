@@ -78,3 +78,32 @@ describe("apiDealToFrontend numeric parsing (#85)", () => {
     ).toBe(3);
   });
 });
+
+describe("daysInStage anchors to stage entry, not updated_at (#257)", () => {
+  it("computes daysInStage from stage_entered_at even when updated_at is 'now'", () => {
+    const fiveDaysAgo = new Date(Date.now() - 5 * 86_400_000).toISOString();
+    // updated_at = now simulates an unrelated write (note edit, fee, ARIVE sync)
+    // that bumped it. The count must still read 5, not reset to 0.
+    const deal = apiDealToFrontend(
+      wireDeal({ stage_entered_at: fiveDaysAgo, updated_at: new Date().toISOString() }),
+    );
+    expect(deal.timeline.daysInStage).toBe(5);
+  });
+
+  it("falls back to created_at when stage_entered_at is absent from the wire", () => {
+    const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    // e.g. the POST /deals create response carries no stage_entered_at — a
+    // brand-new deal's stage entry IS its creation, so created_at anchors it.
+    const deal = apiDealToFrontend(
+      wireDeal({ created_at: threeDaysAgo, updated_at: new Date().toISOString() }),
+    );
+    expect(deal.timeline.daysInStage).toBe(3);
+  });
+
+  it("never goes negative when the anchor is in the future", () => {
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
+    expect(
+      apiDealToFrontend(wireDeal({ stage_entered_at: tomorrow })).timeline.daysInStage,
+    ).toBe(0);
+  });
+});
