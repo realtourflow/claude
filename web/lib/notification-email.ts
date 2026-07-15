@@ -390,6 +390,35 @@ export async function emailFormReviewed(input: {
   });
 }
 
+/**
+ * Disclosure reminder (#303): the admin "Send Reminder" button nudges the
+ * deal's client(s) — the party who must sign — about disclosures that were sent
+ * but not yet signed. Mirrors the other helpers: resolves the buyer/seller
+ * participants server-side, links each to their own portal, and fans out with
+ * the same per-recipient opt-out + dedupe. Admin-triggered, so there is no
+ * actor to skip. Invoked best-effort by the admin disclosure-reminder route.
+ */
+export async function emailDisclosureReminder(input: {
+  req: Request;
+  dealId: string;
+}): Promise<void> {
+  const { req, dealId } = input;
+  const origin = originFromRequest(req);
+
+  const clients = await clientParticipants(dealId);
+  const recipients = clients.map((c) => ({
+    userId: c.user_id,
+    email: c.email,
+    url: recipientUrl(origin, c.role, c.user_id, dealId),
+  }));
+
+  await fanOut(recipients, {
+    subject: "Reminder: your disclosures need a signature",
+    heading: "Please sign your disclosures",
+    body: "Your loan disclosures were sent but haven't been signed yet. Please review and sign them so your closing stays on track.",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // #175 — intake highlights for the "client joined" agent notification.
 // Append-only addition: turns the persisted onboarding answers into a compact

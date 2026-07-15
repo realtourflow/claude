@@ -402,9 +402,19 @@ function AllDeals({ deals }: { deals: Deal[] }) {
 // ─── Pending Disclosures ───────────────────────────────────────────────────────
 
 function PendingDisclosures({ deals }: { deals: Deal[] }) {
+  const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
   const pending = deals.filter(
     (d) => d.loanMilestones?.disclosuresOut && !d.loanMilestones?.disclosuresSignedSubmitted,
   );
+
+  async function sendReminder(dealId: string) {
+    try {
+      await api.post<{ ok: boolean }>(`/deals/${dealId}/disclosure-reminder`, {});
+      setRemindedIds((prev) => new Set([...prev, dealId]));
+    } catch {
+      // Silently ignore — admin can retry.
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -429,8 +439,12 @@ function PendingDisclosures({ deals }: { deals: Deal[] }) {
                 {d.health}
               </span>
               <span className="text-xs text-gray-400">{STAGE_LABELS[d.stage]}</span>
-              <button className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 transition-colors">
-                Send Reminder
+              <button
+                onClick={() => sendReminder(d.id)}
+                disabled={remindedIds.has(d.id)}
+                className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 transition-colors disabled:opacity-60 disabled:cursor-default"
+              >
+                {remindedIds.has(d.id) ? 'Reminder Sent' : 'Send Reminder'}
               </button>
             </div>
           ))}
@@ -638,7 +652,7 @@ const PAYMENT_OPTION_LABELS: Record<string, string> = {
   seller_concession: 'Seller concession',
 };
 
-function ActiveFastPass({ deals }: { deals: Deal[] }) {
+function ActiveFastPass({ deals, refresh }: { deals: Deal[]; refresh: () => void }) {
   const [collectedIds, setCollectedIds] = useState<Set<string>>(new Set());
 
   async function collectFastPass(dealId: string) {
@@ -647,6 +661,16 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
       setCollectedIds((prev) => new Set([...prev, dealId]));
     } catch {
       // Silently ignore — user can retry
+    }
+  }
+
+  async function markFastPassPaid(dealId: string) {
+    try {
+      await api.post<{ ok: boolean }>(`/deals/${dealId}/fastpass/mark-paid`, {});
+      // Status flips pending_payment → active; refetch so the row re-buckets.
+      refresh();
+    } catch {
+      // Silently ignore — admin can retry.
     }
   }
 
@@ -704,7 +728,10 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
             )}
           </div>
           {fp?.status === 'pending_payment' && (
-            <button className="ml-2 rounded-lg bg-green-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-600 transition-colors">
+            <button
+              onClick={() => markFastPassPaid(d.id)}
+              className="ml-2 rounded-lg bg-green-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-600 transition-colors"
+            >
               Mark Paid
             </button>
           )}
@@ -883,7 +910,17 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
 
 // ─── Smooth Exit ──────────────────────────────────────────────────────────────
 
-function SmoothExitQueue({ deals }: { deals: Deal[] }) {
+function SmoothExitQueue({ deals, refresh }: { deals: Deal[]; refresh: () => void }) {
+  async function activateSmoothExit(dealId: string) {
+    try {
+      await api.post<{ ok: boolean }>(`/deals/${dealId}/smoothexit/activate`, {});
+      // Status flips pending → active; refetch so the row re-buckets.
+      refresh();
+    } catch {
+      // Silently ignore — admin can retry.
+    }
+  }
+
   const allSeDeals = deals.filter((d) => d.smoothExit);
   const seDeals = allSeDeals.filter((d) => d.stage !== 'post_close');
   const completed = allSeDeals.filter((d) => d.stage === 'post_close');
@@ -924,7 +961,10 @@ function SmoothExitQueue({ deals }: { deals: Deal[] }) {
             <div className="text-xs text-gray-400">1% fee</div>
           </div>
           {se.status === 'pending' && (
-            <button className="ml-2 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 transition-colors">
+            <button
+              onClick={() => activateSmoothExit(d.id)}
+              className="ml-2 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 transition-colors"
+            >
               Activate
             </button>
           )}
@@ -1992,6 +2032,9 @@ const EVENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   promo_delete:    { label: 'Promo Deleted',   color: 'bg-red-100 text-red-600' },
   brokerage_approve: { label: 'Brokerage Approved', color: 'bg-green-100 text-green-700' },
   brokerage_reject:  { label: 'Brokerage Rejected', color: 'bg-red-100 text-red-600' },
+  fastpass_mark_paid:  { label: 'Fast Pass Marked Paid', color: 'bg-green-100 text-green-700' },
+  smoothexit_activate: { label: 'Smooth Exit Activated', color: 'bg-purple-100 text-purple-700' },
+  disclosure_reminder: { label: 'Disclosure Reminder',   color: 'bg-amber-100 text-amber-700' },
 };
 
 const EVENT_TYPE_OPTIONS = [
@@ -2005,6 +2048,9 @@ const EVENT_TYPE_OPTIONS = [
   { value: 'promo_delete',    label: 'Promo Deletions' },
   { value: 'brokerage_approve', label: 'Brokerage Approvals' },
   { value: 'brokerage_reject',  label: 'Brokerage Rejections' },
+  { value: 'fastpass_mark_paid',  label: 'Fast Pass Marked Paid' },
+  { value: 'smoothexit_activate', label: 'Smooth Exit Activations' },
+  { value: 'disclosure_reminder', label: 'Disclosure Reminders' },
 ];
 
 function describeEntry(e: ReturnType<typeof useAuditLog>['entries'][number]): string {
@@ -2033,6 +2079,9 @@ function describeEntry(e: ReturnType<typeof useAuditLog>['entries'][number]): st
       const name = e.metadata?.name as string | null;
       return `${actor} rejected brokerage${name ? ` "${name}"` : ''}`;
     }
+    case 'fastpass_mark_paid':  return `${actor} marked a Fast Pass paid${deal}`;
+    case 'smoothexit_activate': return `${actor} activated Smooth Exit${deal}`;
+    case 'disclosure_reminder': return `${actor} sent a disclosure reminder${deal}`;
     default: return `${actor} performed ${e.eventType}`;
   }
 }
@@ -2442,7 +2491,7 @@ function CompaniesQueue() {
 
 export default function AdminDashboard() {
   const { section } = useParams<{ section?: string }>();
-  const { deals, loading } = useDeals();
+  const { deals, loading, refresh } = useDeals();
 
   if (section === 'users') return <UserManagement />;
   if (section === 'brokerages') return <CompaniesQueue />;
@@ -2462,8 +2511,8 @@ export default function AdminDashboard() {
     case 'stuck':       return <StuckDeals deals={deals} />;
     case 'fees':        return <FeesCollected deals={deals} />;
     case 'outstanding': return <OutstandingItems deals={deals} />;
-    case 'fastpass':    return <ActiveFastPass deals={deals} />;
-    case 'smoothexit':  return <SmoothExitQueue deals={deals} />;
+    case 'fastpass':    return <ActiveFastPass deals={deals} refresh={refresh} />;
+    case 'smoothexit':  return <SmoothExitQueue deals={deals} refresh={refresh} />;
     case 'arive':       return <AriveStatus deals={deals} />;
     case 'metro':       return <ComingSoon title="Metro View" />;
     case 'promotions':  return <Promotions />;
