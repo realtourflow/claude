@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Deal, Task } from "@/lib/types";
 import { usePermission } from "@/permissions/usePermission";
 import { PERMISSIONS } from "@/permissions/permissions";
-import { useTaskStore } from "@/lib/store/taskStore";
 import { patchTaskStatus, patchTask, postTask } from "@/hooks/useTasks";
 import { Calendar, CheckCircle2, CheckSquare, Bot, ChevronDown, Building2, Plus, Users } from "lucide-react";
 import { TASK_STATUS_ICON } from "@/components/deal/shared";
@@ -42,10 +41,11 @@ type TaskItemCtx = {
   completedIds: Set<string>;
   toggleComplete: (id: string) => void;
   effectiveStatus: (t: Task) => string;
-  effectiveAssignee: (t: Task) => string;
   assigningTaskId: string | null;
   setAssigningTaskId: (id: string | null) => void;
   canAssign: boolean;
+  // Persists the new role via PATCH then refetches — server is the source of
+  // truth (#255), no browser-only override.
   reassign: (id: string, assignee: Task['assignedTo']) => void;
   // Due-date editing (#187) — agent/TC only; persists via PATCH.
   canEditDueDate: boolean;
@@ -55,10 +55,10 @@ type TaskItemCtx = {
 };
 
 function TaskItem({ task, ctx }: { task: Task; ctx: TaskItemCtx }) {
-  const { completedIds, toggleComplete, effectiveStatus, effectiveAssignee, assigningTaskId, setAssigningTaskId, canAssign, reassign, canEditDueDate, editingDueDateId, setEditingDueDateId, saveDueDate } = ctx;
+  const { completedIds, toggleComplete, effectiveStatus, assigningTaskId, setAssigningTaskId, canAssign, reassign, canEditDueDate, editingDueDateId, setEditingDueDateId, saveDueDate } = ctx;
   const isDone = completedIds.has(task.id);
   const status = effectiveStatus(task);
-  const assignee = effectiveAssignee(task);
+  const assignee = task.assignedTo;
   const isAssigning = assigningTaskId === task.id;
   const isEditingDue = editingDueDateId === task.id;
   const [dueDraft, setDueDraft] = useState(task.dueDate ?? '');
@@ -235,7 +235,6 @@ export function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Ta
     new Set(tasks.filter((t) => t.status === 'completed').map((t) => t.id))
   );
   const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
-  const { reassign: storeReassign, effectiveAssignee } = useTaskStore();
 
   // Add-task form (#187)
   const [showAddForm, setShowAddForm] = useState(false);
@@ -310,9 +309,18 @@ export function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Ta
     }
   }
 
-  function reassign(taskId: string, assignee: Task['assignedTo']) {
-    storeReassign(taskId, assignee);
+  // Reassignment persists the task's `role` server-side then refetches, so the
+  // agent↔TC handoff survives reload / other device / TC session (#255). It no
+  // longer stashes the change in a browser-only zustand override.
+  async function reassign(taskId: string, assignee: Task['assignedTo']) {
     setAssigningTaskId(null);
+    try {
+      await patchTask(taskId, { role: assignee });
+      onTasksChange();
+    } catch {
+      // Leave the current grouping in place; the next refetch reflects the
+      // server's truth so no stale optimistic state lingers.
+    }
   }
 
   function effectiveStatus(t: Task) {
@@ -323,15 +331,14 @@ export function TasksTab({ deal, tasks, onTasksChange }: { deal: Deal; tasks: Ta
     return (STATUS_SORT_ORDER[effectiveStatus(a)] ?? 5) - (STATUS_SORT_ORDER[effectiveStatus(b)] ?? 5);
   }
 
-  const agentTasks   = tasks.filter((t) => effectiveAssignee(t) === 'agent').sort(sortByStatus);
-  const clientTasks  = tasks.filter((t) => effectiveAssignee(t) === 'buyer' || effectiveAssignee(t) === 'seller').sort(sortByStatus);
-  const supportTasks = tasks.filter((t) => effectiveAssignee(t) === 'tc' || effectiveAssignee(t) === 'third_party' || effectiveAssignee(t) === 'admin').sort(sortByStatus);
+  const agentTasks   = tasks.filter((t) => t.assignedTo === 'agent').sort(sortByStatus);
+  const clientTasks  = tasks.filter((t) => t.assignedTo === 'buyer' || t.assignedTo === 'seller').sort(sortByStatus);
+  const supportTasks = tasks.filter((t) => t.assignedTo === 'tc' || t.assignedTo === 'third_party' || t.assignedTo === 'admin').sort(sortByStatus);
 
   const ctx: TaskItemCtx = {
     completedIds,
     toggleComplete,
     effectiveStatus,
-    effectiveAssignee,
     assigningTaskId,
     setAssigningTaskId,
     canAssign,

@@ -458,6 +458,121 @@ describe("PATCH /api/tasks/[id]/status — due_date + assignee edits (#187)", ()
   });
 });
 
+describe("PATCH /api/tasks/[id]/status — role reassignment (#255)", () => {
+  it("agent changes a task's role and the change persists (GET reflects it)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id }); // defaults role 'agent'
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ role: "tc" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { role: string };
+    expect(body.role).toBe("tc");
+
+    // Survives reload: the deal's task list now reports the handed-off role,
+    // proving the reassignment left browser memory and reached the DB.
+    const listReq = new Request(`http://localhost/api/deals/${deal.id}/tasks`, {
+      headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+    });
+    const listRes = await listByDealRoute(listReq, ctx(deal.id));
+    const tasks = (await listRes.json()) as { id: string; role: string }[];
+    expect(tasks.find((t) => t.id === task.id)?.role).toBe("tc");
+  });
+
+  it("accepts every valid assignee role", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    for (const role of ["agent", "tc", "buyer", "seller", "third_party", "admin"]) {
+      const task = await createTask({ deal_id: deal.id });
+      const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({ role }),
+      });
+      const res = await updateStatusRoute(req, ctx(task.id));
+      expect(res.status).toBe(200);
+      const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+      expect(row?.role).toBe(role);
+    }
+  });
+
+  it("400 on an invalid role (leaves the row unchanged)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ role: "wizard" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(400);
+    // Rejected specifically for the bad role — not the generic "no fields to
+    // update" (which would 400 even if `role` were silently dropped).
+    expect((await res.text()).toLowerCase()).toContain("role");
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.role).toBe("agent"); // unchanged
+  });
+
+  it("403 when a participant (not the deal agent) tries to reassign role", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|b" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|b", ["buyer"]),
+      },
+      body: JSON.stringify({ role: "tc" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(403);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.role).toBe("agent"); // unchanged
+  });
+
+  it("changes role and status together in one PATCH", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ role: "tc", status: "in_progress" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.role).toBe("tc");
+    expect(row?.status).toBe("in_progress");
+  });
+});
+
 describe("PATCH /api/tasks/[id]/status", () => {
   it("updates status when the user owns the parent deal", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
