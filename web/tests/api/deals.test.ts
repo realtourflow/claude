@@ -1236,6 +1236,126 @@ describe("PATCH /api/deals/[id]/flags", () => {
   });
 });
 
+describe("stage_entered_at anchor survives unrelated writes (#257)", () => {
+  async function advance(dealId: string, token: string, stage: string) {
+    return advanceStageRoute(
+      new Request(`http://localhost/api/deals/${dealId}/stage`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", authorization: token },
+        body: JSON.stringify({ stage }),
+      }),
+      ctx(dealId)
+    );
+  }
+  async function editNotes(dealId: string, token: string, notes: string) {
+    return notesRoute(
+      new Request(`http://localhost/api/deals/${dealId}/notes`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", authorization: token },
+        body: JSON.stringify({ notes }),
+      }),
+      ctx(dealId)
+    );
+  }
+  async function getDeal(dealId: string, token: string) {
+    return getDealRoute(
+      new Request(`http://localhost/api/deals/${dealId}`, {
+        headers: { authorization: token },
+      }),
+      ctx(dealId)
+    );
+  }
+
+  // Case 1: advance the stage, then touch the deal with an UNRELATED write
+  // (a note edit, which bumps deals.updated_at). stage_entered_at must reflect
+  // the stage change, not the later notes edit. FAILS pre-#257: the field did
+  // not exist on the response.
+  it("reports the stage-change time, not a later notes edit", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const token = await authHeader("auth0|a", ["agent"]);
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+
+    expect((await advance(deal.id, token, "active_search")).status).toBe(200);
+
+    // Pin the stage-entry moment to a fixed point in the past — deterministic,
+    // and unmistakably distinct from the notes edit that follows.
+    const enteredAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await prisma.deal_stage_history.updateMany({
+      where: { deal_id: deal.id },
+      data: { changed_at: enteredAt },
+    });
+
+    // Unrelated write: bumps deals.updated_at to ~now (the old bug's trigger).
+    expect((await editNotes(deal.id, token, "touched later")).status).toBe(200);
+
+    const res = await getDeal(deal.id, token);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage_entered_at?: string; updated_at: string };
+
+    expect(body.stage_entered_at).toBeDefined();
+    const enteredMs = new Date(body.stage_entered_at as string).getTime();
+    const updatedMs = new Date(body.updated_at).getTime();
+    // Equals the stage-change time (within a second of the pinned value)…
+    expect(Math.abs(enteredMs - enteredAt.getTime())).toBeLessThan(1000);
+    // …and did NOT follow the notes edit: updated_at jumped to ~now (~5 days later).
+    expect(updatedMs - enteredMs).toBeGreaterThan(4 * 24 * 60 * 60 * 1000);
+  });
+
+  // Case 2: a never-advanced intake deal has no stage history, so the anchor
+  // COALESCEs to created_at.
+  it("equals created_at for a never-advanced intake deal", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const token = await authHeader("auth0|a", ["agent"]);
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+
+    const res = await getDeal(deal.id, token);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage_entered_at?: string; created_at: string };
+    expect(body.stage_entered_at).toBeDefined();
+    expect(body.stage_entered_at).toBe(body.created_at);
+  });
+
+  // The deals LIST hot-path (listDealsForUser) exposes the same anchor column.
+  it("is present on every row of the deals list, defaulting to created_at", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const token = await authHeader("auth0|a", ["agent"]);
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", { headers: { authorization: token } })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      stage_entered_at?: string;
+      created_at: string;
+    }[];
+    const row = body.find((d) => d.id === deal.id);
+    expect(row?.stage_entered_at).toBeDefined();
+    expect(row?.stage_entered_at).toBe(row?.created_at);
+  });
+
+  // The client portal (GET /api/me/deals) exposes it too.
+  it("is present on the client portal payload (/api/me/deals)", async () => {
+    const agent = await createUser({ role: "agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer-257" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const res = await myDealsRoute(
+      new Request("http://localhost/api/me/deals", {
+        headers: { authorization: await authHeader("auth0|buyer-257", ["buyer"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; stage_entered_at?: string }[];
+    expect(body.length).toBe(1);
+    expect(body[0]?.stage_entered_at).toBeDefined();
+  });
+});
+
 describe("deal health honors System Config stage_thresholds (#305)", () => {
   // system_config is NOT cleared by truncateAll (tests/helpers/db.ts preserves
   // it), and the suite shares one DB with fileParallelism:false. Isolate every

@@ -8,6 +8,25 @@ import {
 } from "./system-config";
 
 /**
+ * The instant a deal entered its CURRENT stage: the latest
+ * `deal_stage_history.changed_at`, or `deals.created_at` if it has never
+ * advanced. This — NOT `deals.updated_at`, which ANY write bumps — is the true
+ * "days in stage" anchor (#257). Correlated on the outer `deals` row, so any
+ * SELECT with `deals` in its FROM can interpolate it.
+ *
+ * Both `healthExpr` (its yellow-branch age check) and the `stage_entered_at`
+ * response column build on this ONE fragment so the client's number can never
+ * drift from the server's health anchor. Parameter-free (pure column refs), so
+ * nesting it inside other `Prisma.sql` fragments never disturbs their bound
+ * parameters.
+ */
+export const stageEnteredAtExpr: Prisma.Sql = Prisma.sql`COALESCE(
+  (SELECT changed_at FROM deal_stage_history dsh
+   WHERE dsh.deal_id = deals.id ORDER BY dsh.changed_at DESC LIMIT 1),
+  deals.created_at
+)`;
+
+/**
  * Health CASE expression. Ported verbatim from the legacy Go backend, then
  * wired to the admin-editable per-stage thresholds (#305).
  *
@@ -42,11 +61,7 @@ CASE
       AND t.due_date IS NOT NULL
       AND t.due_date < CURRENT_DATE
   ) THEN 'red'
-  WHEN FLOOR(EXTRACT(EPOCH FROM (NOW() - COALESCE(
-    (SELECT changed_at FROM deal_stage_history dsh
-     WHERE dsh.deal_id = deals.id ORDER BY dsh.changed_at DESC LIMIT 1),
-    deals.created_at
-  ))) / 86400)::INT >
+  WHEN FLOOR(EXTRACT(EPOCH FROM (NOW() - ${stageEnteredAtExpr})) / 86400)::INT >
     CASE deals.stage
       WHEN 'intake'          THEN ${thresholds.intake}::int
       WHEN 'active_search'   THEN ${thresholds.active_search}::int
@@ -93,6 +108,11 @@ export type DealRow = {
   commission_pct: string | null;
   created_at: Date;
   updated_at: Date;
+  /**
+   * When the deal entered its current stage (latest stage-history change, else
+   * created_at) — the stable "days in stage" anchor. See `stageEnteredAtExpr` (#257).
+   */
+  stage_entered_at: Date;
 };
 
 export type DealWithStats = DealRow & {
@@ -132,6 +152,7 @@ export async function listDealsForUser(
            deals.pre_approved, deals.baa_signed, deals.disclosures_complete, deals.buyer_status,
            deals.commission_pct::text AS commission_pct,
            deals.created_at, deals.updated_at,
+           ${stageEnteredAtExpr} AS stage_entered_at,
            u.name AS agent_name, u.email AS agent_email, u.phone AS agent_phone,
            (SELECT COUNT(*) FROM tasks t
             WHERE t.deal_id = deals.id AND t.status NOT IN ('completed','skipped'))::int AS open_task_count,
@@ -161,7 +182,8 @@ export async function getDealForAgent(
            notes, fee_status, fee_amount_cents, fee_paid_at,
            fast_pass, smooth_exit, pre_approved, baa_signed, disclosures_complete,
            buyer_status, commission_pct::text AS commission_pct,
-           created_at, updated_at
+           created_at, updated_at,
+           ${stageEnteredAtExpr} AS stage_entered_at
     FROM deals
     WHERE id = ${dealId}::uuid AND agent_id = ${agentId}::uuid
   `;
@@ -183,7 +205,8 @@ export async function getDealById(dealId: string): Promise<DealRow | null> {
            notes, fee_status, fee_amount_cents, fee_paid_at,
            fast_pass, smooth_exit, pre_approved, baa_signed, disclosures_complete,
            buyer_status, commission_pct::text AS commission_pct,
-           created_at, updated_at
+           created_at, updated_at,
+           ${stageEnteredAtExpr} AS stage_entered_at
     FROM deals
     WHERE id = ${dealId}::uuid
   `;

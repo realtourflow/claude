@@ -111,6 +111,14 @@ export const apiDealSchema = z.object({
   commission_pct: z.string().nullish(),
   created_at: z.string(),
   updated_at: z.string(),
+  /**
+   * ISO timestamp the deal entered its CURRENT stage — the server "days in
+   * stage" anchor (latest `deal_stage_history.changed_at`, else `created_at`).
+   * Unlike `updated_at` it is NOT bumped by unrelated writes (#257). Optional:
+   * responses that don't join stage history (e.g. the create response) omit
+   * it, and the adapter falls back to `created_at`.
+   */
+  stage_entered_at: z.string().optional(),
   agent_name: z.string().optional(),
   agent_email: z.string().optional(),
   agent_phone: z.string().nullish(),
