@@ -23,8 +23,6 @@ import {
 // The declared type is required for a flat form we can't recognize (guided vision
 // needs the type's field set). The caller maps this to a 422.
 export class FormTypeRequiredError extends Error {}
-// The background vision job couldn't be enqueued; the caller maps this to a 503.
-export class FormDetectEnqueueError extends Error {}
 
 export type CreatedForm = {
   id: string;
@@ -143,8 +141,20 @@ export async function createUploadedForm(input: {
     try {
       jobId = await enqueueFormDetectJob(visionForm.id);
     } catch (err) {
-      await prisma.uploaded_forms.delete({ where: { id: visionForm.id } });
-      throw new FormDetectEnqueueError(err instanceof Error ? err.message : String(err));
+      // #289: an enqueue hiccup (transient Neon blip / pg-boss cold-start race /
+      // first-ever schema init) must NOT throw away the agent's upload. The
+      // durable job is only the BACKSTOP; inline detection (below) is the primary
+      // path and needs no pg-boss. Log loudly for ops, keep the just-created row,
+      // and fall through with jobId=null — the inline attempt still resolves the
+      // form. If that inline attempt ALSO fails, the row is simply left in
+      // 'detecting' for admin visibility/retry (#284), same as any inline
+      // failure. No row delete, no throw.
+      console.error(
+        `form-detect enqueue failed for ${visionForm.id}; degrading to inline-only ` +
+          `detection (no durable backstop for this attempt)`,
+        err
+      );
+      jobId = null;
     }
     // #193: detection starts NOW, fire-and-forget — the upload response must
     // not wait the minutes a vision run takes. The durable job above is the

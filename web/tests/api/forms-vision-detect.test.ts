@@ -298,6 +298,90 @@ describe("guided-vision detect job (Phase 3, pt 2b)", () => {
   });
 });
 
+// ── #289: a pg-boss enqueue hiccup degrades to inline-only, never data loss ───
+//
+// The durable job is only the BACKSTOP; inline detection (#193) is the primary
+// path and needs no pg-boss. So an enqueue failure at the exact moment of upload
+// (transient Neon blip / cold-start race) must NOT throw away the agent's upload
+// — it still runs inline and lands in review, just without a durable backstop
+// for that one attempt. Before this fix the row + blob were deleted and the
+// upload 503'd.
+describe("pg-boss enqueue failure degrades to inline-only detection (#289)", () => {
+  it("Case 1: an enqueue hiccup keeps the upload, runs inline, deletes neither row nor blob", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
+    const blobKey = `agent-forms/${agent.id}/1/remax-pa.pdf`;
+
+    let formId = "";
+    const goodDbUrl = process.env.DATABASE_URL!;
+    try {
+      // Break the durable queue exactly at enqueue time: stop the started boss,
+      // point DATABASE_URL at an unreachable host, and re-read env so getBoss()
+      // rebuilds against it → boss.start() fails → enqueueFormDetectJob throws.
+      // Prisma's pool is already open against the real DB, so inline detection
+      // (below) is unaffected by this swap.
+      await stopBossForTesting();
+      process.env.DATABASE_URL = "postgres://x:x@127.0.0.1:1/nope?sslmode=disable";
+      resetEnvForTesting();
+
+      const res = await uploadFlat(agent.id);
+      // Upload SURVIVES the enqueue failure — no 503, no data loss.
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string; status: string };
+      formId = body.id;
+      expect(["detecting", "pending_review"]).toContain(body.status);
+
+      // The row was NOT deleted…
+      expect(await prisma.uploaded_forms.findUnique({ where: { id: formId } })).not.toBeNull();
+      // …and the blob was NOT deleted.
+      expect(storage.deletes).not.toContain(blobKey);
+    } finally {
+      // Restore BEFORE the next test's beforeEach rebuilds the boss singleton,
+      // so a bad URL never poisons a sibling test.
+      process.env.DATABASE_URL = goodDbUrl;
+      resetEnvForTesting();
+    }
+
+    // Inline detection (real DB via Prisma's open pool + the injected fake
+    // detector) resolves the form normally — pending_review with its fields.
+    await waitForInlineFormDetects();
+    const done = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id: formId } });
+    expect(done.status).toBe("pending_review");
+    expect(await prisma.uploaded_form_fields.count({ where: { form_id: formId } })).toBe(3);
+    expect(detectCalls).toBe(1); // inline DID run
+  });
+
+  it("Case 2: after the queue recovers, a normal upload still enqueues a durable backstop job", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
+
+    // Hold the inline run open so the durable job isn't consumed before we can
+    // observe it (inline success completes the job).
+    holdDetector();
+    const res = await uploadFlat(agent.id);
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+
+    // The happy path is unaffected: a durable backstop job was enqueued.
+    expect(await runnableDetectJobs(id)).toHaveLength(1);
+
+    // Let inline finish → it consumes the job and resolves the form.
+    gate!.open();
+    await waitForInlineFormDetects();
+    const form = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id } });
+    expect(form.status).toBe("pending_review");
+    expect(await runnableDetectJobs(id)).toHaveLength(0); // inline consumed it
+  });
+
+  it("Case 3: a flat upload with NO declared type still 422s (unrelated failure mode unchanged)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    await onboard(agent.id);
+    const res = await uploadFlat(agent.id, false);
+    expect(res.status).toBe(422);
+    expect(await prisma.uploaded_forms.count()).toBe(0);
+  });
+});
+
 // ── #288: guided vision can locate the SAME field on multiple pages ──────────
 //
 // The job queries EVERY page with the FULL field set (a new layout hides which

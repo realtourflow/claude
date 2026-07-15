@@ -10,11 +10,7 @@ import {
 } from "@/lib/s3";
 import { PDFDocument } from "pdf-lib";
 import { FORM_SIDES, type FormSide } from "@/lib/uploaded-forms";
-import {
-  createUploadedForm,
-  FormTypeRequiredError,
-  FormDetectEnqueueError,
-} from "@/lib/create-uploaded-form";
+import { createUploadedForm, FormTypeRequiredError } from "@/lib/create-uploaded-form";
 import { sha256Hex } from "@/lib/uploaded-forms";
 
 // Loading + slicing a multi-form bundle PDF is heavier than a JSON call — and
@@ -184,8 +180,6 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         await deleteObject(s3Key).catch(() => {});
         if (e instanceof FormTypeRequiredError) {
           failed.push({ label: r.label, error: "needs a document type" });
-        } else if (e instanceof FormDetectEnqueueError) {
-          failed.push({ label: r.label, error: "could not start field detection" });
         } else {
           failed.push({ label: r.label, error: "processing failed" });
         }
