@@ -41,6 +41,9 @@ export default function RootRedirect() {
     if (groupId === "seller")
       return router.replace(done ? `/seller/${activeUser?.id}` : "/onboard/seller");
     if (groupId === "tc") return router.replace("/tc");
+    // lending_partner is a real role with no product surface yet (#307) — send
+    // it to its honest placeholder, never the full agent app.
+    if (groupId === "lending_partner") return router.replace("/lending-partner");
     if (!done) return router.replace("/onboard/agent");
     router.replace("/agent");
   }, [auth0Loading, isAuthenticated, isLoaded, auth0Error, syncError, activeUser, router]);
