@@ -241,6 +241,7 @@ export async function emailDocumentUploaded(input: {
   const agent = await dealAgent(dealId);
   if (agent && agent.id !== uploaderId) {
     recipients.push({
+      userId: agent.id,
       email: agent.email,
       url: recipientUrl(origin, "agent", agent.id, dealId),
     });
