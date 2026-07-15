@@ -5,7 +5,7 @@ import { POST as processJobs } from "@/app/api/jobs/process/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setVisionDetectorForTesting, type VisionFieldDetector } from "@/lib/form-ai/vision";
-import { seedFormTypes, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
+import { seedFormTypes, resolveFormTypeId, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
 import { runFormDetectJob, waitForInlineFormDetects } from "@/lib/form-detect";
 import { resetEnvForTesting } from "@/lib/env";
 import {
@@ -293,6 +293,145 @@ describe("guided-vision detect job (Phase 3, pt 2b)", () => {
     const res = await uploadFlat(agent.id, false);
     expect(res.status).toBe(422);
     expect(await prisma.uploaded_forms.count()).toBe(0);
+  });
+});
+
+// ── #288: guided vision can locate the SAME field on multiple pages ──────────
+//
+// The job queries EVERY page with the FULL field set (a new layout hides which
+// page a field lives on), so vision can re-match one field NAME on more than one
+// page. The purchase_agreement type has no field that legitimately recurs across
+// pages, so a same-name hit on a second page is a detection error. Dedup by NAME
+// keeps the FIRST (in PAGE ORDER) accepted and flags the rest for the admin, so
+// no core key ever silently carries two accepted boxes.
+describe("guided-vision detect dedupes same-name multi-page hits (#288)", () => {
+  type Loc = { name: string; type: string; page: number; rect: { x: number; y: number; width: number; height: number } };
+
+  // A detector returning a fixed located list — filtered to the pages the job
+  // actually queries, mirroring the real detectGuided (it only reports pages it
+  // was handed). Preserves the given ORDER so a test can emit hits out of page
+  // order and prove the job dedupes by page order, not array order.
+  function detectorReturning(located: Loc[]): VisionFieldDetector {
+    return {
+      detect: async () => [],
+      detectGuided: async ({ expected }) => {
+        const pages = new Set(expected.map((e) => e.page));
+        return located
+          .filter((c) => pages.has(c.page))
+          .map((c) => ({
+            name: c.name,
+            type: c.type as "text" | "signature",
+            page: c.page,
+            rect: c.rect,
+            nearbyText: c.name,
+          }));
+      },
+    };
+  }
+
+  // Create a 'detecting' vision form wired to the purchase_agreement type, then
+  // run detection DIRECTLY (no upload/inline path) so the dedup is tested in
+  // isolation. FLAT2 (the beforeEach default bytes) is 2 pages → the job queries
+  // pages 1-2.
+  async function detectWith(located: Loc[]) {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const typeId = await resolveFormTypeId(PURCHASE_AGREEMENT_KEY);
+    expect(typeId).not.toBeNull();
+    const form = await prisma.uploaded_forms.create({
+      data: {
+        agent_id: agent.id,
+        label: "dup-test",
+        side: "buy",
+        source_s3_key: `agent-forms/${agent.id}/1/dup.pdf`,
+        source_file_name: "dup.pdf",
+        attested_by: agent.id,
+        attestation_statement: "a",
+        file_sha256: "dup-sha",
+        status: "detecting",
+        detection_source: "vision",
+        form_type_id: typeId,
+      },
+      select: { id: true },
+    });
+    setVisionDetectorForTesting(detectorReturning(located));
+    await runFormDetectJob(form.id);
+    return prisma.uploaded_form_fields.findMany({
+      where: { form_id: form.id },
+      orderBy: [{ detected_name: "asc" }, { page_number: "asc" }],
+    });
+  }
+
+  it("Case 1: same field on TWO pages → first in PAGE ORDER accepted, second needs_review/pending", async () => {
+    // Emit the page-2 hit FIRST to prove dedup is by PAGE ORDER, not array order:
+    // the page-1 box must still win as the single accepted one.
+    const fields = await detectWith([
+      { name: "buyer1_signature", type: "signature", page: 2, rect: { x: 72, y: 120, width: 200, height: 24 } },
+      { name: "buyer1_signature", type: "signature", page: 1, rect: { x: 72, y: 500, width: 200, height: 24 } },
+    ]);
+    const sigs = fields.filter((f) => f.detected_name === "buyer1_signature");
+    expect(sigs).toHaveLength(2); // BOTH rows written — no data dropped
+
+    const accepted = sigs.filter((f) => f.decision === "accepted");
+    const flagged = sigs.filter((f) => f.decision === "pending");
+    expect(accepted).toHaveLength(1); // exactly ONE accepted (fails today: both accepted)
+    expect(flagged).toHaveLength(1);
+
+    expect(accepted[0].page_number).toBe(1); // the FIRST in page order
+    expect(accepted[0].needs_review).toBe(false);
+
+    expect(flagged[0].page_number).toBe(2);
+    expect(flagged[0].needs_review).toBe(true);
+    expect(flagged[0].final_core_key).toBeNull();
+    expect(flagged[0].final_role).toBeNull();
+    expect(flagged[0].final_type).toBeNull();
+  });
+
+  it("Case 1b: a core-key-bearing field duplicated → only ONE accepted box carries the core key", async () => {
+    const fields = await detectWith([
+      { name: "buyer_name", type: "text", page: 1, rect: { x: 72, y: 700, width: 200, height: 18 } },
+      { name: "buyer_name", type: "text", page: 2, rect: { x: 72, y: 700, width: 200, height: 18 } },
+    ]);
+    const rows = fields.filter((f) => f.detected_name === "buyer_name");
+    expect(rows).toHaveLength(2);
+
+    // No core key silently carries more than one accepted box.
+    const acceptedWithKey = rows.filter((f) => f.decision === "accepted" && f.final_core_key === "buyer_name");
+    expect(acceptedWithKey).toHaveLength(1);
+    expect(acceptedWithKey[0].page_number).toBe(1);
+
+    const dup = rows.find((f) => f.decision === "pending")!;
+    expect(dup.final_core_key).toBeNull();
+    expect(dup.needs_review).toBe(true);
+    // The AI's suggestion is still recorded so the admin sees what vision thought.
+    expect(dup.ai_core_key).toBe("buyer_name");
+  });
+
+  it("Case 2: a field located on exactly ONE page is unaffected (accepted, not needs_review)", async () => {
+    const fields = await detectWith([
+      { name: "buyer_name", type: "text", page: 1, rect: { x: 72, y: 700, width: 200, height: 18 } },
+    ]);
+    const rows = fields.filter((f) => f.detected_name === "buyer_name");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].decision).toBe("accepted");
+    expect(rows[0].needs_review).toBe(false);
+    expect(rows[0].final_core_key).toBe("buyer_name");
+    expect(rows[0].final_role).toBe("Buyer1");
+  });
+
+  it("Case 3: two DIFFERENT fields on different pages stay independent + both accepted (dedup by NAME, not page)", async () => {
+    const fields = await detectWith([
+      { name: "buyer_name", type: "text", page: 1, rect: { x: 72, y: 700, width: 200, height: 18 } },
+      { name: "purchase_price", type: "text", page: 2, rect: { x: 400, y: 600, width: 80, height: 18 } },
+    ]);
+    expect(fields).toHaveLength(2);
+    for (const f of fields) {
+      expect(f.decision).toBe("accepted");
+      expect(f.needs_review).toBe(false);
+    }
+    const bn = fields.find((f) => f.detected_name === "buyer_name")!;
+    const pp = fields.find((f) => f.detected_name === "purchase_price")!;
+    expect(bn.final_core_key).toBe("buyer_name");
+    expect(pp.final_core_key).toBe("purchase_price");
   });
 });
 
