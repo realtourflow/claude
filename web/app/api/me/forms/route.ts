@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasRole } from "@/lib/roles";
 import { getObjectBytes, getObjectSize, deleteObject } from "@/lib/s3";
+import { PDFDocument } from "pdf-lib";
 import {
   FORM_SIDES,
   type FormSide,
@@ -180,6 +181,21 @@ export async function POST(req: Request): Promise<Response> {
         bytes = await getObjectBytes(body.s3_key);
       } catch {
         return error("uploaded file not found", 400);
+      }
+
+      // Validate the bytes actually parse as a PDF BEFORE either path proceeds.
+      // A non-PDF (a JPEG renamed .pdf) or a truncated/corrupt PDF would otherwise
+      // throw an unexplained 500 downstream on the flat path (and orphan the blob,
+      // since only the two typed errors deleted it) — or, on the bundle path
+      // (which never parses), be accepted as pending_split and only fail later at
+      // admin split. This single gate covers BOTH paths: on failure delete the
+      // orphaned blob and return an agent-readable 400. (ignoreEncryption mirrors
+      // what the downstream extractor does anyway.)
+      try {
+        await PDFDocument.load(bytes, { ignoreEncryption: true });
+      } catch {
+        await deleteObject(body.s3_key);
+        return error("that file isn't a readable PDF — please upload a PDF", 400);
       }
 
       const agentUser = await prisma.users.findUnique({
