@@ -8,6 +8,8 @@ export type IntegrationStatus = {
   connected: boolean;
   scope: 'platform' | 'user';
   account_email?: string;
+  /** Connected but the OAuth token can no longer sync — show a Reconnect CTA (#296). */
+  needs_reconnect?: boolean;
 };
 
 export type IntegrationsResponse = {
@@ -22,8 +24,8 @@ const EMPTY: IntegrationsResponse = {
   arive: { configured: false, connected: false, scope: 'platform' },
   docusign: { configured: false, connected: false, scope: 'platform' },
   stripe: { configured: false, connected: false, scope: 'platform' },
-  google_calendar: { configured: false, connected: false, scope: 'user' },
-  microsoft_calendar: { configured: false, connected: false, scope: 'user' },
+  google_calendar: { configured: false, connected: false, scope: 'user', needs_reconnect: false },
+  microsoft_calendar: { configured: false, connected: false, scope: 'user', needs_reconnect: false },
 };
 
 export function useIntegrations() {
