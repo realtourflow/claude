@@ -120,10 +120,20 @@ export function recalcLines(lines: NetSheetLine[], salePrice: number, annualTaxe
     if (!line.isPct || line.pct === null) return line;
     if (line.id === 'property_tax_proration') {
       if (annualTaxes > 0 && closingDate) {
-        const d = new Date(closingDate);
-        const start = new Date(d.getFullYear(), 0, 1);
-        const dayOfYear = Math.floor((d.getTime() - start.getTime()) / 86_400_000) + 1;
-        return { ...line, amount: Math.round(annualTaxes * (dayOfYear / 365)) };
+        // closingDate is date-only — "2026-01-01" from the date input, or the
+        // API shape "2026-01-01T00:00:00.000Z". Parse the Y/M/D prefix and do
+        // every calculation in UTC: new Date()/getFullYear() mix UTC midnight
+        // with local getters, so in a negative-offset zone a Jan 1 close flips
+        // to the prior Dec 31 and prorates ~a full year. Divide by the actual
+        // days in that year (365/366) so leap years prorate correctly and the
+        // amount never exceeds the annual bill.
+        const [year, month, day] = closingDate.slice(0, 10).split('-').map(Number);
+        if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+          const yearStart = Date.UTC(year, 0, 1);
+          const dayOfYear = Math.floor((Date.UTC(year, month - 1, day) - yearStart) / 86_400_000) + 1;
+          const daysInYear = (Date.UTC(year + 1, 0, 1) - yearStart) / 86_400_000;
+          return { ...line, amount: Math.round(annualTaxes * (dayOfYear / daysInYear)) };
+        }
       }
       return { ...line, amount: 0 };
     }
