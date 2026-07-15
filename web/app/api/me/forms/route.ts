@@ -10,11 +10,7 @@ import {
   getAttestationStatement,
   sha256Hex,
 } from "@/lib/uploaded-forms";
-import {
-  createUploadedForm,
-  FormTypeRequiredError,
-  FormDetectEnqueueError,
-} from "@/lib/create-uploaded-form";
+import { createUploadedForm, FormTypeRequiredError } from "@/lib/create-uploaded-form";
 import { sendNotificationEmail } from "@/lib/email";
 
 const ADMIN_NOTIFY_EMAIL = "paul@mountain.mortgage";
@@ -296,10 +292,6 @@ export async function POST(req: Request): Promise<Response> {
             "pick the document type so we can detect this form's fields",
             422
           );
-        }
-        if (err instanceof FormDetectEnqueueError) {
-          await deleteObject(body.s3_key);
-          return error("couldn't start form detection — please try again", 503);
         }
         throw err;
       }
