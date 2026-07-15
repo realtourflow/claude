@@ -95,11 +95,27 @@ export async function runFormDetectJob(formId: string): Promise<void> {
 
   // Map each located box back to its type field (mapping is from the type, not a
   // guess → mapping is pre-resolved; needs_review=false so ONLY placement gates).
+  //
+  // Dedup by NAME first (#288): vision was queried with the FULL field set on
+  // EVERY page (a new layout hides which page a field lives on), so it can
+  // re-match the SAME field name on more than one page. The purchase_agreement
+  // type has no field that legitimately recurs across pages, so a second
+  // same-name hit is a detection error. Keep the FIRST in PAGE ORDER as accepted;
+  // still WRITE the extras (don't drop data) but flag them needs_review + clear
+  // final_*/decision to pending — the same "unresolved" shape copyKnownFields
+  // uses — so the admin overlay surfaces the conflict instead of two accepted
+  // boxes silently sharing one core key. Dedup is by NAME only, never by
+  // page/position. Sort by page (stable) so "first" is the lowest-page hit
+  // regardless of the order detectGuided returned them in.
   const byLabel = new Map(fieldSet.map((f) => [f.label, f]));
-  const rows = located
+  const seen = new Set<string>();
+  const rows = [...located]
+    .sort((a, b) => a.page - b.page)
     .map((d) => {
       const tf = byLabel.get(d.name);
       if (!tf) return null;
+      const duplicate = seen.has(d.name);
+      seen.add(d.name);
       return {
         form_id: formId,
         detected_name: d.name,
@@ -110,15 +126,17 @@ export async function runFormDetectJob(formId: string): Promise<void> {
         width: d.rect.width,
         height: d.rect.height,
         nearby_text: d.nearbyText ?? tf.label,
-        ai_core_key: tf.core_key,
+        ai_core_key: tf.core_key, // record the AI's suggestion even on a dup
         ai_role: tf.role,
-        ai_confidence: 1, // mapping known from the type
-        ai_rationale: "vision-located on the agent's layout; mapping from the document type",
-        needs_review: false, // mapping resolved; PLACEMENT is gated separately
-        final_core_key: tf.core_key,
-        final_role: tf.role,
-        final_type: tf.type,
-        decision: "accepted",
+        ai_confidence: duplicate ? 0 : 1, // dup mapping is now in doubt
+        ai_rationale: duplicate
+          ? "duplicate vision hit: this field was already located on an earlier page; needs admin review"
+          : "vision-located on the agent's layout; mapping from the document type",
+        needs_review: duplicate, // first hit: PLACEMENT gates separately; dup: surface the conflict
+        final_core_key: duplicate ? null : tf.core_key,
+        final_role: duplicate ? null : tf.role,
+        final_type: duplicate ? null : tf.type,
+        decision: duplicate ? "pending" : "accepted",
       };
     })
     .filter((r): r is NonNullable<typeof r> => r !== null);
