@@ -230,6 +230,139 @@ describe("Checklist", () => {
     const res = await listChecklistRoute(req, ctx({ id: deal.id }));
     expect(res.status).toBe(404);
   });
+
+  it("an intentionally emptied checklist stays empty — no re-seed on next GET (#264)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+    const auth = await authHeader("auth0|a", ["agent"]);
+    const getChecklist = () =>
+      listChecklistRoute(
+        new Request(`http://localhost/api/deals/${deal.id}/checklist`, {
+          headers: { authorization: auth },
+        }),
+        ctx({ id: deal.id })
+      );
+
+    // First GET seeds the 17 defaults.
+    const seeded = (await (await getChecklist()).json()) as { id: string }[];
+    expect(seeded.length).toBe(17);
+
+    // Delete every item — defaults are deletable (e.g. a cash deal).
+    for (const item of seeded) {
+      const delRes = await deleteChecklistRoute(
+        new Request(
+          `http://localhost/api/deals/${deal.id}/checklist/${item.id}`,
+          { method: "DELETE", headers: { authorization: auth } }
+        ),
+        ctx({ id: deal.id, itemId: item.id })
+      );
+      expect(delRes.status).toBe(200);
+    }
+
+    // Next GET must NOT resurrect the defaults (the bug: count === 0 re-seeds).
+    const after = (await (await getChecklist()).json()) as unknown[];
+    expect(after.length).toBe(0);
+  });
+
+  it("seeds defaults exactly once and stamps checklist_seeded_at; second GET doesn't duplicate (#264)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+    const auth = await authHeader("auth0|a", ["agent"]);
+    const getChecklist = () =>
+      listChecklistRoute(
+        new Request(`http://localhost/api/deals/${deal.id}/checklist`, {
+          headers: { authorization: auth },
+        }),
+        ctx({ id: deal.id })
+      );
+
+    // Before any GET the marker is unset.
+    const before = await prisma.deals.findUnique({
+      where: { id: deal.id },
+      select: { checklist_seeded_at: true },
+    });
+    expect(before?.checklist_seeded_at).toBeNull();
+
+    const first = (await (await getChecklist()).json()) as unknown[];
+    expect(first.length).toBe(17);
+
+    // The seed set the persistent marker in the same transaction.
+    const stamped = await prisma.deals.findUnique({
+      where: { id: deal.id },
+      select: { checklist_seeded_at: true },
+    });
+    expect(stamped?.checklist_seeded_at).not.toBeNull();
+
+    // A second GET does not duplicate.
+    const second = (await (await getChecklist()).json()) as unknown[];
+    expect(second.length).toBe(17);
+    const count = await prisma.checklist_items.count({
+      where: { deal_id: deal.id },
+    });
+    expect(count).toBe(17);
+  });
+
+  it("custom items added after emptying survive; a pre-eligible-stage deal still seeds nothing (#264)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+    const auth = await authHeader("auth0|a", ["agent"]);
+    const getChecklist = (dealId: string) =>
+      listChecklistRoute(
+        new Request(`http://localhost/api/deals/${dealId}/checklist`, {
+          headers: { authorization: auth },
+        }),
+        ctx({ id: dealId })
+      );
+
+    // Seed then empty.
+    const seeded = (await (await getChecklist(deal.id)).json()) as {
+      id: string;
+    }[];
+    for (const item of seeded) {
+      await deleteChecklistRoute(
+        new Request(
+          `http://localhost/api/deals/${deal.id}/checklist/${item.id}`,
+          { method: "DELETE", headers: { authorization: auth } }
+        ),
+        ctx({ id: deal.id, itemId: item.id })
+      );
+    }
+
+    // Add one custom item to the emptied list.
+    const createRes = await createChecklistRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/checklist`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: auth },
+        body: JSON.stringify({ label: "Custom: wire earnest money" }),
+      }),
+      ctx({ id: deal.id })
+    );
+    expect(createRes.status).toBe(200);
+
+    // Subsequent GET returns just the custom item — no defaults resurrected.
+    const after = (await (await getChecklist(deal.id)).json()) as {
+      label: string;
+      is_custom: boolean;
+    }[];
+    expect(after.length).toBe(1);
+    expect(after[0].label).toBe("Custom: wire earnest money");
+    expect(after[0].is_custom).toBe(true);
+
+    // A pre-eligible-stage (intake) deal seeds nothing and leaves the marker unset.
+    const intakeDeal = await createDeal({
+      agent_id: agent.id,
+      stage: "intake",
+    });
+    const intakeItems = (await (
+      await getChecklist(intakeDeal.id)
+    ).json()) as unknown[];
+    expect(intakeItems.length).toBe(0);
+    const intakeMarker = await prisma.deals.findUnique({
+      where: { id: intakeDeal.id },
+      select: { checklist_seeded_at: true },
+    });
+    expect(intakeMarker?.checklist_seeded_at).toBeNull();
+  });
 });
 
 describe("Contingencies", () => {

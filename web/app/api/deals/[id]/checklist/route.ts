@@ -18,19 +18,27 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       return error("deal not found", 404);
     }
 
-    // Auto-seed defaults if eligible stage + empty.
-    const count = await prisma.checklist_items.count({ where: { deal_id: dealId } });
-    if (count === 0) {
-      const deal = await prisma.deals.findUnique({
-        where: { id: dealId },
-        select: { stage: true },
-      });
-      if (deal && CHECKLIST_ELIGIBLE_STAGES.has(deal.stage)) {
-        // Two concurrent first-opens can both see count === 0 (#90).
-        // skipDuplicates emits ON CONFLICT DO NOTHING, so the loser of that
-        // race no-ops against the partial unique index on (deal_id, label)
-        // WHERE NOT is_custom and both callers read the winner's rows below.
-        await prisma.checklist_items.createMany({
+    // Auto-seed the defaults exactly once per deal, at an eligible stage. The
+    // persistent marker deals.checklist_seeded_at — NOT a live item count —
+    // decides "seeded before?", so an intentionally emptied checklist stays
+    // empty instead of resurrecting all 17 defaults on the next load (#264).
+    const deal = await prisma.deals.findUnique({
+      where: { id: dealId },
+      select: { stage: true, checklist_seeded_at: true },
+    });
+    if (
+      deal &&
+      deal.checklist_seeded_at === null &&
+      CHECKLIST_ELIGIBLE_STAGES.has(deal.stage)
+    ) {
+      // Seed the rows and stamp the marker in one transaction. Two concurrent
+      // first-opens can both read checklist_seeded_at IS NULL (#90):
+      // skipDuplicates emits ON CONFLICT DO NOTHING so the loser no-ops against
+      // the partial unique index on (deal_id, label) WHERE NOT is_custom, and
+      // the marker UPDATE is idempotent (both write ~now()); both callers then
+      // read the winner's rows below.
+      await prisma.$transaction([
+        prisma.checklist_items.createMany({
           data: DEFAULT_CHECKLIST_ITEMS.map((d, i) => ({
             deal_id: dealId,
             label: d.label,
@@ -39,8 +47,12 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
             sort_order: i,
           })),
           skipDuplicates: true,
-        });
-      }
+        }),
+        prisma.deals.update({
+          where: { id: dealId },
+          data: { checklist_seeded_at: new Date() },
+        }),
+      ]);
     }
 
     const items = await prisma.$queryRaw<
