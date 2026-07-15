@@ -135,11 +135,20 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
         select: { user_id: true },
       });
       const label = STAGE_LABELS[newStage] ?? newStage;
+      // Direction-aware copy (#267): a retreat — e.g. a busted contract moving
+      // under_contract → active_search — must not push clients a celebratory
+      // "moved forward" about bad news. Advance copy is kept byte-identical
+      // (other tests assert it); retreats get neutral wording.
+      const advanced = isForwardAdvance(current.stage, newStage);
+      const title = advanced
+        ? "Your deal has moved forward"
+        : "Your deal's stage was updated";
+      const body = advanced ? `New stage: ${label}` : `Stage: ${label}`;
       for (const p of participants) {
         await createNotification({
           userId: p.user_id,
-          title: "Your deal has moved forward",
-          body: `New stage: ${label}`,
+          title,
+          body,
           kind: "stage_change",
           dealId,
         });
