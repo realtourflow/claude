@@ -1,3 +1,4 @@
+import { env } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import { getAriveClient } from "@/lib/arive";
 import { enqueuePushDealClosingEvent } from "@/lib/jobs";
@@ -8,7 +9,28 @@ type Payload = {
   event?: string;
 };
 
+// Shared-secret token, carried in the `x-arive-token` header or a `?token=`
+// query param (ARIVE's webhook config can send either). Mirrors the IndexNow
+// webhook's tokenFrom.
+function tokenFrom(req: Request): string | null {
+  const fromQuery = new URL(req.url).searchParams.get("token");
+  return fromQuery ?? req.headers.get("x-arive-token");
+}
+
 export async function POST(req: Request): Promise<Response> {
+  // Auth gate (#270). This was the only webhook in the app with zero auth —
+  // anyone could POST a loanId and drive a sync + calendar-push fan-out. Fail
+  // closed exactly like /api/indexnow/notion: with no secret configured the
+  // endpoint is disabled (503; never compare against an empty secret); a
+  // missing or wrong token is 401. Runs BEFORE client.enabled()/payload parse.
+  const secret = env().ARIVE_WEBHOOK_SECRET;
+  if (!secret) {
+    return new Response("arive webhook not configured", { status: 503 });
+  }
+  if (tokenFrom(req) !== secret) {
+    return new Response("unauthorized", { status: 401 });
+  }
+
   const client = getAriveClient();
   if (!client.enabled()) {
     return new Response("arive not configured", { status: 503 });

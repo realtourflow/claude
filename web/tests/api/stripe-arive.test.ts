@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+} from "vitest";
 import type Stripe from "stripe";
 import { POST as checkoutRoute } from "@/app/api/deals/[id]/fee/checkout/route";
 import { POST as waiveRoute } from "@/app/api/deals/[id]/fee/waive/route";
@@ -6,6 +14,7 @@ import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
 import { PATCH as linkAriveRoute } from "@/app/api/deals/[id]/arive/route";
 import { POST as syncAriveRoute } from "@/app/api/deals/[id]/arive/sync/route";
 import { POST as ariveWebhook } from "@/app/api/arive/webhook/route";
+import { resetEnvForTesting } from "@/lib/env";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setStripeForTesting } from "@/lib/stripe";
 import { setAriveForTesting, type AriveClient } from "@/lib/arive";
@@ -424,7 +433,21 @@ describe("POST /api/stripe/webhook", () => {
   });
 });
 
+const ARIVE_WEBHOOK_TOKEN = "test-arive-webhook-secret";
+
 describe("ARIVE link + sync + webhook", () => {
+  // The webhook is fail-closed: it requires ARIVE_WEBHOOK_SECRET and a matching
+  // token (#270). Set the secret for the whole block so the happy-path webhook
+  // test still exercises the sync; the auth block below flips it as needed.
+  beforeAll(() => {
+    process.env.ARIVE_WEBHOOK_SECRET = ARIVE_WEBHOOK_TOKEN;
+    resetEnvForTesting();
+  });
+  afterAll(() => {
+    delete process.env.ARIVE_WEBHOOK_SECRET;
+    resetEnvForTesting();
+  });
+
   function fakeAriveClient(enabled = true): AriveClient {
     return {
       enabled: () => enabled,
@@ -434,6 +457,27 @@ describe("ARIVE link + sync + webhook", () => {
         milestones: { contract: true },
         keyDates: { closing: "2026-06-15" },
       }),
+    };
+  }
+
+  // Fake client that records whether fetchLoan ran — lets the auth tests assert
+  // no sync happened when the caller is rejected before the gate.
+  function spyAriveClient(): { client: AriveClient; calls: string[] } {
+    const calls: string[] = [];
+    return {
+      calls,
+      client: {
+        enabled: () => true,
+        fetchLoan: async (loanId: string) => {
+          calls.push(loanId);
+          return {
+            loanId,
+            status: "active",
+            milestones: { contract: true },
+            keyDates: { closing: "2026-06-15" },
+          };
+        },
+      },
     };
   }
 
@@ -543,7 +587,10 @@ describe("ARIVE link + sync + webhook", () => {
     setAriveForTesting(fakeAriveClient());
     const req = new Request("http://localhost/api/arive/webhook", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        "x-arive-token": ARIVE_WEBHOOK_TOKEN,
+      },
       body: JSON.stringify({ loanId: "loan-hook" }),
     });
     const res = await ariveWebhook(req);
@@ -556,5 +603,112 @@ describe("ARIVE link + sync + webhook", () => {
     expect(row?.arive_milestones).toEqual({ contract: true });
     expect(row?.arive_key_dates).toEqual({ closing: "2026-06-15" });
     expect(row?.arive_synced_at).not.toBeNull();
+  });
+
+  // #270 — the webhook was the only one in the app with zero auth. It must
+  // authenticate a shared secret (x-arive-token header or ?token= query) and
+  // fail closed (503) when the secret is unconfigured.
+  describe("ARIVE webhook auth", () => {
+    it("401 with no/wrong token, and does NOT sync (fetchLoan not called)", async () => {
+      const agent = await createUser({ role: "agent" });
+      const deal = await createDeal({ agent_id: agent.id });
+      await prisma.deals.update({
+        where: { id: deal.id },
+        data: { arive_loan_id: "loan-noauth", arive_linked: true },
+      });
+      const spy = spyAriveClient();
+      setAriveForTesting(spy.client);
+
+      // No token at all.
+      const noToken = await ariveWebhook(
+        new Request("http://localhost/api/arive/webhook", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ loanId: "loan-noauth" }),
+        })
+      );
+      expect(noToken.status).toBe(401);
+
+      // Wrong token.
+      const wrongToken = await ariveWebhook(
+        new Request("http://localhost/api/arive/webhook", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-arive-token": "nope",
+          },
+          body: JSON.stringify({ loanId: "loan-noauth" }),
+        })
+      );
+      expect(wrongToken.status).toBe(401);
+
+      // The gate ran before any sync — ARIVE was never queried and nothing
+      // was written.
+      expect(spy.calls).toEqual([]);
+      const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+      expect(row?.arive_loan_status).toBeNull();
+      expect(row?.arive_synced_at).toBeNull();
+    });
+
+    it("200 with the correct token in the query string → syncs as before", async () => {
+      const agent = await createUser({ role: "agent" });
+      const deal = await createDeal({ agent_id: agent.id });
+      await prisma.deals.update({
+        where: { id: deal.id },
+        data: { arive_loan_id: "loan-ok", arive_linked: true },
+      });
+      setAriveForTesting(fakeAriveClient());
+
+      const res = await ariveWebhook(
+        new Request(
+          `http://localhost/api/arive/webhook?token=${ARIVE_WEBHOOK_TOKEN}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ loanId: "loan-ok" }),
+          }
+        )
+      );
+      expect(res.status).toBe(200);
+      const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+      expect(row?.arive_loan_status).toBe("active");
+      expect(row?.arive_synced_at).not.toBeNull();
+    });
+
+    it("503 when ARIVE_WEBHOOK_SECRET is unset — fail closed, no sync", async () => {
+      const agent = await createUser({ role: "agent" });
+      const deal = await createDeal({ agent_id: agent.id });
+      await prisma.deals.update({
+        where: { id: deal.id },
+        data: { arive_loan_id: "loan-unset", arive_linked: true },
+      });
+      const spy = spyAriveClient();
+      setAriveForTesting(spy.client);
+
+      process.env.ARIVE_WEBHOOK_SECRET = "";
+      resetEnvForTesting();
+      try {
+        const res = await ariveWebhook(
+          new Request("http://localhost/api/arive/webhook", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              // Even with a token, an unset secret disables the endpoint.
+              "x-arive-token": "anything",
+            },
+            body: JSON.stringify({ loanId: "loan-unset" }),
+          })
+        );
+        expect(res.status).toBe(503);
+      } finally {
+        process.env.ARIVE_WEBHOOK_SECRET = ARIVE_WEBHOOK_TOKEN;
+        resetEnvForTesting();
+      }
+
+      expect(spy.calls).toEqual([]);
+      const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+      expect(row?.arive_loan_status).toBeNull();
+      expect(row?.arive_synced_at).toBeNull();
+    });
   });
 });
