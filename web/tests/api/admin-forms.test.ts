@@ -551,7 +551,10 @@ describe("admin save-as-known — promote into the recognition catalog", () => {
       known_form_id: string;
       fingerprint: string;
     };
-    expect(body.fingerprint).toMatch(/^v1:[0-9a-f]{64}$/);
+    // The shared test PDF is FLAT (no AcroForm fields), so save-as-known writes the
+    // content-hash fingerprint the flat matcher consults — not a v1: structure hash
+    // (which recognition would never look at for a flat form). See #286.
+    expect(body.fingerprint).toMatch(/^flat:[0-9a-f]{64}$/);
 
     const kf = await prisma.known_forms.findUnique({
       where: { id: body.known_form_id },

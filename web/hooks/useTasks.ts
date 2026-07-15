@@ -70,10 +70,19 @@ export async function patchTaskStatus(taskId: string, status: string): Promise<v
   await api.patch(`/tasks/${taskId}/status`, { status });
 }
 
-/** Edit a task's due date and/or assignee (agent-only server-side). */
+/**
+ * Edit a task's status, due date, assignee, and/or `role` — the assignee
+ * bucket (agent/tc/buyer/seller/third_party/admin) the reassign dropdown
+ * changes (#255). All of due_date/assigned_to/role are agent-only server-side.
+ */
 export async function patchTask(
   taskId: string,
-  fields: { status?: string; due_date?: string | null; assigned_to?: string | null },
+  fields: {
+    status?: string;
+    due_date?: string | null;
+    assigned_to?: string | null;
+    role?: string;
+  },
 ): Promise<void> {
   await api.patch(`/tasks/${taskId}/status`, fields);
 }

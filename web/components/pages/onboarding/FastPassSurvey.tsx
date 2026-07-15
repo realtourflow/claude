@@ -10,6 +10,10 @@ import {
   calcFastPassTotal,
   FAST_PASS_BASE_PRICE,
 } from "@/lib/fast-pass-display";
+// Single source of truth for the +15% "pay at closing" premium (#280) — the
+// server prices enrollments from this same helper, so what we show is what the
+// buyer is charged.
+import { computeFastPassTotalCents } from "@/lib/fast-pass-catalog";
 import type { FastPassPaymentOption } from "@/lib/types";
 import { api } from "@/lib/api-client";
 
@@ -71,6 +75,16 @@ const UTILITY_OPTIONS = [
 const TOTAL_SCREENS = 5;
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
+
+// Money for display. Whole-dollar amounts stay clean ("$3,074"); the +15%
+// "pay at closing" premium introduces cents, which we then show to the penny
+// ("$3,423.55") so the figure on screen matches what the server charges (#280).
+function formatDollars(amount: number): string {
+  return amount.toLocaleString("en-US", {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 function Question({ text, note }: { text: string; note?: string }) {
   return (
@@ -469,6 +483,7 @@ function ConfirmationScreen({
   data,
   selectedUpsells,
   total,
+  atClosingTotal,
   submitting,
   submitError,
   onSubmit,
@@ -476,6 +491,9 @@ function ConfirmationScreen({
   data: SurveyData;
   selectedUpsells: FastPassUpsellId[];
   total: number;
+  // Base + upsells + 15% deferral premium, in dollars — computed once by the
+  // parent from the shared server helper (#280), not re-derived here.
+  atClosingTotal: number;
   submitting?: boolean;
   submitError?: boolean;
   onSubmit: (paymentOption: FastPassPaymentOption) => void;
@@ -488,8 +506,6 @@ function ConfirmationScreen({
     relocating: 'Relocating from out of state',
     other: 'Other',
   };
-
-  const atClosingTotal = Math.round(total * 1.15);
 
   return (
     <div className="screen-enter flex flex-col items-center">
@@ -576,7 +592,7 @@ function ConfirmationScreen({
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-black text-brand-navy">
-                        ${displayTotal.toLocaleString()}
+                        ${formatDollars(displayTotal)}
                       </span>
                       <div
                         className={[
@@ -631,9 +647,13 @@ const SUBMITTED_NOTES: Record<FastPassPaymentOption, string> = {
 
 function SubmittedScreen({
   total,
+  atClosingTotal,
   paymentOption,
 }: {
   total: number;
+  // Base + upsells + 15% deferral premium, in dollars — from the shared server
+  // helper via the parent (#280), so it equals what was actually enrolled.
+  atClosingTotal: number;
   paymentOption: FastPassPaymentOption;
 }) {
   const router = useRouter();
@@ -647,7 +667,6 @@ function SubmittedScreen({
       router.push('/');
     }
   }
-  const atClosingTotal = Math.round(total * 1.15);
   const displayTotal = paymentOption === 'at_closing' ? atClosingTotal : total;
 
   return (
@@ -663,7 +682,7 @@ function SubmittedScreen({
         <span className="font-semibold">
           {paymentOption === 'now' ? 'Invoice amount:' : 'Total due at closing:'}
         </span>{' '}
-        <span className="font-black">${displayTotal.toLocaleString()}</span>
+        <span className="font-black">${formatDollars(displayTotal)}</span>
       </div>
       <p className="mt-3 text-xs text-gray-300">
         Your dashboard will update once payment is confirmed.
@@ -698,6 +717,11 @@ export default function FastPassSurvey() {
     handoff != null && (queryDealId == null || handoff.dealId === queryDealId);
   const selectedUpsells: FastPassUpsellId[] = stashMatches ? handoff?.selectedUpsells ?? [] : [];
   const total = stashMatches ? handoff?.total ?? calcFastPassTotal(selectedUpsells) : calcFastPassTotal([]);
+  // The exact "pay at closing" charge (base + upsells + 15% deferral premium),
+  // in dollars, from the single server-side source of truth — no local * 1.15
+  // (#280). Derived from selectedUpsells so it always equals what POST
+  // /deals/[id]/fastpass persists and charges.
+  const atClosingTotal = computeFastPassTotalCents(selectedUpsells, "at_closing") / 100;
 
   const [screen, setScreen] = useState(0);
   const [data, setData] = useState<SurveyData>(EMPTY);
@@ -727,7 +751,7 @@ export default function FastPassSurvey() {
   if (submitted) {
     return (
       <div className="flex min-h-screen flex-col bg-white px-4 py-8">
-        <SubmittedScreen total={total} paymentOption={chosenPayment} />
+        <SubmittedScreen total={total} atClosingTotal={atClosingTotal} paymentOption={chosenPayment} />
       </div>
     );
   }
@@ -772,6 +796,7 @@ export default function FastPassSurvey() {
             data={data}
             selectedUpsells={selectedUpsells}
             total={total}
+            atClosingTotal={atClosingTotal}
             submitting={submitting}
             submitError={submitError}
             onSubmit={async (option) => {
@@ -780,10 +805,10 @@ export default function FastPassSurvey() {
                 setSubmitting(true);
                 setSubmitError(false);
                 try {
-                  const atClosingTotal = Math.round(total * 1.15);
-                  const totalCents = option === 'at_closing'
-                    ? atClosingTotal * 100
-                    : total * 100;
+                  // total_cents is priced server-side and ignored on the wire
+                  // (#78); send the same shared-helper value so client and
+                  // server never disagree, incl. the +15% at-closing premium.
+                  const totalCents = computeFastPassTotalCents(selectedUpsells, option);
                   const res = await api.post<{ checkout_url?: string; ok?: boolean }>(
                     `/deals/${dealId}/fastpass`,
                     {

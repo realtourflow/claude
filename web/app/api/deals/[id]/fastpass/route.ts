@@ -58,10 +58,11 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     const selectedUpsells = body.selected_upsells ?? [];
 
     // Server-side pricing (#78): the total is computed from the shared catalog
-    // (base fee + selected upsells) — body.total_cents is ignored, so a
-    // tampered client can't set its own price. Unknown keys 400 before anything
-    // is persisted; duplicate keys count once. (Deliberate divergence from the
-    // Go handler, which trusted the client's total_cents.)
+    // (base fee + selected upsells, plus the +15% deferral premium when
+    // payment_option === "at_closing" — #280) — body.total_cents is ignored, so
+    // a tampered client can't set its own price. Unknown keys 400 before
+    // anything is persisted; duplicate keys count once. (Deliberate divergence
+    // from the Go handler, which trusted the client's total_cents.)
     const validatedUpsells: FastPassUpsellId[] = [];
     for (const key of new Set(selectedUpsells)) {
       if (!isFastPassUpsellId(key)) {
@@ -69,7 +70,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       }
       validatedUpsells.push(key);
     }
-    const totalCents = computeFastPassTotalCents(validatedUpsells);
+    const totalCents = computeFastPassTotalCents(validatedUpsells, paymentOption);
 
     const enrollment = {
       status: "active",

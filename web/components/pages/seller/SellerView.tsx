@@ -121,15 +121,20 @@ function MessagesTab({ dealId }: { dealId: string }) {
   const { messages, loading, refresh } = useMessages(dealId, 'client_thread');
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   async function handleSend() {
     if (!draft.trim() || sending) return;
     setSending(true);
+    setSendError(null);
     try {
       await postMessage(dealId, 'client_thread', draft.trim());
       setDraft('');
       await refresh();
-    } catch {}
+    } catch {
+      // Keep the draft so the seller can retry instead of losing what they typed.
+      setSendError('Message failed to send. Please try again.');
+    }
     setSending(false);
   }
 
@@ -161,6 +166,12 @@ function MessagesTab({ dealId }: { dealId: string }) {
           </div>
         );
       })}
+      {sendError && (
+        <div role="alert" className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+          <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
+          <p className="text-xs font-medium text-red-600">{sendError}</p>
+        </div>
+      )}
       <div className="pt-1 flex items-center gap-2">
         <input
           type="text"
@@ -457,6 +468,21 @@ function ShowingAvailabilityModal({ dealId, onClose }: { dealId: string; onClose
 
 // ─── ListingActiveCard ────────────────────────────────────────────────────────
 
+// Format an offer's close date defensively. `close_date` serializes to a
+// UTC-midnight ISO string ("2026-08-15T00:00:00.000Z"); parsing that with
+// `new Date(iso)` and formatting in a negative-offset timezone shifts the day
+// backwards. Take the calendar-date PART only and build a local Date so the day
+// can't drift. Falls back to the raw value if the shape is unexpected.
+function formatCloseDate(value: string): string {
+  const [y, m, d] = value.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return value;
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 function ListingActiveCard({ deal }: { deal: Deal }) {
   const [showAvailModal, setShowAvailModal] = useState(false);
   const { slots: availability } = useShowingAvailability(deal.id);
@@ -547,7 +573,9 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
                     <p className="text-lg font-black text-brand-navy">${offer.offerPrice.toLocaleString()}</p>
-                    <p className="text-xs text-gray-400">{offer.buyerName} · Close {offer.closeDate}</p>
+                    <p className="text-xs text-gray-400">
+                      {offer.buyerName}{offer.closeDate ? ` · Close ${formatCloseDate(offer.closeDate)}` : ''}
+                    </p>
                   </div>
                 </div>
                 {offer.contingencies.length > 0 && (
@@ -786,6 +814,19 @@ function NetSheetReadOnlyCard({ dealId, compact }: { dealId: string; compact?: b
 
 function PostCloseCard({ deal, firstName }: { deal: Deal; firstName: string }) {
   const [showReferral, setShowReferral] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const referralUrl = 'realtourflow.com/refer';
+
+  async function copyReferral() {
+    try {
+      await navigator.clipboard.writeText(referralUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can reject (insecure context / permission denied). Leave the
+      // link on screen so the seller can still select and copy it manually.
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -865,9 +906,12 @@ function PostCloseCard({ deal, firstName }: { deal: Deal; firstName: string }) {
               Please refer us to all your friends and family who would love to share the same awesome experience you had with your home transaction. We will pay you <strong>$50 for every referral</strong> you send our way who completes a transaction with us.
             </p>
             <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 mb-4 flex items-center gap-2">
-              <p className="flex-1 text-xs font-mono text-gray-600 truncate">realtourflow.com/refer</p>
-              <button className="text-xs font-bold text-brand-navy hover:text-brand-navy/70 transition-colors flex-shrink-0">
-                Copy
+              <p className="flex-1 text-xs font-mono text-gray-600 truncate">{referralUrl}</p>
+              <button
+                onClick={copyReferral}
+                className="text-xs font-bold text-brand-navy hover:text-brand-navy/70 transition-colors flex-shrink-0"
+              >
+                {copied ? 'Copied' : 'Copy'}
               </button>
             </div>
             <button
@@ -1166,7 +1210,7 @@ export default function SellerView() {
       {isFallenThrough && <MessagesTab dealId={deal.id} />}
 
       <JourneyTracker deal={deal} />
-      <VendorDirectory agentId={deal.agentId} />
+      <VendorDirectory dealId={deal.id} />
       <AgentCard agentName={deal.agentName} agentEmail={deal.agentEmail} agentPhone={deal.agentPhone} />
 
       {/* Welcome modal — shown once after onboarding completes */}

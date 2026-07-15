@@ -1,9 +1,11 @@
 /**
  * FF1 — best-effort notification emails on top of lib/email.ts.
  *
- * The app already persists in-app notifications (the `notifications` table) for
- * new messages, document uploads, and task assignments. These helpers add email
- * delivery for the same three events. Each helper:
+ * These helpers add best-effort EMAIL delivery for deal activity — new messages,
+ * document uploads, task assignments, and offer requests. The matching in-app
+ * `notifications` rows are persisted separately by the routes via
+ * lib/notifications.ts (#290 wired up the document-upload and task-assignment
+ * rows this header used to claim existed but did not). Each helper:
  *   - resolves recipients server-side from the deal (agent_id + deal_participants),
  *   - never emails the actor (sender / uploader / assigner),
  *   - is invoked best-effort by the route: a throw must never block the mutation
@@ -40,8 +42,13 @@ function originFromRequest(req: Request): string {
  * Role-appropriate deep link for a recipient. Clients land on their own portal
  * (keyed by their userId — the app's only client deal view); agents/admins use
  * the agent deal route; TCs use the TC deals dashboard.
+ *
+ * Exported (#291) so in-app notification hrefs reuse the EXACT same role→URL
+ * mapping as these emails. Pass `origin=""` for a relative path (what the
+ * Next `<Link>` in the notification bell wants); pass a real origin for the
+ * absolute links the emails need.
  */
-function recipientUrl(
+export function recipientUrl(
   origin: string,
   role: string,
   userId: string,
@@ -199,7 +206,20 @@ export async function emailNewMessage(input: {
   });
 }
 
-/** Document uploaded/confirmed: email the deal's client(s). Never the uploader. */
+/**
+ * Document uploaded/confirmed: email the deal's client(s) AND the deal's agent.
+ * Never the uploader.
+ *
+ * The agent belongs in the recipient set whenever they are not the uploader
+ * (#293): when a CLIENT uploads (the "please upload your pre-approval" reply),
+ * the agent is the party waiting on it, yet the old client-only fan-out left
+ * them out entirely — and on the common single-participant deal the recipient
+ * set (clients minus the uploader) was empty, so nobody was emailed and the
+ * request-a-doc loop dead-ended silently. When the AGENT uploads, `agent.id ===
+ * uploaderId` so they are skipped and only the clients hear about it (unchanged,
+ * no self-notify). fanOut dedupes by email, so an agent who is somehow also a
+ * client participant is never emailed twice.
+ */
 export async function emailDocumentUploaded(input: {
   req: Request;
   dealId: string;
@@ -217,6 +237,14 @@ export async function emailDocumentUploaded(input: {
       email: c.email,
       url: recipientUrl(origin, c.role, c.user_id, dealId),
     }));
+
+  const agent = await dealAgent(dealId);
+  if (agent && agent.id !== uploaderId) {
+    recipients.push({
+      email: agent.email,
+      url: recipientUrl(origin, "agent", agent.id, dealId),
+    });
+  }
 
   await fanOut(recipients, {
     subject: "A document was shared on your RealTourFlow deal",

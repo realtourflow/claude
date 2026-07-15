@@ -9,9 +9,10 @@
  * awaited best-effort mechanism was chosen over next/server `after()` (no
  * `waitUntil` outside a running Next server → nondeterministic in tests).
  *
- * Phase 6 will add the typed event union and a listing endpoint. For now
- * this is just the minimal insert surface used by Phase 3 (stage advance
- * notifies participants, task creation/completion notifies the owner, etc.).
+ * Phase 6 will add the typed event union and a listing endpoint. For now this
+ * is the minimal insert surface. Call sites: stage advance (participants), new
+ * messages (the other party), document uploads (deal clients, #290), task
+ * assignments (the assignee, #290), and offer requests (the agent).
  */
 import { prisma } from "./db";
 

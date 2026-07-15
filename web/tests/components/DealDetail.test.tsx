@@ -105,6 +105,12 @@ vi.mock("@/hooks/useTasks", () => ({
   patchTaskStatus: vi.fn(),
 }));
 
+// The Timeline tab (the default landing tab here) fetches stage history via
+// TanStack Query (#256); stub it so these tests need no QueryClientProvider.
+vi.mock("@/hooks/useStageHistory", () => ({
+  useStageHistory: () => ({ history: [], loading: false }),
+}));
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ dealId: DEAL_ID }),
   useRouter: () => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -117,10 +123,6 @@ vi.mock("@/lib/store/authStore", () => ({
     const state = { activeUser: { id: "agent-1", groupId: "agent", name: "Agent Amy" } };
     return sel ? sel(state) : state;
   },
-}));
-
-vi.mock("@/lib/store/taskStore", () => ({
-  useTaskStore: () => ({ reassign: vi.fn(), effectiveAssignee: () => undefined }),
 }));
 
 vi.mock("@/permissions/usePermission", () => ({

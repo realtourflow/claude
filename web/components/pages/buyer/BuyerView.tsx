@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -12,7 +12,7 @@ import { useTasks } from "@/hooks/useTasks";
 import { useTaskCompletion } from "@/hooks/useTaskCompletion";
 import { useMessages, postMessage } from "@/hooks/useMessages";
 import {
-  CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
+  CheckCircle2, Circle, AlertCircle, Loader2,
   MapPin, Calendar, MessageSquare, FileText,
   ChevronRight, Phone, Mail, Home, Zap,
   ClipboardList, Building2, Star, ExternalLink,
@@ -388,42 +388,30 @@ const STAGE_DESCRIPTIONS: Record<DealStage, string> = {
 };
 
 function JourneyTracker({ deal }: { deal: Deal }) {
-  const isFallenThrough = deal.status === 'fallen_through';
-  const currentIdx = STAGE_ORDER.indexOf(
-    isFallenThrough ? (deal.fellFromStage ?? deal.stage) : deal.stage
-  );
+  const currentIdx = STAGE_ORDER.indexOf(deal.stage);
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-sm bg-white">
       {STAGE_ORDER.map((stage, i) => {
         const isPast     = i < currentIdx;
         const isCurrent  = i === currentIdx;
-        const isFellHere = isFallenThrough && isCurrent;
 
         if (isCurrent) {
           return (
-            <div key={stage} className={`px-5 py-4 ${isFellHere ? 'bg-gray-800' : 'bg-brand-navy'}`}>
+            <div key={stage} className="px-5 py-4 bg-brand-navy">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5">
-                  <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
-                    isFellHere ? 'bg-red-400' : 'bg-brand-gold'
-                  }`}>
-                    {isFellHere
-                      ? <XCircle size={15} className="text-white" />
-                      : <div className="h-2.5 w-2.5 rounded-full bg-brand-navy" />}
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-gold">
+                    <div className="h-2.5 w-2.5 rounded-full bg-brand-navy" />
                   </div>
                   <span className="text-base font-black text-white">{BUYER_STAGE_LABELS[stage]}</span>
                 </div>
-                <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                  isFellHere ? 'bg-red-400/20 text-red-300' : 'bg-brand-gold/20 text-brand-gold'
-                }`}>
-                  {isFellHere ? 'Fell out' : "You're here"}
+                <span className="flex-shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-brand-gold/20 text-brand-gold">
+                  You&apos;re here
                 </span>
               </div>
               <p className="mt-1.5 ml-[38px] text-xs text-white/60 leading-relaxed">
-                {isFellHere
-                  ? (deal.fallReason ?? 'This deal has fallen through.')
-                  : STAGE_DESCRIPTIONS[stage]}
+                {STAGE_DESCRIPTIONS[stage]}
               </p>
             </div>
           );
@@ -882,6 +870,7 @@ function MLSBrowser({ deal, onAddProperty }: {
 // ─── Active Search Card ───────────────────────────────────────────────────────
 
 function ActiveSearchCard({ deal }: { deal: Deal }) {
+  const queryClient = useQueryClient();
   const { properties, addProperty, updateStatus, removeProperty, updateBuyerNote, setOfferRequested } = useProperties(deal.id);
   const preApproved = deal.preApproved ?? false;
   const baaSigned = deal.baaSigned ?? false;
@@ -952,12 +941,70 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
     }
   }
 
+  // Pre-approval letter CTAs (#266) — outside-lender buyers. These used to be
+  // empty no-ops. The upload button now runs the SAME presigned flow the
+  // TaskCard uploads use (request URL → push bytes → confirm the documents
+  // row); the "send later" button posts a real client_thread message to the
+  // agent. Neither flips pre_approved — that stays agent-set server-side.
+  const preApprovalFileRef = useRef<HTMLInputElement>(null);
+  const [uploadingLetter, setUploadingLetter] = useState(false);
+  const [letterUploaded, setLetterUploaded] = useState(false);
+  const [letterError, setLetterError] = useState<string | null>(null);
+  const [sendingLater, setSendingLater] = useState(false);
+  const [letterLaterSent, setLetterLaterSent] = useState(false);
+  const [letterLaterError, setLetterLaterError] = useState<string | null>(null);
+
   function handleUploadLetter() {
-    // Pre-approval flag is set by the agent — this is informational
+    preApprovalFileRef.current?.click();
   }
 
-  function handleLetterLater() {
-    // Pre-approval flag is set by the agent — this is informational
+  async function handleLetterFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingLetter(true);
+    setLetterError(null);
+    try {
+      const mimeType = file.type || 'application/octet-stream';
+      const { upload_url, client_upload_url, s3_key } = await requestUploadUrl(deal.id, file.name, mimeType);
+      const put = await uploadFileToStorage({
+        uploadUrl: upload_url,
+        clientUploadUrl: client_upload_url,
+        key: s3_key,
+        file,
+        contentType: mimeType,
+      });
+      if (!put.ok) {
+        setLetterError(put.tooLarge ? 'File too large (max 25MB). Upload failed.' : 'Upload failed. Please try again.');
+        return;
+      }
+      await confirmUpload(deal.id, file.name, s3_key, mimeType, file.size);
+      setLetterUploaded(true);
+      // Surface the new doc in the Documents tab this session.
+      void queryClient.invalidateQueries({ queryKey: ['documents', deal.id] });
+    } catch {
+      setLetterError('Upload failed. Please try again.');
+    } finally {
+      setUploadingLetter(false);
+      e.target.value = '';
+    }
+  }
+
+  async function handleLetterLater() {
+    if (sendingLater) return;
+    setSendingLater(true);
+    setLetterLaterError(null);
+    try {
+      await postMessage(
+        deal.id,
+        'client_thread',
+        "I have a pre-approval letter — I'll send it over.",
+      );
+      setLetterLaterSent(true);
+    } catch {
+      setLetterLaterError("Couldn't reach your agent — please try again.");
+    } finally {
+      setSendingLater(false);
+    }
   }
 
   return (
@@ -1077,16 +1124,44 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
                 <ExternalLink size={12} /> Apply Now →
               </a>
             </div>
+          ) : letterUploaded ? (
+            <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2.5">
+              <CheckCircle2 size={14} className="text-green-500 flex-shrink-0" />
+              <p className="text-xs font-semibold text-green-800">Pre-approval letter uploaded — your agent will review it</p>
+            </div>
+          ) : letterLaterSent ? (
+            <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2.5">
+              <CheckCircle2 size={14} className="text-green-500 flex-shrink-0" />
+              <p className="text-xs font-semibold text-green-800">Got it — we let your agent know you have a pre-approval letter. They&apos;ll reach out.</p>
+            </div>
           ) : (
-            <div className="flex gap-2">
-              <button onClick={handleUploadLetter}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors">
-                Upload pre-approval letter
-              </button>
-              <button onClick={handleLetterLater}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
-                I have one — send later
-              </button>
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <button onClick={handleUploadLetter} disabled={uploadingLetter}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-50">
+                  {uploadingLetter
+                    ? <><Loader2 size={12} className="animate-spin" /> Uploading…</>
+                    : <><Upload size={12} /> Upload pre-approval letter</>}
+                </button>
+                <button onClick={handleLetterLater} disabled={sendingLater}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50">
+                  {sendingLater ? 'Sending…' : 'I have one — send later'}
+                </button>
+              </div>
+              {letterError && (
+                <p role="alert" className="text-xs font-medium text-red-600">{letterError}</p>
+              )}
+              {letterLaterError && (
+                <p role="alert" className="text-xs font-medium text-red-600">{letterLaterError}</p>
+              )}
+              {/* Hidden input drives the "Upload pre-approval letter" button (#266). */}
+              <input
+                ref={preApprovalFileRef}
+                type="file"
+                className="hidden"
+                onChange={handleLetterFileChange}
+                disabled={uploadingLetter}
+              />
             </div>
           )}
         </div>
@@ -1371,7 +1446,7 @@ function PreCloseCard({ deal }: { deal: Deal }) {
   );
 }
 
-function ClosingCard() {
+function ClosingCard({ agentName }: { agentName?: string }) {
   const checklist = [
     'Government-issued photo ID',
     'Cashier\'s check or wire confirmation',
@@ -1396,7 +1471,7 @@ function ClosingCard() {
         ))}
         <div className="pt-2 border-t border-gray-100 mt-2">
           <p className="text-xs text-gray-400 leading-relaxed">
-            Your agent will be there with you. Questions? Call Sarah before you leave.
+            Your agent will be there with you. Questions? Call {agentName || 'your agent'} before you leave.
           </p>
         </div>
       </div>
@@ -1495,40 +1570,6 @@ function LenderCard({ deal }: { deal: Deal }) {
             <ExternalLink size={14} /> Open {lender.company} Portal
           </a>
         )}
-      </div>
-    </div>
-  );
-}
-
-function FallenThroughCard({ deal, firstName }: { deal: Deal; firstName: string }) {
-  return (
-    <div className="space-y-3">
-      <div className="rounded-2xl bg-gray-800 p-5 text-white">
-        <div className="flex items-center gap-2 mb-2">
-          <XCircle size={18} className="text-red-400" />
-          <p className="text-xs font-bold uppercase tracking-widest text-white/50">Deal Fell Through</p>
-        </div>
-        <p className="text-lg font-bold">We&apos;re sorry, {firstName}.</p>
-        {deal.fallReason && (
-          <p className="text-sm text-white/60 mt-2 leading-relaxed">{deal.fallReason}</p>
-        )}
-      </div>
-      <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
-        <p className="text-sm font-bold text-blue-800 mb-1">What happens next</p>
-        <p className="text-xs text-blue-600 leading-relaxed">
-          This doesn&apos;t mean the end of your home search. Your agent will reach out to discuss
-          your options — whether that&apos;s a different lender, a different property, or another approach.
-        </p>
-        <div className="mt-3 flex gap-2">
-          <a href="tel:+12055550100"
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 transition-colors">
-            <Phone size={12} /> Call Agent
-          </a>
-          <a href="mailto:sarah@realtourflow.com"
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-white border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
-            <Mail size={12} /> Email Agent
-          </a>
-        </div>
       </div>
     </div>
   );
@@ -1712,14 +1753,13 @@ function FastPassPitch({ dealId }: { dealId: string }) {
 // ─── Stage card dispatcher ────────────────────────────────────────────────────
 
 function StageCard({ deal, firstName }: { deal: Deal; firstName: string; onRefresh?: () => void }) {
-  if (deal.status === 'fallen_through') return <FallenThroughCard deal={deal} firstName={firstName} />;
   switch (deal.stage) {
     case 'intake':         return <IntakeCard deal={deal} firstName={firstName} />;
     case 'active_search':  return <ActiveSearchCard deal={deal} />;
     case 'offer_active':   return <OfferActiveCard deal={deal} />;
     case 'under_contract': return <UnderContractCard deal={deal} />;
     case 'pre_close':      return <PreCloseCard deal={deal} />;
-    case 'closing':        return <ClosingCard />;
+    case 'closing':        return <ClosingCard agentName={deal.agentName} />;
     case 'post_close':     return <PostCloseCard deal={deal} firstName={firstName} />;
   }
 }
@@ -1778,7 +1818,6 @@ export default function BuyerView() {
   }
 
   const firstName = activeUser?.name.split(' ')[0] ?? 'there';
-  const isFallenThrough = deal.status === 'fallen_through';
 
   // Unread "new_message" notifications for THIS deal drive the Messages tab badge.
   const unreadMessageNotifications = notifications.filter(
@@ -1799,10 +1838,9 @@ export default function BuyerView() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-black text-brand-navy">
-          {isFallenThrough ? `Hi, ${firstName}` : `Hi, ${firstName}!`}
+          Hi, {firstName}!
         </h1>
         <div className={`mt-3 rounded-2xl bg-white shadow-sm p-4 ${
-          isFallenThrough ? 'border-l-4 border-l-gray-400' :
           deal.health === 'green' ? 'border-l-4 border-l-green-400' :
           deal.health === 'yellow' ? 'border-l-4 border-l-amber-400' :
           'border-l-4 border-l-red-400'
@@ -1822,15 +1860,13 @@ export default function BuyerView() {
             </div>
             <div className="text-right flex-shrink-0">
               <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                isFallenThrough
-                  ? 'bg-gray-100 text-gray-500 border-gray-200'
-                  : deal.health === 'green'  ? 'bg-green-100 text-green-700 border-green-200'
+                deal.health === 'green'  ? 'bg-green-100 text-green-700 border-green-200'
                   : deal.health === 'yellow' ? 'bg-amber-100 text-amber-700 border-amber-200'
                   :                            'bg-red-100 text-red-700 border-red-200'
               }`}>
-                {isFallenThrough ? 'Fell Through' : BUYER_STAGE_LABELS[deal.stage]}
+                {BUYER_STAGE_LABELS[deal.stage]}
               </span>
-              {deal.timeline.closingDate && !isFallenThrough && (
+              {deal.timeline.closingDate && (
                 <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-gray-400">
                   <Calendar size={10} /> Closing {deal.timeline.closingDate}
                 </div>
@@ -1841,7 +1877,7 @@ export default function BuyerView() {
       </div>
 
       {/* Overdue alert — right after header, before journey */}
-      {!isFallenThrough && buyerTasks.some((t) => t.status === 'overdue') && (
+      {buyerTasks.some((t) => t.status === 'overdue') && (
         <div className="flex items-center gap-3 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
           <AlertCircle size={18} className="text-red-500 flex-shrink-0" />
           <div>
@@ -1852,7 +1888,7 @@ export default function BuyerView() {
       )}
 
       {/* Journey tracker */}
-      <div className={!isFallenThrough && buyerTasks.some((t) => t.status === 'overdue') ? 'pt-6' : ''}>
+      <div className={buyerTasks.some((t) => t.status === 'overdue') ? 'pt-6' : ''}>
         <JourneyTracker deal={deal} />
       </div>
 
@@ -1860,14 +1896,14 @@ export default function BuyerView() {
       <StageCard deal={deal} firstName={firstName} onRefresh={refreshDeals} />
 
       {/* Fast Pass tracker (enrolled) or pitch (unenrolled) */}
-      {!isFallenThrough && deal.stage !== 'intake' && (
+      {deal.stage !== 'intake' && (
         deal.fastPass?.status === 'active'
           ? <FastPassTracker deal={deal} />
           : deal.stage !== 'post_close' && <FastPassPitch dealId={deal.id} />
       )}
 
-      {/* Tabs (hide on post-close and fallen-through to keep it clean) */}
-      {!isFallenThrough && deal.stage !== 'post_close' && (
+      {/* Tabs (hidden on post-close to keep it clean) */}
+      {deal.stage !== 'post_close' && (
         <>
           <div className="pt-6" />
           <TabBar
@@ -1905,18 +1941,13 @@ export default function BuyerView() {
         </>
       )}
 
-      {/* Always show messages on fallen-through so they can reach their agent */}
-      {isFallenThrough && (
-        <MessagesTab dealId={deal.id} />
-      )}
-
       {/* Lender card */}
       <div className="pt-14">
         <LenderCard deal={deal} />
       </div>
 
       {/* Agent's preferred vendor directory */}
-      <VendorDirectory agentId={deal.agentId} />
+      <VendorDirectory dealId={deal.id} />
 
       {/* Agent card */}
       <AgentCard agentName={deal.agentName} agentEmail={deal.agentEmail} agentPhone={deal.agentPhone} />
