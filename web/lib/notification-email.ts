@@ -34,8 +34,13 @@ function originFromRequest(req: Request): string {
  * Role-appropriate deep link for a recipient. Clients land on their own portal
  * (keyed by their userId — the app's only client deal view); agents/admins use
  * the agent deal route; TCs use the TC deals dashboard.
+ *
+ * Exported (#291) so in-app notification hrefs reuse the EXACT same role→URL
+ * mapping as these emails. Pass `origin=""` for a relative path (what the
+ * Next `<Link>` in the notification bell wants); pass a real origin for the
+ * absolute links the emails need.
  */
-function recipientUrl(
+export function recipientUrl(
   origin: string,
   role: string,
   userId: string,

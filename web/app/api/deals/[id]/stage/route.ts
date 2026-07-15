@@ -10,6 +10,7 @@ import { dealStagePatchBodySchema } from "@/lib/schemas/deal";
 import { parseBody } from "@/lib/schemas/parse";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
+import { recipientUrl } from "@/lib/notification-email";
 import { enqueuePushDealClosingEvent } from "@/lib/jobs";
 import { seedStandardContingencies } from "@/lib/contingency-seed";
 import { seedStageAutoTasks } from "@/lib/stage-task-seed";
@@ -132,7 +133,7 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     try {
       const participants = await prisma.deal_participants.findMany({
         where: { deal_id: dealId },
-        select: { user_id: true },
+        select: { user_id: true, role: true },
       });
       const label = STAGE_LABELS[newStage] ?? newStage;
       // Direction-aware copy (#267): a retreat — e.g. a busted contract moving
@@ -151,6 +152,8 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
           body,
           kind: "stage_change",
           dealId,
+          // Role-appropriate deep link so the bell navigates, not '#' (#291).
+          href: recipientUrl("", p.role, p.user_id, dealId),
         });
       }
     } catch (err) {
