@@ -107,9 +107,12 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     );
   }
 
-  // Same key selection as the calendar push (lib/jobs.ts) and the iCal feed —
-  // see lib/arive-dates.ts (#196).
-  const closingDate = extractClosingDate(d.arive_key_dates) ?? undefined;
+  // ARIVE key dates win when present (same key selection as the calendar push
+  // in lib/jobs.ts and the iCal feed — see lib/arive-dates.ts (#196)); the
+  // agent-entered manual closing_date is the fallback anchor for non-ARIVE
+  // deals — every seller deal and outside-lender buyer (#253).
+  const closingDate =
+    extractClosingDate(d.arive_key_dates) ?? d.closing_date ?? undefined;
 
   // Derive a live "days to close" counter from the closing date so the buyer /
   // seller portal countdown blocks show real data. Guard unparseable dates so

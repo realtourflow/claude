@@ -105,6 +105,12 @@ export type DealRow = {
   disclosures_complete: boolean;
   /** Agent-set "Buyer's Progress" step shown on the seller portal (#184). */
   buyer_status: string | null;
+  /**
+   * Agent-entered manual closing date (`deals.closing_date`), serialized as
+   * `YYYY-MM-DD` text (`closing_date::text`). Fallback closing anchor for
+   * non-ARIVE deals; ARIVE key dates still win in the adapter (#253).
+   */
+  closing_date: string | null;
   commission_pct: string | null;
   created_at: Date;
   updated_at: Date;
@@ -150,6 +156,7 @@ export async function listDealsForUser(
            deals.fee_status, deals.fee_amount_cents, deals.fee_paid_at,
            deals.fast_pass, deals.smooth_exit,
            deals.pre_approved, deals.baa_signed, deals.disclosures_complete, deals.buyer_status,
+           deals.closing_date::text AS closing_date,
            deals.commission_pct::text AS commission_pct,
            deals.created_at, deals.updated_at,
            ${stageEnteredAtExpr} AS stage_entered_at,
@@ -181,7 +188,8 @@ export async function getDealForAgent(
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,
            fast_pass, smooth_exit, pre_approved, baa_signed, disclosures_complete,
-           buyer_status, commission_pct::text AS commission_pct,
+           buyer_status, closing_date::text AS closing_date,
+           commission_pct::text AS commission_pct,
            created_at, updated_at,
            ${stageEnteredAtExpr} AS stage_entered_at
     FROM deals
@@ -204,7 +212,8 @@ export async function getDealById(dealId: string): Promise<DealRow | null> {
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,
            fast_pass, smooth_exit, pre_approved, baa_signed, disclosures_complete,
-           buyer_status, commission_pct::text AS commission_pct,
+           buyer_status, closing_date::text AS closing_date,
+           commission_pct::text AS commission_pct,
            created_at, updated_at,
            ${stageEnteredAtExpr} AS stage_entered_at
     FROM deals
