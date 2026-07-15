@@ -19,13 +19,19 @@
  * route. The origin is taken from the request (`protocol://host`) so links work
  * across local / preview / prod without a hardcoded scheme.
  *
- * Preference / opt-out: `user_settings` has only a free-form JSONB `settings`
- * column with no email-notification field and no existing convention for one, so
- * the behavior is DEFAULT-ON (always send). If a typed opt-out column is added
- * later, gate the sends here in one place.
+ * Preference / opt-out (#292): the Settings → Notifications "Email
+ * notifications" toggle persists to `user_settings.settings.notifications.email`.
+ * Every send here is gated PER-RECIPIENT on that key via `lib/notification-prefs`
+ * — opted-out recipients are skipped while everyone else in the same fan-out
+ * still gets theirs. It stays DEFAULT-ON: a missing row/key means "not yet
+ * configured", which is opted-in (matching the Settings UI default).
  */
-import { prisma } from "./db";
 import { sendNotificationEmail } from "./email";
+import {
+  emailNotificationsEnabled,
+  emailNotificationsEnabledFor,
+} from "./notification-prefs";
+import { prisma } from "./db";
 
 function originFromRequest(req: Request): string {
   const url = new URL(req.url);
@@ -61,7 +67,7 @@ export function recipientUrl(
 }
 
 type Participant = { user_id: string; email: string; role: string };
-type Recipient = { email: string; url: string };
+type Recipient = { userId: string; email: string; url: string };
 
 /** The deal's client participants (buyers/sellers) with their emails + roles. */
 async function clientParticipants(dealId: string): Promise<Participant[]> {
@@ -108,15 +114,27 @@ async function dealAgent(
   return rows[0] ?? null;
 }
 
-/** Send to each unique recipient with their own role-appropriate link. */
+/**
+ * Send to each unique recipient with their own role-appropriate link, skipping
+ * anyone who has turned email notifications OFF (#292). The preference is read
+ * PER-RECIPIENT in one batched query, so opting one person out never suppresses
+ * the others in the same fan-out.
+ */
 async function fanOut(
   recipients: Recipient[],
   fields: { subject: string; heading: string; body: string }
 ): Promise<void> {
   const seen = new Set<string>();
-  for (const r of recipients) {
-    if (!r.email || seen.has(r.email)) continue;
+  const unique = recipients.filter((r) => {
+    if (!r.email || seen.has(r.email)) return false;
     seen.add(r.email);
+    return true;
+  });
+  if (unique.length === 0) return;
+
+  const prefs = await emailNotificationsEnabledFor(unique.map((r) => r.userId));
+  for (const r of unique) {
+    if (prefs.get(r.userId) === false) continue; // recipient opted out
     await sendNotificationEmail({
       to: r.email,
       subject: fields.subject,
@@ -155,6 +173,7 @@ export async function emailNewMessage(input: {
     recipients = tcs
       .filter((tc) => tc.user_id !== senderId)
       .map((tc) => ({
+        userId: tc.user_id,
         email: tc.email,
         url: recipientUrl(origin, tc.role, tc.user_id, dealId),
       }));
@@ -163,6 +182,7 @@ export async function emailNewMessage(input: {
     recipients = clients
       .filter((c) => c.user_id !== senderId)
       .map((c) => ({
+        userId: c.user_id,
         email: c.email,
         url: recipientUrl(origin, c.role, c.user_id, dealId),
       }));
@@ -171,6 +191,7 @@ export async function emailNewMessage(input: {
     if (agent && agent.id !== senderId) {
       recipients = [
         {
+          userId: agent.id,
           email: agent.email,
           url: recipientUrl(origin, "agent", agent.id, dealId),
         },
@@ -212,6 +233,7 @@ export async function emailDocumentUploaded(input: {
   const recipients = clients
     .filter((c) => c.user_id !== uploaderId)
     .map((c) => ({
+      userId: c.user_id,
       email: c.email,
       url: recipientUrl(origin, c.role, c.user_id, dealId),
     }));
@@ -219,6 +241,7 @@ export async function emailDocumentUploaded(input: {
   const agent = await dealAgent(dealId);
   if (agent && agent.id !== uploaderId) {
     recipients.push({
+      userId: agent.id,
       email: agent.email,
       url: recipientUrl(origin, "agent", agent.id, dealId),
     });
@@ -241,6 +264,8 @@ export async function emailTaskAssigned(input: {
 }): Promise<void> {
   const { req, dealId, assigneeId, actorId, taskTitle } = input;
   if (!assigneeId || assigneeId === actorId) return;
+  // #292 — skip if the assignee turned email notifications off.
+  if (!(await emailNotificationsEnabled(assigneeId))) return;
 
   // Resolve the assignee's email + their role RELATIVE TO THIS DEAL so the link
   // points at the right area (agent route vs client portal vs TC dashboard).
@@ -287,6 +312,7 @@ export async function emailOfferRequested(input: {
   await fanOut(
     [
       {
+        userId: agent.id,
         email: agent.email,
         url: recipientUrl(origin, "agent", agent.id, dealId),
       },
