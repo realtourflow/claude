@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from "@tanstack/react-query";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -882,6 +882,7 @@ function MLSBrowser({ deal, onAddProperty }: {
 // ─── Active Search Card ───────────────────────────────────────────────────────
 
 function ActiveSearchCard({ deal }: { deal: Deal }) {
+  const queryClient = useQueryClient();
   const { properties, addProperty, updateStatus, removeProperty, updateBuyerNote, setOfferRequested } = useProperties(deal.id);
   const preApproved = deal.preApproved ?? false;
   const baaSigned = deal.baaSigned ?? false;
@@ -952,12 +953,70 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
     }
   }
 
+  // Pre-approval letter CTAs (#266) — outside-lender buyers. These used to be
+  // empty no-ops. The upload button now runs the SAME presigned flow the
+  // TaskCard uploads use (request URL → push bytes → confirm the documents
+  // row); the "send later" button posts a real client_thread message to the
+  // agent. Neither flips pre_approved — that stays agent-set server-side.
+  const preApprovalFileRef = useRef<HTMLInputElement>(null);
+  const [uploadingLetter, setUploadingLetter] = useState(false);
+  const [letterUploaded, setLetterUploaded] = useState(false);
+  const [letterError, setLetterError] = useState<string | null>(null);
+  const [sendingLater, setSendingLater] = useState(false);
+  const [letterLaterSent, setLetterLaterSent] = useState(false);
+  const [letterLaterError, setLetterLaterError] = useState<string | null>(null);
+
   function handleUploadLetter() {
-    // Pre-approval flag is set by the agent — this is informational
+    preApprovalFileRef.current?.click();
   }
 
-  function handleLetterLater() {
-    // Pre-approval flag is set by the agent — this is informational
+  async function handleLetterFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingLetter(true);
+    setLetterError(null);
+    try {
+      const mimeType = file.type || 'application/octet-stream';
+      const { upload_url, client_upload_url, s3_key } = await requestUploadUrl(deal.id, file.name, mimeType);
+      const put = await uploadFileToStorage({
+        uploadUrl: upload_url,
+        clientUploadUrl: client_upload_url,
+        key: s3_key,
+        file,
+        contentType: mimeType,
+      });
+      if (!put.ok) {
+        setLetterError(put.tooLarge ? 'File too large (max 25MB). Upload failed.' : 'Upload failed. Please try again.');
+        return;
+      }
+      await confirmUpload(deal.id, file.name, s3_key, mimeType, file.size);
+      setLetterUploaded(true);
+      // Surface the new doc in the Documents tab this session.
+      void queryClient.invalidateQueries({ queryKey: ['documents', deal.id] });
+    } catch {
+      setLetterError('Upload failed. Please try again.');
+    } finally {
+      setUploadingLetter(false);
+      e.target.value = '';
+    }
+  }
+
+  async function handleLetterLater() {
+    if (sendingLater) return;
+    setSendingLater(true);
+    setLetterLaterError(null);
+    try {
+      await postMessage(
+        deal.id,
+        'client_thread',
+        "I have a pre-approval letter — I'll send it over.",
+      );
+      setLetterLaterSent(true);
+    } catch {
+      setLetterLaterError("Couldn't reach your agent — please try again.");
+    } finally {
+      setSendingLater(false);
+    }
   }
 
   return (
@@ -1077,16 +1136,44 @@ function ActiveSearchCard({ deal }: { deal: Deal }) {
                 <ExternalLink size={12} /> Apply Now →
               </a>
             </div>
+          ) : letterUploaded ? (
+            <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2.5">
+              <CheckCircle2 size={14} className="text-green-500 flex-shrink-0" />
+              <p className="text-xs font-semibold text-green-800">Pre-approval letter uploaded — your agent will review it</p>
+            </div>
+          ) : letterLaterSent ? (
+            <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3 py-2.5">
+              <CheckCircle2 size={14} className="text-green-500 flex-shrink-0" />
+              <p className="text-xs font-semibold text-green-800">Got it — we let your agent know you have a pre-approval letter. They&apos;ll reach out.</p>
+            </div>
           ) : (
-            <div className="flex gap-2">
-              <button onClick={handleUploadLetter}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors">
-                Upload pre-approval letter
-              </button>
-              <button onClick={handleLetterLater}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
-                I have one — send later
-              </button>
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <button onClick={handleUploadLetter} disabled={uploadingLetter}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-brand-navy py-2.5 text-xs font-bold text-white hover:bg-brand-navy/90 transition-colors disabled:opacity-50">
+                  {uploadingLetter
+                    ? <><Loader2 size={12} className="animate-spin" /> Uploading…</>
+                    : <><Upload size={12} /> Upload pre-approval letter</>}
+                </button>
+                <button onClick={handleLetterLater} disabled={sendingLater}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-200 py-2.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-50">
+                  {sendingLater ? 'Sending…' : 'I have one — send later'}
+                </button>
+              </div>
+              {letterError && (
+                <p role="alert" className="text-xs font-medium text-red-600">{letterError}</p>
+              )}
+              {letterLaterError && (
+                <p role="alert" className="text-xs font-medium text-red-600">{letterLaterError}</p>
+              )}
+              {/* Hidden input drives the "Upload pre-approval letter" button (#266). */}
+              <input
+                ref={preApprovalFileRef}
+                type="file"
+                className="hidden"
+                onChange={handleLetterFileChange}
+                disabled={uploadingLetter}
+              />
             </div>
           )}
         </div>
