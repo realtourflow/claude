@@ -111,6 +111,14 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
   // see lib/arive-dates.ts (#196).
   const closingDate = extractClosingDate(d.arive_key_dates) ?? undefined;
 
+  // Derive a live "days to close" counter from the closing date so the buyer /
+  // seller portal countdown blocks show real data. Guard unparseable dates so
+  // the counter is `undefined` (block hidden) rather than `NaN`.
+  const closingMs = closingDate ? new Date(closingDate).getTime() : NaN;
+  const daysToClose = Number.isFinite(closingMs)
+    ? Math.max(0, Math.ceil((closingMs - Date.now()) / 86_400_000))
+    : undefined;
+
   return {
     id: d.id,
     type: d.type,
@@ -130,6 +138,7 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     timeline: {
       createdAt: d.created_at,
       closingDate: closingDate ?? undefined,
+      daysToClose,
       daysInStage: Math.max(
         0,
         Math.floor((Date.now() - new Date(d.updated_at).getTime()) / 86_400_000),

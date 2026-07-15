@@ -12,7 +12,7 @@ import { useTasks } from "@/hooks/useTasks";
 import { useTaskCompletion } from "@/hooks/useTaskCompletion";
 import { useMessages, postMessage } from "@/hooks/useMessages";
 import {
-  CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
+  CheckCircle2, Circle, AlertCircle, Loader2,
   MapPin, Calendar, MessageSquare, FileText,
   ChevronRight, Phone, Mail, Home, Zap,
   ClipboardList, Building2, Star, ExternalLink,
@@ -388,42 +388,30 @@ const STAGE_DESCRIPTIONS: Record<DealStage, string> = {
 };
 
 function JourneyTracker({ deal }: { deal: Deal }) {
-  const isFallenThrough = deal.status === 'fallen_through';
-  const currentIdx = STAGE_ORDER.indexOf(
-    isFallenThrough ? (deal.fellFromStage ?? deal.stage) : deal.stage
-  );
+  const currentIdx = STAGE_ORDER.indexOf(deal.stage);
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-sm bg-white">
       {STAGE_ORDER.map((stage, i) => {
         const isPast     = i < currentIdx;
         const isCurrent  = i === currentIdx;
-        const isFellHere = isFallenThrough && isCurrent;
 
         if (isCurrent) {
           return (
-            <div key={stage} className={`px-5 py-4 ${isFellHere ? 'bg-gray-800' : 'bg-brand-navy'}`}>
+            <div key={stage} className="px-5 py-4 bg-brand-navy">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5">
-                  <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
-                    isFellHere ? 'bg-red-400' : 'bg-brand-gold'
-                  }`}>
-                    {isFellHere
-                      ? <XCircle size={15} className="text-white" />
-                      : <div className="h-2.5 w-2.5 rounded-full bg-brand-navy" />}
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-gold">
+                    <div className="h-2.5 w-2.5 rounded-full bg-brand-navy" />
                   </div>
                   <span className="text-base font-black text-white">{BUYER_STAGE_LABELS[stage]}</span>
                 </div>
-                <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                  isFellHere ? 'bg-red-400/20 text-red-300' : 'bg-brand-gold/20 text-brand-gold'
-                }`}>
-                  {isFellHere ? 'Fell out' : "You're here"}
+                <span className="flex-shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-brand-gold/20 text-brand-gold">
+                  You&apos;re here
                 </span>
               </div>
               <p className="mt-1.5 ml-[38px] text-xs text-white/60 leading-relaxed">
-                {isFellHere
-                  ? (deal.fallReason ?? 'This deal has fallen through.')
-                  : STAGE_DESCRIPTIONS[stage]}
+                {STAGE_DESCRIPTIONS[stage]}
               </p>
             </div>
           );
@@ -1371,7 +1359,7 @@ function PreCloseCard({ deal }: { deal: Deal }) {
   );
 }
 
-function ClosingCard() {
+function ClosingCard({ agentName }: { agentName?: string }) {
   const checklist = [
     'Government-issued photo ID',
     'Cashier\'s check or wire confirmation',
@@ -1396,7 +1384,7 @@ function ClosingCard() {
         ))}
         <div className="pt-2 border-t border-gray-100 mt-2">
           <p className="text-xs text-gray-400 leading-relaxed">
-            Your agent will be there with you. Questions? Call Sarah before you leave.
+            Your agent will be there with you. Questions? Call {agentName || 'your agent'} before you leave.
           </p>
         </div>
       </div>
@@ -1495,40 +1483,6 @@ function LenderCard({ deal }: { deal: Deal }) {
             <ExternalLink size={14} /> Open {lender.company} Portal
           </a>
         )}
-      </div>
-    </div>
-  );
-}
-
-function FallenThroughCard({ deal, firstName }: { deal: Deal; firstName: string }) {
-  return (
-    <div className="space-y-3">
-      <div className="rounded-2xl bg-gray-800 p-5 text-white">
-        <div className="flex items-center gap-2 mb-2">
-          <XCircle size={18} className="text-red-400" />
-          <p className="text-xs font-bold uppercase tracking-widest text-white/50">Deal Fell Through</p>
-        </div>
-        <p className="text-lg font-bold">We&apos;re sorry, {firstName}.</p>
-        {deal.fallReason && (
-          <p className="text-sm text-white/60 mt-2 leading-relaxed">{deal.fallReason}</p>
-        )}
-      </div>
-      <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
-        <p className="text-sm font-bold text-blue-800 mb-1">What happens next</p>
-        <p className="text-xs text-blue-600 leading-relaxed">
-          This doesn&apos;t mean the end of your home search. Your agent will reach out to discuss
-          your options — whether that&apos;s a different lender, a different property, or another approach.
-        </p>
-        <div className="mt-3 flex gap-2">
-          <a href="tel:+12055550100"
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 transition-colors">
-            <Phone size={12} /> Call Agent
-          </a>
-          <a href="mailto:sarah@realtourflow.com"
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-white border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition-colors">
-            <Mail size={12} /> Email Agent
-          </a>
-        </div>
       </div>
     </div>
   );
@@ -1712,14 +1666,13 @@ function FastPassPitch({ dealId }: { dealId: string }) {
 // ─── Stage card dispatcher ────────────────────────────────────────────────────
 
 function StageCard({ deal, firstName }: { deal: Deal; firstName: string; onRefresh?: () => void }) {
-  if (deal.status === 'fallen_through') return <FallenThroughCard deal={deal} firstName={firstName} />;
   switch (deal.stage) {
     case 'intake':         return <IntakeCard deal={deal} firstName={firstName} />;
     case 'active_search':  return <ActiveSearchCard deal={deal} />;
     case 'offer_active':   return <OfferActiveCard deal={deal} />;
     case 'under_contract': return <UnderContractCard deal={deal} />;
     case 'pre_close':      return <PreCloseCard deal={deal} />;
-    case 'closing':        return <ClosingCard />;
+    case 'closing':        return <ClosingCard agentName={deal.agentName} />;
     case 'post_close':     return <PostCloseCard deal={deal} firstName={firstName} />;
   }
 }
@@ -1778,7 +1731,6 @@ export default function BuyerView() {
   }
 
   const firstName = activeUser?.name.split(' ')[0] ?? 'there';
-  const isFallenThrough = deal.status === 'fallen_through';
 
   // Unread "new_message" notifications for THIS deal drive the Messages tab badge.
   const unreadMessageNotifications = notifications.filter(
@@ -1799,10 +1751,9 @@ export default function BuyerView() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-black text-brand-navy">
-          {isFallenThrough ? `Hi, ${firstName}` : `Hi, ${firstName}!`}
+          Hi, {firstName}!
         </h1>
         <div className={`mt-3 rounded-2xl bg-white shadow-sm p-4 ${
-          isFallenThrough ? 'border-l-4 border-l-gray-400' :
           deal.health === 'green' ? 'border-l-4 border-l-green-400' :
           deal.health === 'yellow' ? 'border-l-4 border-l-amber-400' :
           'border-l-4 border-l-red-400'
@@ -1822,15 +1773,13 @@ export default function BuyerView() {
             </div>
             <div className="text-right flex-shrink-0">
               <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                isFallenThrough
-                  ? 'bg-gray-100 text-gray-500 border-gray-200'
-                  : deal.health === 'green'  ? 'bg-green-100 text-green-700 border-green-200'
+                deal.health === 'green'  ? 'bg-green-100 text-green-700 border-green-200'
                   : deal.health === 'yellow' ? 'bg-amber-100 text-amber-700 border-amber-200'
                   :                            'bg-red-100 text-red-700 border-red-200'
               }`}>
-                {isFallenThrough ? 'Fell Through' : BUYER_STAGE_LABELS[deal.stage]}
+                {BUYER_STAGE_LABELS[deal.stage]}
               </span>
-              {deal.timeline.closingDate && !isFallenThrough && (
+              {deal.timeline.closingDate && (
                 <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-gray-400">
                   <Calendar size={10} /> Closing {deal.timeline.closingDate}
                 </div>
@@ -1841,7 +1790,7 @@ export default function BuyerView() {
       </div>
 
       {/* Overdue alert — right after header, before journey */}
-      {!isFallenThrough && buyerTasks.some((t) => t.status === 'overdue') && (
+      {buyerTasks.some((t) => t.status === 'overdue') && (
         <div className="flex items-center gap-3 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
           <AlertCircle size={18} className="text-red-500 flex-shrink-0" />
           <div>
@@ -1852,7 +1801,7 @@ export default function BuyerView() {
       )}
 
       {/* Journey tracker */}
-      <div className={!isFallenThrough && buyerTasks.some((t) => t.status === 'overdue') ? 'pt-6' : ''}>
+      <div className={buyerTasks.some((t) => t.status === 'overdue') ? 'pt-6' : ''}>
         <JourneyTracker deal={deal} />
       </div>
 
@@ -1860,14 +1809,14 @@ export default function BuyerView() {
       <StageCard deal={deal} firstName={firstName} onRefresh={refreshDeals} />
 
       {/* Fast Pass tracker (enrolled) or pitch (unenrolled) */}
-      {!isFallenThrough && deal.stage !== 'intake' && (
+      {deal.stage !== 'intake' && (
         deal.fastPass?.status === 'active'
           ? <FastPassTracker deal={deal} />
           : deal.stage !== 'post_close' && <FastPassPitch dealId={deal.id} />
       )}
 
-      {/* Tabs (hide on post-close and fallen-through to keep it clean) */}
-      {!isFallenThrough && deal.stage !== 'post_close' && (
+      {/* Tabs (hidden on post-close to keep it clean) */}
+      {deal.stage !== 'post_close' && (
         <>
           <div className="pt-6" />
           <TabBar
@@ -1903,11 +1852,6 @@ export default function BuyerView() {
           {activeTab === 'messages' && <MessagesTab dealId={deal.id} />}
           {activeTab === 'documents' && <PortalDealDocuments dealId={deal.id} />}
         </>
-      )}
-
-      {/* Always show messages on fallen-through so they can reach their agent */}
-      {isFallenThrough && (
-        <MessagesTab dealId={deal.id} />
       )}
 
       {/* Lender card */}
