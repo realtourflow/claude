@@ -210,6 +210,86 @@ describe("POST /api/deals", () => {
   });
 });
 
+describe("POST /api/deals — closing_date (#253)", () => {
+  async function post(body: Record<string, unknown>) {
+    const req = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|cd", ["agent"]),
+      },
+      body: JSON.stringify(body),
+    });
+    return createDealRoute(req);
+  }
+
+  it("persists closing_date and round-trips it on a fresh GET (Case 1)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "123 Elm", type: "buy", closing_date: "2026-09-30" });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string; closing_date: string | null };
+    // The create response carries the date straight back.
+    expect(created.closing_date).toBe("2026-09-30");
+
+    // Stored server-side as a real date column.
+    const row = await prisma.deals.findUnique({ where: { id: created.id } });
+    expect(row?.closing_date?.toISOString().slice(0, 10)).toBe("2026-09-30");
+
+    // A brand-new request (reload) still sees it on the deal payload.
+    const getReq = new Request(`http://localhost/api/deals/${created.id}`, {
+      headers: { authorization: await authHeader("auth0|cd", ["agent"]) },
+    });
+    const getRes = await getDealRoute(getReq, ctx(created.id));
+    expect(getRes.status).toBe(200);
+    const body = (await getRes.json()) as { closing_date: string | null };
+    expect(body.closing_date).toBe("2026-09-30");
+  });
+
+  it("shows the manual closing_date on the pipeline list payload too", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "77 List", type: "sell", closing_date: "2026-10-15" });
+    expect(res.status).toBe(201);
+
+    const listReq = new Request("http://localhost/api/deals", {
+      headers: { authorization: await authHeader("auth0|cd", ["agent"]) },
+    });
+    const listRes = await listDeals(listReq);
+    expect(listRes.status).toBe(200);
+    const body = (await listRes.json()) as { title: string; closing_date: string | null }[];
+    expect(body.find((d) => d.title === "77 List")?.closing_date).toBe("2026-10-15");
+  });
+
+  it("201 with closing_date null when the field is omitted (Case 2)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "No date", type: "buy" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { closing_date: string | null };
+    expect(body.closing_date).toBeNull();
+  });
+
+  it("400 (not silently dropped) for a garbage closing_date string (Case 2)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "Bad", type: "buy", closing_date: "banana" });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("closing_date");
+    expect(await prisma.deals.count()).toBe(0);
+  });
+
+  it("400 for an out-of-range calendar date (Case 2)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "Bad", type: "buy", closing_date: "2026-13-99" });
+    expect(res.status).toBe(400);
+    expect(await prisma.deals.count()).toBe(0);
+  });
+
+  it("400 when closing_date is a non-string type", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "Bad", type: "buy", closing_date: 20260930 });
+    expect(res.status).toBe(400);
+    expect(await prisma.deals.count()).toBe(0);
+  });
+});
+
 describe("GET /api/deals/[id]", () => {
   it("404 if not owner", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });

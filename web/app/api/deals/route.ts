@@ -51,18 +51,21 @@ export async function POST(req: Request): Promise<Response> {
         address: string | null;
         price: string | null;
         arive_linked: boolean;
+        closing_date: string | null;
         created_at: Date;
         updated_at: Date;
       }[]
     >`
-      INSERT INTO deals (agent_id, type, title, address, price, arive_linked, market)
+      INSERT INTO deals (agent_id, type, title, address, price, arive_linked, closing_date, market)
       VALUES (${userId}::uuid, ${type}::deal_type, ${title},
               ${body.address ?? null},
               ${body.price ?? null}::decimal,
               ${body.arive_linked ?? false},
+              ${body.closing_date ?? null}::date,
               COALESCE((SELECT market FROM users WHERE id = ${userId}::uuid), ''))
       RETURNING id, agent_id, type::text AS type, stage::text AS stage,
-                title, address, price::text AS price, arive_linked, created_at, updated_at
+                title, address, price::text AS price, arive_linked,
+                closing_date::text AS closing_date, created_at, updated_at
     `;
     return json({ ...rows[0], health: "green" }, 201);
   })) as Response;

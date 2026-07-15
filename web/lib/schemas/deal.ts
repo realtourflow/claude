@@ -12,7 +12,7 @@
  */
 import { z } from "zod";
 import { STAGE_ORDER } from "@/lib/stages";
-import { decimalString } from "./common";
+import { decimalString, dateOnlyString } from "./common";
 
 // ---------------------------------------------------------------------------
 // Request bodies
@@ -28,6 +28,10 @@ export const createDealBodySchema = z.object({
   // number, numeric string (always worked — SQL casts ::decimal), or null.
   price: z.union([z.number(), decimalString]).nullish(),
   arive_linked: z.boolean().nullish(),
+  // Agent-entered "Est. Closing Date" (#253). YYYY-MM-DD or null; garbage 400s
+  // here instead of being silently dropped. Fallback closing anchor for
+  // non-ARIVE deals (ARIVE key dates still win when present).
+  closing_date: dateOnlyString.nullish(),
 });
 export type CreateDealBody = z.output<typeof createDealBodySchema>;
 
@@ -92,6 +96,13 @@ export const apiDealSchema = z.object({
   /** Postgres DECIMAL serialized as text by the API (`price::text`). */
   price: z.string().nullable(),
   arive_linked: z.boolean(),
+  /**
+   * Agent-entered manual closing date (`deals.closing_date`), serialized as
+   * `YYYY-MM-DD` text by the API (#253). Fallback timeline anchor for non-ARIVE
+   * deals; ARIVE key dates take precedence in `apiDealToFrontend`. Optional:
+   * payloads that don't SELECT it (e.g. /api/me/deals) omit it.
+   */
+  closing_date: z.string().nullish(),
   arive_loan_id: z.string().nullish(),
   arive_milestones: z.array(ariveTrackerSchema).nullish(),
   arive_key_dates: ariveKeyDatesSchema.nullish(),

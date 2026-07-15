@@ -95,6 +95,9 @@ export function NewDealModal({
         address: fullAddress,
         price: isNaN(price) ? null : price,
         arive_linked: false,
+        // Persist the entered "Est. Closing Date" (#253) — previously dropped.
+        // The <input type="date"> value is already YYYY-MM-DD; blank → null.
+        closing_date: form.closingDate || null,
       });
       setSubmitted(true);
       onCreated();
