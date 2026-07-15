@@ -53,6 +53,9 @@ export async function GET(req: Request): Promise<Response> {
         scope: tokens.scope,
         expires_at: expiresAt,
         updated_at: new Date(),
+        // A fresh successful connect clears any "reconnect needed" flag a prior
+        // dead-token refresh may have set (#296).
+        needs_reconnect: false,
         // Preserve the stored refresh token / email when Google returns none.
         ...(tokens.refresh_token ? { refresh_token: tokens.refresh_token } : {}),
         ...(tokens.account_email ? { account_email: tokens.account_email } : {}),

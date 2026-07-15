@@ -1096,13 +1096,24 @@ function IntegrationsSection() {
         statusBadge={
           !status.google_calendar.configured
             ? { label: 'Not configured on server', color: 'gray' }
+            : status.google_calendar.connected && status.google_calendar.needs_reconnect
+            ? { label: 'Reconnect needed', color: 'amber' }
             : status.google_calendar.connected
             ? { label: status.google_calendar.account_email || 'Connected', color: 'green' }
             : { label: 'Not connected', color: 'amber' }
         }
         primaryAction={
-          status.google_calendar.configured && !status.google_calendar.connected
-            ? { label: busy === 'google_calendar' ? 'Opening…' : 'Connect Google Calendar', onClick: () => handleConnect('google_calendar'), disabled: busy === 'google_calendar' || loading }
+          status.google_calendar.configured &&
+          (!status.google_calendar.connected || status.google_calendar.needs_reconnect)
+            ? {
+                label: busy === 'google_calendar'
+                  ? 'Opening…'
+                  : status.google_calendar.needs_reconnect
+                  ? 'Reconnect Google Calendar'
+                  : 'Connect Google Calendar',
+                onClick: () => handleConnect('google_calendar'),
+                disabled: busy === 'google_calendar' || loading,
+              }
             : undefined
         }
         secondaryAction={
@@ -1113,6 +1124,8 @@ function IntegrationsSection() {
         footnote={
           !status.google_calendar.configured
             ? 'Admin: set GOOGLE_OAUTH_CLIENT_ID / SECRET / REDIRECT_URL to enable.'
+            : status.google_calendar.connected && status.google_calendar.needs_reconnect
+            ? 'Access was revoked or expired — reconnect to resume calendar sync.'
             : undefined
         }
       />
@@ -1125,13 +1138,24 @@ function IntegrationsSection() {
         statusBadge={
           !status.microsoft_calendar.configured
             ? { label: 'Not configured on server', color: 'gray' }
+            : status.microsoft_calendar.connected && status.microsoft_calendar.needs_reconnect
+            ? { label: 'Reconnect needed', color: 'amber' }
             : status.microsoft_calendar.connected
             ? { label: status.microsoft_calendar.account_email || 'Connected', color: 'green' }
             : { label: 'Not connected', color: 'amber' }
         }
         primaryAction={
-          status.microsoft_calendar.configured && !status.microsoft_calendar.connected
-            ? { label: busy === 'microsoft_calendar' ? 'Opening…' : 'Connect Outlook', onClick: () => handleConnect('microsoft_calendar'), disabled: busy === 'microsoft_calendar' || loading }
+          status.microsoft_calendar.configured &&
+          (!status.microsoft_calendar.connected || status.microsoft_calendar.needs_reconnect)
+            ? {
+                label: busy === 'microsoft_calendar'
+                  ? 'Opening…'
+                  : status.microsoft_calendar.needs_reconnect
+                  ? 'Reconnect Outlook'
+                  : 'Connect Outlook',
+                onClick: () => handleConnect('microsoft_calendar'),
+                disabled: busy === 'microsoft_calendar' || loading,
+              }
             : undefined
         }
         secondaryAction={
@@ -1142,6 +1166,8 @@ function IntegrationsSection() {
         footnote={
           !status.microsoft_calendar.configured
             ? 'Admin: set MICROSOFT_OAUTH_CLIENT_ID / SECRET / REDIRECT_URL to enable.'
+            : status.microsoft_calendar.connected && status.microsoft_calendar.needs_reconnect
+            ? 'Access was revoked or expired — reconnect to resume calendar sync.'
             : undefined
         }
       />
