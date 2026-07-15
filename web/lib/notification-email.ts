@@ -1,9 +1,11 @@
 /**
  * FF1 — best-effort notification emails on top of lib/email.ts.
  *
- * The app already persists in-app notifications (the `notifications` table) for
- * new messages, document uploads, and task assignments. These helpers add email
- * delivery for the same three events. Each helper:
+ * These helpers add best-effort EMAIL delivery for deal activity — new messages,
+ * document uploads, task assignments, and offer requests. The matching in-app
+ * `notifications` rows are persisted separately by the routes via
+ * lib/notifications.ts (#290 wired up the document-upload and task-assignment
+ * rows this header used to claim existed but did not). Each helper:
  *   - resolves recipients server-side from the deal (agent_id + deal_participants),
  *   - never emails the actor (sender / uploader / assigner),
  *   - is invoked best-effort by the route: a throw must never block the mutation

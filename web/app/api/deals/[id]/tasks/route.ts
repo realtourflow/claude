@@ -4,6 +4,7 @@ import { resolveUserId } from "@/lib/users";
 import { canReadDeal } from "@/lib/deals";
 import { enqueuePushTaskDueEvent } from "@/lib/jobs";
 import { emailTaskAssigned } from "@/lib/notification-email";
+import { createNotification } from "@/lib/notifications";
 import { isValidDueDateString } from "@/lib/task-due-dates";
 import { createTaskBodySchema } from "@/lib/schemas/task";
 import { parseBody } from "@/lib/schemas/parse";
@@ -111,6 +112,20 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
                 due_date::text AS due_date, created_at, updated_at
     `;
     const task = rows[0];
+
+    // In-app notification to the assignee (#290) — never the actor who assigned
+    // it. AWAITED, not detached (#83): on Vercel a stray promise may never run
+    // once the response is sent. createNotification swallows internally, so a
+    // notification-insert failure can never fail the task creation.
+    if (task.assigned_to && task.assigned_to !== userId) {
+      await createNotification({
+        userId: task.assigned_to,
+        title: "You've been assigned a task",
+        body: `You were assigned: "${task.title}".`,
+        kind: "task_assigned",
+        dealId,
+      });
+    }
 
     // Best-effort email to the assignee (never the assigner). Awaited (not
     // detached) so it sends on Vercel; a throw must never block the response.

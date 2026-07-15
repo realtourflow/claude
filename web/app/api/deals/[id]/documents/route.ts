@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { canReadDeal, hasDealAccess } from "@/lib/deals";
 import { emailDocumentUploaded } from "@/lib/notification-email";
+import { createNotification } from "@/lib/notifications";
 import { getBlobSize, getBlobContentType } from "@/lib/blob-storage";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -117,6 +118,32 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       JOIN users u ON u.id = i.uploaded_by
     `;
     const doc = rows[0];
+
+    // In-app notification fan-out (#290) — persist a `notifications` row for the
+    // SAME recipients the email targets: the deal's client participants
+    // (buyers/sellers), never the uploader (and never the agent — agent email is
+    // #293's scope). AWAITED, not detached (#83): on Vercel a stray promise may
+    // never run once the response is sent. Best-effort — createNotification
+    // swallows internally and the participant lookup is wrapped here, so a
+    // notification failure can never fail the upload.
+    try {
+      const clients = await prisma.deal_participants.findMany({
+        where: { deal_id: dealId, role: { in: ["buyer", "seller"] } },
+        select: { user_id: true },
+      });
+      for (const c of clients) {
+        if (c.user_id === userId) continue; // never notify the uploader
+        await createNotification({
+          userId: c.user_id,
+          title: "A document was shared on your deal",
+          body: `"${doc.name}" was added to your deal.`,
+          kind: "document_uploaded",
+          dealId,
+        });
+      }
+    } catch (err) {
+      console.error("document notification fan-out failed", err);
+    }
 
     // Best-effort email to the deal's client(s). Awaited (not detached) so it
     // sends on Vercel; a throw must never block the response.
