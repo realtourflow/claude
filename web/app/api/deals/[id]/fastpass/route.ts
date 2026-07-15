@@ -3,10 +3,12 @@ import { prisma } from "@/lib/db";
 import { hasDealAccess } from "@/lib/deals";
 import { resolveUserId } from "@/lib/users";
 import {
+  computeFastPassSubtotalCents,
   computeFastPassTotalCents,
   isFastPassUpsellId,
   type FastPassUpsellId,
 } from "@/lib/fast-pass-catalog";
+import { redeemPromoCode } from "@/lib/promo-codes";
 import { createFastPassCheckout } from "@/lib/stripe";
 import { fastPassEnrollBodySchema } from "@/lib/schemas/enrollment";
 import { parseBody } from "@/lib/schemas/parse";
@@ -14,6 +16,14 @@ import { parseBody } from "@/lib/schemas/parse";
 type Ctx = { params: Promise<{ id: string }> };
 
 const PAYMENT_OPTIONS = ["now", "at_closing", "seller_concession"] as const;
+
+// Product key the promo's `applies_to` must include for a Fast Pass enrollment.
+const PROMO_PRODUCT = "fast_pass";
+
+/** Thrown inside the enrollment transaction when a concurrent redemption
+ * consumed the code's last use; rolls the whole enrollment back so `max_uses`
+ * is never exceeded (#281 double-spend guard). */
+class PromoExhaustedError extends Error {}
 
 // POST /deals/:dealId/fastpass — owning agent or any deal participant (#169:
 // buyers enroll their own deal from the portal pitch; the price is computed
@@ -70,7 +80,36 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       }
       validatedUpsells.push(key);
     }
-    const totalCents = computeFastPassTotalCents(validatedUpsells, paymentOption);
+    const subtotalCents = computeFastPassSubtotalCents(validatedUpsells);
+
+    // Optional promo code (#281): validated server-side against the catalog
+    // subtotal (pre-premium). The client's discount_cents/total_cents are never
+    // trusted — the server recomputes the discount from the stored code (mirrors
+    // #78/#280 anti-tamper). An invalid code (unknown / expired / wrong product /
+    // past max_uses) 400s BEFORE any write, matching the "validate before
+    // persist" shape of the upsell check above, so the enrollment is untouched.
+    const promoInput = (body.promo_code ?? "").trim();
+    let appliedPromo:
+      | { promoId: string; code: string; maxUses: number | null; discountCents: number }
+      | null = null;
+    if (promoInput) {
+      const promo = await redeemPromoCode(promoInput, PROMO_PRODUCT, subtotalCents);
+      if (!promo.ok) return error(promo.reason, 400);
+      appliedPromo = {
+        promoId: promo.promoId,
+        code: promo.code,
+        maxUses: promo.maxUses,
+        discountCents: promo.discountCents,
+      };
+    }
+
+    // Final charge, composed in the catalog (#281 + #280): discount the subtotal
+    // first, THEN apply the at_closing +15% premium on the discounted basket —
+    // so a discounted at_closing enrollment costs round((subtotal − discount) ×
+    // 1.15). body.total_cents stays ignored.
+    const totalCents = computeFastPassTotalCents(validatedUpsells, paymentOption, {
+      discountCents: appliedPromo?.discountCents ?? 0,
+    });
 
     const enrollment = {
       status: "active",
@@ -78,15 +117,45 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       // Dedupe what we store so the JSONB matches what was actually charged.
       selected_upsells: validatedUpsells,
       total_cents: totalCents,
+      // Record the redeemed code + discount for audit (only when one applied).
+      ...(appliedPromo
+        ? { promo_code: appliedPromo.code, discount_cents: appliedPromo.discountCents }
+        : {}),
       survey_answers: (body.survey_answers ?? null) as object | null,
       paid: false,
       enrolled_at: new Date().toISOString(),
     };
 
-    await prisma.deals.update({
-      where: { id: dealId },
-      data: { fast_pass: enrollment, updated_at: new Date() },
-    });
+    // Persist the enrollment and the promo's uses_count++ in ONE transaction so
+    // two concurrent redemptions can't both slip under max_uses (#281). The
+    // increment is a conditional update (WHERE uses_count < max_uses); Postgres
+    // re-checks that predicate against the row a concurrent writer just
+    // committed, so if it touches 0 rows the code was exhausted mid-flight and
+    // the whole enrollment rolls back to a clean 400 — no double-spend.
+    try {
+      await prisma.$transaction(async (tx) => {
+        const promo = appliedPromo;
+        if (promo) {
+          const bumped = await tx.promo_codes.updateMany({
+            where:
+              promo.maxUses == null
+                ? { id: promo.promoId }
+                : { id: promo.promoId, uses_count: { lt: promo.maxUses } },
+            data: { uses_count: { increment: 1 } },
+          });
+          if (bumped.count !== 1) throw new PromoExhaustedError();
+        }
+        await tx.deals.update({
+          where: { id: dealId },
+          data: { fast_pass: enrollment, updated_at: new Date() },
+        });
+      });
+    } catch (err) {
+      if (err instanceof PromoExhaustedError) {
+        return error("promo code has reached its usage limit", 400);
+      }
+      throw err;
+    }
 
     // Only "now" charges upfront. The enrollment is already persisted, so any
     // Stripe failure (including no key configured) falls back to a plain ok —
