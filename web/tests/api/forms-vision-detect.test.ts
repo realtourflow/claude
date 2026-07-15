@@ -2,10 +2,12 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { PDFDocument } from "pdf-lib";
 import { POST as createForm } from "@/app/api/me/forms/route";
 import { POST as processJobs } from "@/app/api/jobs/process/route";
+import { GET as adminForms } from "@/app/api/admin/forms/route";
+import { POST as retryDetect } from "@/app/api/admin/forms/[id]/retry-detect/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setVisionDetectorForTesting, type VisionFieldDetector } from "@/lib/form-ai/vision";
-import { seedFormTypes, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
+import { seedFormTypes, resolveFormTypeId, PURCHASE_AGREEMENT_KEY } from "@/lib/form-types-seed";
 import { runFormDetectJob, waitForInlineFormDetects } from "@/lib/form-detect";
 import { resetEnvForTesting } from "@/lib/env";
 import {
@@ -345,5 +347,119 @@ describe("POST /api/jobs/process — form-detect backlog drain (#193)", () => {
       const f = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id } });
       expect(f.status).toBe("pending_review");
     }
+  });
+});
+
+// ── admin visibility + retry for a form stuck in 'detecting' (#284) ──────────
+//
+// When a detect job exhausts its 3 pg-boss retries it parks in `failed` and
+// nothing flips the uploaded_forms row out of 'detecting' — so the form is
+// invisible to the admin queue and un-retryable, and the agent sees
+// "Detecting…" forever. These lock in: (1) the default pending queue surfaces
+// 'detecting' rows with their age, and (2) an admin can re-run detection.
+describe("stuck 'detecting' forms — admin queue + retry-detect (#284)", () => {
+  // A row stranded in 'detecting' exactly as an exhausted job leaves it (the
+  // durable job is gone/failed; only the DB row remains). Typed by default so a
+  // retry has a field set to locate.
+  async function makeDetecting(agentId: string, withType = true) {
+    const formTypeId = withType ? await resolveFormTypeId(PURCHASE_AGREEMENT_KEY) : null;
+    return prisma.uploaded_forms.create({
+      data: {
+        agent_id: agentId,
+        label: "Stuck PA",
+        side: "buy",
+        source_s3_key: `agent-forms/${agentId}/1/stuck.pdf`,
+        source_file_name: "stuck.pdf",
+        attested_by: agentId,
+        attestation_statement: "a",
+        file_sha256: `sha-${agentId}-${Math.random()}`,
+        status: "detecting",
+        detection_source: "vision",
+        form_type_id: formTypeId,
+      },
+      select: { id: true, created_at: true },
+    });
+  }
+
+  async function adminQueue(status?: string) {
+    const q = status ? `?status=${status}` : "";
+    return adminForms(
+      new Request(`http://localhost/api/admin/forms${q}`, {
+        headers: { authorization: await authHeader("auth0|admin", ["admin"]) },
+      })
+    );
+  }
+
+  async function callRetry(formId: string, roles: string[] = ["admin"]) {
+    return retryDetect(
+      new Request(`http://localhost/api/admin/forms/${formId}/retry-detect`, {
+        method: "POST",
+        headers: { authorization: await authHeader("auth0|admin", roles) },
+      }),
+      { params: Promise.resolve({ id: formId }) }
+    );
+  }
+
+  // Case 1 (fails today): the default pending queue must include the stranded
+  // 'detecting' row, exposing created_at so the UI can badge it stuck.
+  it("surfaces a stranded 'detecting' form in the default pending queue with its age", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const form = await makeDetecting(agent.id);
+
+    const res = await adminQueue(); // default filter = pending
+    expect(res.status).toBe(200);
+    const rows = (await res.json()) as Array<{ id: string; status: string; created_at: string }>;
+    const row = rows.find((r) => r.id === form.id);
+    expect(row).toBeDefined();
+    expect(row!.status).toBe("detecting");
+    // created_at drives the "> 1h = stuck" badge in the UI.
+    expect(typeof row!.created_at).toBe("string");
+    expect(Number.isNaN(Date.parse(row!.created_at))).toBe(false);
+  });
+
+  // Case 2: admin retry re-enqueues + kicks the inline detect (fake detector),
+  // so detection runs end-to-end → pending_review with fields. No real vision.
+  it("admin retry re-runs detection end-to-end → pending_review with fields", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const form = await makeDetecting(agent.id);
+
+    const res = await callRetry(form.id);
+    expect(res.status).toBe(200);
+
+    await waitForInlineFormDetects();
+    expect(detectCalls).toBe(1); // the injected fake ran; no real vision/Anthropic
+
+    const after = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id: form.id } });
+    expect(after.status).toBe("pending_review");
+    expect(await prisma.uploaded_form_fields.count({ where: { form_id: form.id } })).toBe(3);
+  });
+
+  // Case 3: retry is a no-op on a non-'detecting' form (409) and is admin-gated (403).
+  it("409 on a non-'detecting' form; 403 for a non-admin — neither kicks detection", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+
+    // A form past detection can't be retried.
+    const ready = await prisma.uploaded_forms.create({
+      data: {
+        agent_id: agent.id,
+        label: "already reviewed",
+        side: "buy",
+        source_s3_key: `agent-forms/${agent.id}/1/r.pdf`,
+        source_file_name: "r.pdf",
+        attested_by: agent.id,
+        attestation_statement: "a",
+        file_sha256: "sha-ready",
+        status: "pending_review",
+        detection_source: "vision",
+      },
+      select: { id: true },
+    });
+    expect((await callRetry(ready.id)).status).toBe(409);
+
+    // Non-admin is rejected even on a genuinely stuck form.
+    const stuck = await makeDetecting(agent.id);
+    expect((await callRetry(stuck.id, ["agent"])).status).toBe(403);
+
+    expect(detectCalls).toBe(0); // a rejected retry never runs the detector
   });
 });

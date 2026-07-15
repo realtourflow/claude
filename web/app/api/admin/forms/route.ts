@@ -49,9 +49,12 @@ export async function GET(req: Request): Promise<Response> {
       status === "all"
         ? await prisma.$queryRawUnsafe<Row[]>(`${base} ${tail}`)
         : status === "pending_review"
-          ? // The pending queue also surfaces bundles awaiting a page-split.
+          ? // The pending queue also surfaces bundles awaiting a page-split and
+            // forms stuck mid-detection — a detect job that exhausts its retries
+            // strands the row in 'detecting', so it must show here (with its age,
+            // via created_at) or the admin never sees it (#284).
             await prisma.$queryRawUnsafe<Row[]>(
-              `${base} WHERE f.status IN ('pending_review', 'pending_split') ${tail}`
+              `${base} WHERE f.status IN ('pending_review', 'pending_split', 'detecting') ${tail}`
             )
           : await prisma.$queryRawUnsafe<Row[]>(
               `${base} WHERE f.status = $1 ${tail}`,
