@@ -224,4 +224,128 @@ describe("admin bundle split", () => {
     });
     for (const c of done) expect(c.status).toBe("pending_review");
   });
+
+  // ── #285: partial failure must NOT archive the bundle ──────────────────────
+  it("keeps the bundle pending_split when any part fails to store", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedBundle(agent.id);
+
+    // The second part's carved PDF can't be stored — best-effort split keeps the
+    // first child but reports the second as failed.
+    storage.failPut = (key) => key.includes("Wire-Fraud-Advisory");
+
+    const res = await splitForm(
+      await splitReq(id, "auth0|admin", ["admin"], {
+        parts: [
+          part({ start_page: 1, end_page: 2, label: "Buyer Agency Agreement" }),
+          part({ start_page: 3, end_page: 3, label: "Wire Fraud Advisory" }),
+        ],
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as {
+      created: { id: string; label: string }[];
+      failed: { label: string; error: string }[];
+    };
+    expect(out.created).toHaveLength(1);
+    expect(out.failed).toHaveLength(1);
+    expect(out.failed[0].label).toBe("Wire Fraud Advisory");
+
+    // The bundle must stay in the admin queue so the failed range can be re-split.
+    const bundle = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id } });
+    expect(bundle.status).toBe("pending_split");
+    expect(bundle.reviewed_at).toBeNull();
+  });
+
+  // ── #285: re-split is duplicate-safe via the file_sha256 guard ─────────────
+  it("re-splitting does not duplicate an already-created child and archives once complete", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedBundle(agent.id);
+
+    const partsBody = {
+      parts: [
+        part({ start_page: 1, end_page: 2, label: "Buyer Agency Agreement" }),
+        part({ start_page: 3, end_page: 3, label: "Wire Fraud Advisory" }),
+      ],
+    };
+
+    // First split: the second part fails to store, first child is created.
+    storage.failPut = (key) => key.includes("Wire-Fraud-Advisory");
+    const first = await splitForm(
+      await splitReq(id, "auth0|admin", ["admin"], partsBody),
+      { params: Promise.resolve({ id }) }
+    );
+    const firstOut = (await first.json()) as {
+      created: { id: string }[];
+      failed: unknown[];
+    };
+    expect(firstOut.created).toHaveLength(1);
+    expect(firstOut.failed).toHaveLength(1);
+    await waitForInlineFormDetects();
+
+    const afterFirst = await prisma.uploaded_forms.count({
+      where: { agent_id: agent.id, id: { not: id } },
+    });
+    expect(afterFirst).toBe(1); // one child only
+
+    // Re-split submitting BOTH ranges again; storage now healthy. The identical
+    // first part must be skipped (byte-identical carve → same file_sha256), so no
+    // duplicate row; the previously-failed part succeeds and the bundle archives.
+    storage.failPut = undefined;
+    const second = await splitForm(
+      await splitReq(id, "auth0|admin", ["admin"], partsBody),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(second.status).toBe(200);
+    const secondOut = (await second.json()) as {
+      created: { id: string }[];
+      failed: unknown[];
+    };
+    expect(secondOut.failed).toHaveLength(0);
+    await waitForInlineFormDetects();
+
+    // Exactly two children total — the first part was NOT duplicated.
+    const children = await prisma.uploaded_forms.count({
+      where: { agent_id: agent.id, id: { not: id } },
+    });
+    expect(children).toBe(2);
+
+    // Every part now accounted for → the bundle is archived with review metadata.
+    const bundle = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id } });
+    expect(bundle.status).toBe("split");
+    expect(bundle.reviewed_by).toBe(admin.id);
+    expect(bundle.reviewed_at).not.toBeNull();
+  });
+
+  // ── #285: full success is unchanged (archives with review metadata) ────────
+  it("archives the bundle with reviewer metadata when every part succeeds", async () => {
+    const admin = await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedBundle(agent.id);
+
+    const res = await splitForm(
+      await splitReq(id, "auth0|admin", ["admin"], {
+        parts: [
+          part({ start_page: 1, end_page: 2, label: "Buyer Agency Agreement" }),
+          part({ start_page: 3, end_page: 3, label: "Wire Fraud Advisory" }),
+        ],
+      }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as {
+      created: unknown[];
+      failed: unknown[];
+    };
+    expect(out.created).toHaveLength(2);
+    expect(out.failed).toHaveLength(0);
+
+    const bundle = await prisma.uploaded_forms.findUniqueOrThrow({ where: { id } });
+    expect(bundle.status).toBe("split");
+    expect(bundle.reviewed_by).toBe(admin.id);
+    expect(bundle.reviewed_at).not.toBeNull();
+  });
 });

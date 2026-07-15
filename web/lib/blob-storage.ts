@@ -145,6 +145,12 @@ export class TestStorage {
   defaultSize: number | undefined;
   /** When true, deleteBlob throws (to exercise best-effort delete failure). */
   failDeletes = false;
+  /**
+   * When set, putBlob throws for any key this predicate returns true for — lets a
+   * test simulate a storage failure on a specific object (e.g. one part of a
+   * best-effort bundle split) without failing the others.
+   */
+  failPut?: (key: string) => boolean;
   readonly seeded = new Map<string, StoredBlob>();
   readonly puts: Array<{ key: string; bytes: Uint8Array; contentType: string }> = [];
   readonly deletes: string[] = [];
@@ -412,6 +418,7 @@ export async function putBlob(
   contentType: string
 ): Promise<void> {
   if (testStore) {
+    if (testStore.failPut?.(key)) throw new Error("blob put failed (test)");
     testStore.puts.push({ key, bytes, contentType });
     testStore.seed(key, bytes, contentType);
     return;
