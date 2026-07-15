@@ -6,8 +6,11 @@ import { getObjectBytes } from "@/lib/s3";
 import { PDFDocument } from "pdf-lib";
 import { extractAcroFields } from "@/lib/form-ai/extract";
 import { computeStructureFingerprint } from "@/lib/form-ai/fingerprint";
+import { extractPdfText } from "@/lib/pdf-text";
+import { computeTextFingerprint } from "@/lib/text-layout";
 import {
   saveKnownForm,
+  flatFingerprint,
   KnownFormConflictError,
   type KnownField,
 } from "@/lib/known-forms";
@@ -36,6 +39,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         status: true,
         source_s3_key: true,
         role_mapping: true,
+        form_type_id: true,
       },
     });
     if (!form) return error("form not found", 404);
@@ -48,20 +52,37 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       orderBy: [{ page_number: "asc" }, { created_at: "asc" }],
     });
 
-    // Recompute the fingerprint from the source bytes so it matches what
-    // recognition will hash on a future upload of the same blank.
+    // Recompute the fingerprint from the source bytes so it matches EXACTLY what
+    // recognition hashes on a future upload of the same blank. A FLAT (vision) form
+    // has no AcroForm fields, so recognition never consults a structure fingerprint
+    // for it — it matches by the blank's content hash (flat:+sha256) then by a
+    // text-layout MinHash. Compute those for the flat branch; keep the AcroForm
+    // structure fingerprint for FILLABLE forms unchanged.
     let fingerprint: string;
     let fieldCount: number;
     let pageCount: number;
+    let textMinhash: number[] | null = null;
     try {
       const bytes = await getObjectBytes(form.source_s3_key);
       const detected = await extractAcroFields(bytes);
       pageCount = (
         await PDFDocument.load(bytes, { ignoreEncryption: true })
       ).getPageCount();
-      const fp = computeStructureFingerprint(detected, pageCount);
-      fingerprint = fp.fingerprint;
-      fieldCount = fp.fieldCount;
+      if (detected.length === 0) {
+        // Flat → the exact signals matchFlatKnownForm / matchTextLayoutKnownForm use.
+        fingerprint = flatFingerprint(bytes);
+        // The structure fp reports 0 fields for a flat form; use the snapshot rows.
+        fieldCount = fieldRows.length;
+        try {
+          textMinhash = computeTextFingerprint(await extractPdfText(bytes));
+        } catch {
+          textMinhash = null; // scanned / empty-text PDF → exact-bytes match only
+        }
+      } else {
+        const fp = computeStructureFingerprint(detected, pageCount);
+        fingerprint = fp.fingerprint;
+        fieldCount = fp.fieldCount;
+      }
     } catch (err) {
       return error(
         "could not read the source PDF: " +
@@ -107,6 +128,11 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         pageCount,
         fields,
         roleMapping: (form.role_mapping ?? {}) as Record<string, string>,
+        // Flat forms carry the text-layout MinHash so re-saved/re-exported copies
+        // recognize too; null on the fillable path. Thread the document-type link so
+        // a recognized re-upload keeps it.
+        textMinhash,
+        typeId: form.form_type_id,
         sourceFormId: id,
         createdBy: adminId,
       });
