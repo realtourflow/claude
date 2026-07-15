@@ -16,6 +16,7 @@ import { CORE_KEYS } from "@/lib/form-ai/core-keys";
 import { rememberApprovedForm } from "@/lib/remember-form";
 import { KnownFormConflictError } from "@/lib/known-forms";
 import { isValidMarket } from "@/lib/markets";
+import { emailFormReviewed } from "@/lib/notification-email";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -290,6 +291,18 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
           review_notes: body.review_notes ?? null,
         },
       });
+      // #295 — tell the owning agent WHY, best-effort: a send failure must never
+      // undo the rejection that already succeeded above.
+      try {
+        await emailFormReviewed({
+          req,
+          formId: id,
+          action: "reject",
+          reviewNotes: body.review_notes ?? null,
+        });
+      } catch (err) {
+        console.error("form-rejected email failed; form stays rejected", err);
+      }
       return json({ id, status: "rejected" });
     }
 
@@ -388,6 +401,14 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
         docusign_template_id: templateId,
       },
     });
+
+    // #295 — confirm to the owning agent their form is now usable, best-effort:
+    // a send failure must never undo the approval that already succeeded above.
+    try {
+      await emailFormReviewed({ req, formId: id, action: "approve" });
+    } catch (err) {
+      console.error("form-approved email failed; form stays approved", err);
+    }
 
     // Phase 4: a reviewed VISION form is now remembered as a known layout, so the
     // next agent who uploads the same form is recognized (no vision) and inherits

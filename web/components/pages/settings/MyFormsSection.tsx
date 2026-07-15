@@ -47,8 +47,15 @@ function StatusChip({ status }: { status: FormStatus }) {
 }
 
 function FormRow({ form }: { form: UploadedForm }) {
+  // #295 — a rejected form must show WHY. Surface the admin's review note under
+  // the chip so the agent can act on the reason, not just see a bare "Rejected".
+  const rejectionReason =
+    form.status === "rejected" && form.reviewNotes?.trim()
+      ? form.reviewNotes.trim()
+      : null;
+
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 px-3 py-2.5">
+    <li className="flex items-start justify-between gap-3 rounded-lg border border-gray-100 px-3 py-2.5">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <FileSignature size={15} className="shrink-0 text-gray-400" />
@@ -63,6 +70,11 @@ function FormRow({ form }: { form: UploadedForm }) {
             ? ` · ${form.needsReviewCount} need review`
             : ""}
         </p>
+        {rejectionReason && (
+          <p className="mt-1 text-xs text-red-600">
+            <span className="font-semibold">Reason:</span> {rejectionReason}
+          </p>
+        )}
       </div>
       <StatusChip status={form.status} />
     </li>

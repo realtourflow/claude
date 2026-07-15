@@ -325,6 +325,71 @@ export async function emailOfferRequested(input: {
   );
 }
 
+/**
+ * Form reviewed (#295): an admin approved or rejected an agent-uploaded form.
+ * Email the OWNING AGENT so they learn the outcome without having to reopen
+ * Settings → My Forms and notice a status chip changed. A rejection carries the
+ * admin's stated reason (`reviewNotes`) when present; an approval is a simple
+ * "it's ready to use" confirmation.
+ *
+ * Single-recipient (the form's owner), gated on that agent's email-notification
+ * preference (#292). Invoked best-effort by POST /api/admin/forms/:id AFTER the
+ * status write, wrapped in the route's try/catch so a send failure can never
+ * block the admin's approve/reject action.
+ */
+export async function emailFormReviewed(input: {
+  req: Request;
+  formId: string;
+  action: "approve" | "reject";
+  reviewNotes?: string | null;
+}): Promise<void> {
+  const { req, formId, action, reviewNotes } = input;
+
+  // Resolve the owning agent (id + email) + the form label from the form row.
+  const rows = await prisma.$queryRaw<
+    { agent_id: string; email: string; label: string }[]
+  >`
+    SELECT f.agent_id, u.email, f.label
+    FROM uploaded_forms f
+    JOIN users u ON u.id = f.agent_id
+    WHERE f.id = ${formId}::uuid
+  `;
+  const row = rows[0];
+  if (!row?.email) return;
+  // #292 — respect the agent's "Email notifications" opt-out.
+  if (!(await emailNotificationsEnabled(row.agent_id))) return;
+
+  const origin = originFromRequest(req);
+  // The agent's forms live under Settings → My Forms; there is no per-form deep
+  // link, so point at their settings page (the actionable surface).
+  const formsUrl = `${origin}/agent/settings`;
+  const label = row.label || "your form";
+
+  if (action === "approve") {
+    await sendNotificationEmail({
+      to: row.email,
+      subject: `Your form "${label}" is ready to use`,
+      heading: "Your form was approved",
+      body: `"${label}" passed review and is now available to send on your deals.`,
+      dealUrl: formsUrl,
+    });
+    return;
+  }
+
+  // reject — include the admin's stated reason when one was given.
+  const reason = (reviewNotes ?? "").trim();
+  const body = reason
+    ? `"${label}" was rejected. Reason: ${reason}. Open My Forms in Settings to re-upload a corrected version.`
+    : `"${label}" was rejected. Open My Forms in Settings to re-upload a corrected version.`;
+  await sendNotificationEmail({
+    to: row.email,
+    subject: `Your form "${label}" needs another look`,
+    heading: "Your form was rejected",
+    body,
+    dealUrl: formsUrl,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // #175 — intake highlights for the "client joined" agent notification.
 // Append-only addition: turns the persisted onboarding answers into a compact

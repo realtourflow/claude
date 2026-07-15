@@ -4,6 +4,7 @@ import {
   expect,
   beforeAll,
   beforeEach,
+  afterEach,
   afterAll,
 } from "vitest";
 import { PDFDocument } from "pdf-lib";
@@ -14,6 +15,7 @@ import { POST as saveKnown } from "@/app/api/admin/forms/[id]/known/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setStorageForTesting, type TestStorage } from "@/lib/blob-storage";
 import { setDocusignForTesting, type DocusignClient } from "@/lib/docusign";
+import { setEmailForTesting } from "@/lib/email";
 import { MARKETS } from "@/lib/markets";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -59,6 +61,38 @@ beforeEach(async () => {
   storage.defaultBytes = PDF;
   lastTemplateSigners = [];
 });
+
+afterEach(() => {
+  // Reset the email seam so a stub set by one test never leaks into the next.
+  setEmailForTesting(undefined);
+});
+
+type SentEmail = {
+  from: string;
+  to: string | string[];
+  subject: string;
+  html: string;
+  headers?: Record<string, string>;
+};
+
+/**
+ * Minimal Resend-surface fake — records every send, or throws to simulate a
+ * delivery failure. Mirrors the fake in notification-email.test.ts. Never
+ * touches the real Resend API.
+ */
+function fakeEmail(opts: { throwOnSend?: boolean } = {}) {
+  const sent: SentEmail[] = [];
+  const client = {
+    emails: {
+      send: async (payload: SentEmail) => {
+        if (opts.throwOnSend) throw new Error("resend boom");
+        sent.push(payload);
+        return { data: { id: "email_test_1" }, error: null };
+      },
+    },
+  };
+  return { client, sent };
+}
 
 type FieldSeed = {
   detected_name?: string;
@@ -326,6 +360,96 @@ describe("admin form review — correction + approve/reject", () => {
       params: Promise.resolve({ id }),
     });
     expect(res.status).toBe(409);
+  });
+});
+
+// #295 — the review gate was silent: neither approve nor reject notified the
+// owning agent, and a rejection's review_notes reached no agent-visible surface.
+// The route now emails the form's owner on both outcomes (best-effort), and the
+// rejection email carries the admin's stated reason.
+describe("admin form review — notifies the owning agent (#295)", () => {
+  it("reject → emails the owning agent with the review note", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [{ needs_review: true }]);
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const res = await action(
+      await actionReq(id, { action: "reject", review_notes: "bad scan" }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(res.status).toBe(200);
+
+    // Exactly one email, to the form's owner, carrying the admin's reason.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe(agent.email);
+    expect(sent[0].html).toContain("bad scan");
+  });
+
+  it("approve → emails the owning agent a confirmation", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [
+      {
+        detected_name: "buyer_name",
+        detected_type: "text",
+        ai_core_key: "buyer_name",
+        ai_role: "Buyer",
+        needs_review: false,
+      },
+    ]);
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const res = await action(await actionReq(id, { action: "approve" }), {
+      params: Promise.resolve({ id }),
+    });
+    expect(res.status).toBe(200);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe(agent.email);
+    expect(sent[0].subject.toLowerCase()).toContain("form");
+  });
+
+  it("a failing review email never blocks the reject (best-effort)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [{ needs_review: true }]);
+
+    const { client } = fakeEmail({ throwOnSend: true });
+    setEmailForTesting(client);
+
+    const res = await action(
+      await actionReq(id, { action: "reject", review_notes: "bad scan" }),
+      { params: Promise.resolve({ id }) }
+    );
+    // The reject still succeeds and is persisted despite the send throwing.
+    expect(res.status).toBe(200);
+    const row = await prisma.uploaded_forms.findUnique({ where: { id } });
+    expect(row?.status).toBe("rejected");
+  });
+
+  it("respects the agent's email-notification opt-out", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin" });
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const id = await seedForm(agent.id, [{ needs_review: true }]);
+    // The agent turned "Email notifications" OFF.
+    await prisma.user_settings.create({
+      data: { user_id: agent.id, settings: { notifications: { email: false } } },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const res = await action(
+      await actionReq(id, { action: "reject", review_notes: "bad scan" }),
+      { params: Promise.resolve({ id }) }
+    );
+    expect(res.status).toBe(200);
+    expect(sent).toHaveLength(0);
   });
 });
 
