@@ -62,6 +62,28 @@ function readHandoff(): SurveyHandoff | null {
   }
 }
 
+// A 400 that mentions the promo code means the server rejected the code (#281):
+// unknown / expired / wrong product / past max_uses. Pull that human reason out
+// of the thrown ApiError (duck-typed by shape — `status` + `message` — so it
+// stays robust even when the api-client module is mocked) and show it inline
+// instead of the generic submit error.
+function promoReasonFromError(err: unknown): string | null {
+  if (
+    err &&
+    typeof err === 'object' &&
+    (err as { status?: unknown }).status === 400 &&
+    typeof (err as { message?: unknown }).message === 'string'
+  ) {
+    const msg = (err as { message: string }).message;
+    const idx = msg.toLowerCase().indexOf('promo code');
+    if (idx >= 0) {
+      const reason = msg.slice(idx).trim();
+      return reason.charAt(0).toUpperCase() + reason.slice(1);
+    }
+  }
+  return null;
+}
+
 const UTILITY_OPTIONS = [
   'Electric',
   'Natural Gas',
@@ -486,6 +508,7 @@ function ConfirmationScreen({
   atClosingTotal,
   submitting,
   submitError,
+  promoError,
   onSubmit,
 }: {
   data: SurveyData;
@@ -496,9 +519,13 @@ function ConfirmationScreen({
   atClosingTotal: number;
   submitting?: boolean;
   submitError?: boolean;
-  onSubmit: (paymentOption: FastPassPaymentOption) => void;
+  promoError?: string | null;
+  onSubmit: (paymentOption: FastPassPaymentOption, promoCode: string) => void;
 }) {
   const [paymentOption, setPaymentOption] = useState<FastPassPaymentOption | null>(null);
+  // Promo code (#281) is validated SERVER-SIDE on submit — this input is UX
+  // only; the server is the boundary and recomputes any discount from the code.
+  const [promoCode, setPromoCode] = useState('');
   const upsellItems = FAST_PASS_UPSELLS.filter((u) => selectedUpsells.includes(u.id));
   const situationLabels: Record<string, string> = {
     renting: 'Currently renting',
@@ -562,6 +589,28 @@ function ConfirmationScreen({
           </div>
         </div>
 
+        {/* Promo code (#281) — optional; validated server-side on submit */}
+        <div>
+          <label htmlFor="promo-code" className="mb-2 block text-xs font-bold uppercase tracking-wider text-gray-400">
+            Promo code (optional)
+          </label>
+          <input
+            id="promo-code"
+            type="text"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            value={promoCode}
+            onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+            placeholder="Enter code"
+            className={[
+              'w-full rounded-xl border-2 bg-white px-4 py-3 text-sm font-semibold uppercase tracking-wide text-brand-navy placeholder:font-normal placeholder:normal-case placeholder:tracking-normal placeholder:text-gray-300 focus:outline-none',
+              promoError ? 'border-red-300 focus:border-red-400' : 'border-gray-100 focus:border-brand-navy',
+            ].join(' ')}
+          />
+          {promoError && <p className="mt-1.5 text-xs font-medium text-red-500">{promoError}</p>}
+        </div>
+
         {/* Payment selection */}
         <div>
           <div className="mb-2 text-xs font-bold uppercase tracking-wider text-gray-400">
@@ -621,7 +670,7 @@ function ConfirmationScreen({
         )}
 
         <button
-          onClick={() => paymentOption && !submitting && onSubmit(paymentOption)}
+          onClick={() => paymentOption && !submitting && onSubmit(paymentOption, promoCode.trim())}
           disabled={!paymentOption || submitting}
           className={[
             'flex w-full items-center justify-center gap-2 rounded-xl py-4 text-base font-bold transition-all',
@@ -728,6 +777,8 @@ export default function FastPassSurvey() {
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState(false);
+  // Server-side promo rejection (#281), surfaced inline next to the code input.
+  const [promoError, setPromoError] = useState<string | null>(null);
   const [chosenPayment, setChosenPayment] = useState<FastPassPaymentOption>('now');
 
   const progress = Math.min(((screen + 1) / TOTAL_SCREENS) * 100, 100);
@@ -799,11 +850,13 @@ export default function FastPassSurvey() {
             atClosingTotal={atClosingTotal}
             submitting={submitting}
             submitError={submitError}
-            onSubmit={async (option) => {
+            promoError={promoError}
+            onSubmit={async (option, promoCode) => {
               setChosenPayment(option);
               if (dealId) {
                 setSubmitting(true);
                 setSubmitError(false);
+                setPromoError(null);
                 try {
                   // total_cents is priced server-side and ignored on the wire
                   // (#78); send the same shared-helper value so client and
@@ -814,6 +867,8 @@ export default function FastPassSurvey() {
                     {
                       payment_option: option,
                       selected_upsells: selectedUpsells,
+                      // Server validates + prices the code; this is a hint only.
+                      promo_code: promoCode || undefined,
                       total_cents: totalCents,
                       survey_answers: data,
                     },
@@ -826,10 +881,18 @@ export default function FastPassSurvey() {
                     return;
                   }
                   sessionStorage.removeItem(HANDOFF_KEY);
-                } catch {
+                } catch (err) {
                   // Enrollment did not persist — show the error, never the
-                  // success screen, and keep the handoff so retry works.
-                  setSubmitError(true);
+                  // success screen, and keep the handoff so retry works. A
+                  // rejected promo code (#281) gets a specific inline message
+                  // so the buyer can fix or drop the code; anything else is the
+                  // generic failure.
+                  const promoReason = promoReasonFromError(err);
+                  if (promoReason) {
+                    setPromoError(promoReason);
+                  } else {
+                    setSubmitError(true);
+                  }
                   setSubmitting(false);
                   return;
                 }

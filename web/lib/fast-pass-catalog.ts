@@ -47,27 +47,52 @@ export function isFastPassUpsellId(key: string): key is FastPassUpsellId {
 }
 
 /**
- * Server-side total for a Fast Pass enrollment: base fee + the selected
- * upsells, then the deferral premium if the buyer pays at closing. Duplicate
- * keys count once (pass a deduped set or rely on this to collapse them).
- * Callers must validate each key with isFastPassUpsellId first — unknown keys
- * here would be silently skipped.
+ * Server-side SUBTOTAL for a Fast Pass enrollment: base fee + the selected
+ * upsells, before any promo discount or payment-timing premium. Duplicate keys
+ * count once (pass a deduped set or rely on this to collapse them). Callers must
+ * validate each key with isFastPassUpsellId first — unknown keys here would be
+ * silently skipped.
+ */
+export function computeFastPassSubtotalCents(upsells: Iterable<FastPassUpsellId>): number {
+  let subtotal = FAST_PASS_BASE_PRICE_CENTS;
+  for (const key of new Set(upsells)) {
+    subtotal += FAST_PASS_UPSELL_PRICE_CENTS[key];
+  }
+  return subtotal;
+}
+
+/**
+ * Server-side TOTAL for a Fast Pass enrollment: base fee + selected upsells,
+ * then (a) any promo discount and (b) the deferral premium if the buyer pays at
+ * closing. The single entry point the route charges from — the client never
+ * supplies a total or a discount.
+ *
+ * Order of operations (documented choice, #281 composed with #280):
+ *   1. subtotal = base fee + selected upsells       (computeFastPassSubtotalCents)
+ *   2. subtract the promo discount, clamped to ≥ 0   (opts.discountCents)
+ *   3. apply the at_closing payment-timing premium   (#280, AT_CLOSING_PREMIUM)
+ *
+ * The promo discounts the SUBTOTAL and the premium then multiplies the ALREADY
+ * DISCOUNTED basket — the buyer's discount is on the goods, and the deferral
+ * premium is charged on what they actually defer. So a discounted at_closing
+ * enrollment costs `round((subtotal − discount) × 1.15)`.
  *
  * `paymentOption` is the whitelisted enrollment option (`now` | `at_closing` |
- * `seller_concession`). Only `at_closing` adds AT_CLOSING_PREMIUM, applied to
- * the FULL basket exactly once; every other value (including `undefined`)
- * prices the plain basket. Typed as `string` because the route validates the
- * whitelist before calling — this stays the single source of the markup so the
- * survey never re-derives it (#280).
+ * `seller_concession`); only `at_closing` adds AT_CLOSING_PREMIUM, applied once.
+ * Typed as `string` because the route validates the whitelist before calling —
+ * this stays the single source of the markup so the survey never re-derives it
+ * (#280). Passing no `discountCents` returns #280's plain (undiscounted)
+ * behavior, so pre-#281 callers — the route's un-promo'd path and the survey
+ * preview — are unaffected.
  */
 export function computeFastPassTotalCents(
   upsells: Iterable<FastPassUpsellId>,
-  paymentOption?: string
+  paymentOption?: string,
+  opts: { discountCents?: number } = {}
 ): number {
-  let total = FAST_PASS_BASE_PRICE_CENTS;
-  for (const key of new Set(upsells)) {
-    total += FAST_PASS_UPSELL_PRICE_CENTS[key];
-  }
+  const subtotal = computeFastPassSubtotalCents(upsells);
+  const discount = Math.max(0, Math.min(opts.discountCents ?? 0, subtotal));
+  let total = subtotal - discount;
   if (paymentOption === "at_closing") {
     total = Math.round(total * AT_CLOSING_PREMIUM);
   }
