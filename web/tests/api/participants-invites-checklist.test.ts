@@ -365,6 +365,100 @@ describe("Checklist", () => {
   });
 });
 
+describe("Seller checklist seeding (#261)", () => {
+  const auth = () => authHeader("auth0|a", ["agent"]);
+  const getChecklist = async (dealId: string) =>
+    listChecklistRoute(
+      new Request(`http://localhost/api/deals/${dealId}/checklist`, {
+        headers: { authorization: await auth() },
+      }),
+      ctx({ id: dealId })
+    );
+
+  it("seeds the seller listing-prep defaults for a SELL deal at active_search, exactly once", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      type: "sell",
+      stage: "active_search",
+    });
+
+    const first = (await (await getChecklist(deal.id)).json()) as {
+      assigned_to: string;
+      checked: boolean;
+      is_custom: boolean;
+    }[];
+    // The six listing-prep items, all seller-assigned, none pre-checked.
+    expect(first.length).toBe(6);
+    expect(first.every((i) => i.assigned_to === "seller")).toBe(true);
+    expect(first.every((i) => i.checked === false)).toBe(true);
+    expect(first.every((i) => i.is_custom === false)).toBe(true);
+
+    // Seeding the seller set must NOT stamp the TC marker (so the TC closing
+    // set still seeds independently at under_contract+ — #264 stays intact).
+    const marker = await prisma.deals.findUnique({
+      where: { id: deal.id },
+      select: { checklist_seeded_at: true },
+    });
+    expect(marker?.checklist_seeded_at).toBeNull();
+
+    // Idempotent: a second GET at the same stage does not duplicate.
+    const second = (await (await getChecklist(deal.id)).json()) as unknown[];
+    expect(second.length).toBe(6);
+    const count = await prisma.checklist_items.count({
+      where: { deal_id: deal.id },
+    });
+    expect(count).toBe(6);
+  });
+
+  it("does NOT seed listing-prep for a BUY deal at active_search", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      type: "buy",
+      stage: "active_search",
+    });
+    const items = (await (await getChecklist(deal.id)).json()) as unknown[];
+    expect(items.length).toBe(0);
+  });
+
+  it("still seeds the 17 TC closing defaults for a SELL deal at under_contract (existing behavior)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      type: "sell",
+      stage: "under_contract",
+    });
+    const items = (await (await getChecklist(deal.id)).json()) as {
+      assigned_to: string;
+    }[];
+    expect(items.length).toBe(17);
+    // None of the TC defaults are seller-assigned.
+    expect(items.some((i) => i.assigned_to === "seller")).toBe(false);
+    const marker = await prisma.deals.findUnique({
+      where: { id: deal.id },
+      select: { checklist_seeded_at: true },
+    });
+    expect(marker?.checklist_seeded_at).not.toBeNull();
+  });
+
+  it("seeds the seller pre-close set for a SELL deal at pre_close alongside the TC set", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      type: "sell",
+      stage: "pre_close",
+    });
+    const items = (await (await getChecklist(deal.id)).json()) as {
+      assigned_to: string;
+    }[];
+    const sellerItems = items.filter((i) => i.assigned_to === "seller");
+    // Five seller pre-close items, plus the 17 TC closing defaults.
+    expect(sellerItems.length).toBe(5);
+    expect(items.length).toBe(22);
+  });
+});
+
 describe("Contingencies", () => {
   it("agent owner can create, update and delete a contingency", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });

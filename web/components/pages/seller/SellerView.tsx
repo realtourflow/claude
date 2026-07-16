@@ -16,6 +16,7 @@ import { useMessages, postMessage } from "@/hooks/useMessages";
 import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
 import { useOffers } from "@/hooks/useOffers";
 import { useNetSheet, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
+import { useChecklist } from "@/hooks/useChecklist";
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
@@ -305,43 +306,38 @@ function IntakeCard({ firstName }: { firstName: string }) {
   );
 }
 
-function ListingPrepCard() {
-  const DEFAULT_ITEMS = [
-    'Deep clean / declutter',
-    'Minor repairs completed',
-    'Professional photos scheduled',
-    'Listing copy approved',
-    'Disclosures package complete',
-    'Lockbox installed',
-  ];
-  const [done, setDone] = useState<Set<number>>(new Set([0, 1]));
-
-  function toggle(i: number) {
-    setDone((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i); else next.add(i);
-      return next;
-    });
-  }
-
-  const pct = Math.round((done.size / DEFAULT_ITEMS.length) * 100);
+function ListingPrepCard({ deal }: { deal: Deal }) {
+  // Backed by the persisted checklist API (#261): the seller's ticks survive
+  // reload and are visible to the agent on the same deal checklist. We show the
+  // seller-assigned items only (the TC/agent closing set seeds later at
+  // under_contract+ and isn't the seller's to work). No fabricated pre-checks.
+  const { items, loading, toggle } = useChecklist(deal.id);
+  const prepItems = items.filter((i) => i.assignedTo === 'seller');
+  const doneCount = prepItems.filter((i) => i.checked).length;
+  const pct = prepItems.length > 0 ? Math.round((doneCount / prepItems.length) * 100) : 0;
 
   return (
     <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
       <div className="bg-indigo-50 border-b border-indigo-100 px-5 py-3 flex items-center justify-between">
         <span className="text-sm font-bold text-indigo-800">Listing Prep Checklist</span>
-        <span className="text-sm font-black text-indigo-700">{done.size}/{DEFAULT_ITEMS.length} done</span>
+        <span className="text-sm font-black text-indigo-700">{doneCount}/{prepItems.length} done</span>
       </div>
       <div className="h-1.5 bg-gray-100">
         <div className="h-full bg-indigo-400 transition-all duration-300" style={{ width: `${pct}%` }} />
       </div>
       <div className="p-5 space-y-1">
-        {DEFAULT_ITEMS.map((item, i) => {
-          const isDone = done.has(i);
+        {loading && prepItems.length === 0 && (
+          <p className="px-2 py-2.5 text-sm text-gray-400">Loading your checklist…</p>
+        )}
+        {!loading && prepItems.length === 0 && (
+          <p className="px-2 py-2.5 text-sm text-gray-400">Your agent will add your prep checklist shortly.</p>
+        )}
+        {prepItems.map((item) => {
+          const isDone = item.checked;
           return (
             <button
-              key={i}
-              onClick={() => toggle(i)}
+              key={item.id}
+              onClick={() => toggle(item.id)}
               className="w-full flex items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors"
             >
               <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full transition-all ${
@@ -350,12 +346,12 @@ function ListingPrepCard() {
                 {isDone && <CheckCircle2 size={12} className="text-white" />}
               </div>
               <span className={`text-sm transition-all ${isDone ? 'line-through text-gray-300' : 'text-gray-700'}`}>
-                {item}
+                {item.label}
               </span>
             </button>
           );
         })}
-        {done.size === DEFAULT_ITEMS.length && (
+        {prepItems.length > 0 && doneCount === prepItems.length && (
           <div className="mt-3 rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-center">
             <p className="text-sm font-bold text-green-700">🎉 All prep items complete!</p>
             <p className="text-xs text-green-600 mt-0.5">Your agent will review and schedule your listing date.</p>
@@ -684,13 +680,10 @@ function UnderContractCard({ deal }: { deal: Deal }) {
 }
 
 function PreCloseCard({ deal }: { deal: Deal }) {
-  const items = [
-    { label: 'Complete agreed repairs',           done: false },
-    { label: 'Remove all personal belongings',    done: false },
-    { label: 'Schedule final walkthrough access', done: false },
-    { label: 'Confirm possession date',           done: false },
-    { label: 'Utilities transfer arranged',       done: false },
-  ];
+  // Persisted, clickable pre-close checklist (#261) — seller-assigned items from
+  // the same deal checklist the agent sees. Was a static, non-interactive array.
+  const { items, loading, toggle } = useChecklist(deal.id);
+  const preCloseItems = items.filter((i) => i.assignedTo === 'seller');
   return (
     <div className="space-y-3">
       <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
@@ -704,18 +697,31 @@ function PreCloseCard({ deal }: { deal: Deal }) {
           )}
         </div>
         <div className="p-5 space-y-2.5">
-          {items.map((item, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
-                item.done ? 'bg-green-400' : 'border-2 border-gray-200'
-              }`}>
-                {item.done && <CheckCircle2 size={12} className="text-white" />}
-              </div>
-              <span className={`text-sm ${item.done ? 'line-through text-gray-300' : 'text-gray-700'}`}>
-                {item.label}
-              </span>
-            </div>
-          ))}
+          {loading && preCloseItems.length === 0 && (
+            <p className="text-sm text-gray-400">Loading your checklist…</p>
+          )}
+          {!loading && preCloseItems.length === 0 && (
+            <p className="text-sm text-gray-400">Your agent will add your pre-close checklist shortly.</p>
+          )}
+          {preCloseItems.map((item) => {
+            const isDone = item.checked;
+            return (
+              <button
+                key={item.id}
+                onClick={() => toggle(item.id)}
+                className="w-full flex items-center gap-3 text-left rounded-lg -mx-1 px-1 py-0.5 hover:bg-gray-50 transition-colors"
+              >
+                <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+                  isDone ? 'bg-green-400' : 'border-2 border-gray-200'
+                }`}>
+                  {isDone && <CheckCircle2 size={12} className="text-white" />}
+                </div>
+                <span className={`text-sm ${isDone ? 'line-through text-gray-300' : 'text-gray-700'}`}>
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
       <NetSheetReadOnlyCard dealId={deal.id} compact />
@@ -967,7 +973,7 @@ function StageCard({ deal, firstName }: { deal: Deal; firstName: string }) {
   if (deal.status === 'fallen_through') return <FallenThroughCard deal={deal} firstName={firstName} />;
   switch (deal.stage) {
     case 'intake':         return <IntakeCard firstName={firstName} />;
-    case 'active_search':  return <ListingPrepCard />;
+    case 'active_search':  return <ListingPrepCard deal={deal} />;
     case 'offer_active':   return <ListingActiveCard deal={deal} />;
     case 'under_contract': return <UnderContractCard deal={deal} />;
     case 'pre_close':      return <PreCloseCard deal={deal} />;
