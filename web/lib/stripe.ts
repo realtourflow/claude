@@ -33,6 +33,15 @@ type StripeLike = {
       secret: string
     ) => Stripe.Event;
   };
+  // Optional so existing stubs that don't touch refunds stay valid. Needed by
+  // the webhook's refund/dispute handling (#364): a charge/dispute event only
+  // carries a payment_intent id, so we retrieve the PI to read the deal_id/type
+  // metadata we stamp at checkout.
+  paymentIntents?: {
+    retrieve: (
+      id: string
+    ) => Promise<Pick<Stripe.PaymentIntent, "id" | "metadata">>;
+  };
 };
 
 let stub: StripeLike | undefined;
@@ -78,11 +87,34 @@ export async function createCheckoutSession(
       },
     ],
     mode: "payment",
+    // Stamp the same deal_id/type onto the PaymentIntent (Checkout session
+    // metadata does NOT propagate to the PaymentIntent/Charge). A refund/dispute
+    // webhook only references the PaymentIntent, so this is what lets the handler
+    // resolve the deal for refunds (#364). Forward-only: fees paid before this
+    // shipped have no PI metadata and are reconciled manually.
+    payment_intent_data: {
+      metadata: { deal_id: input.dealId, type: "closing_fee" },
+    },
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata: { deal_id: input.dealId, type: "closing_fee" },
   });
   return { id: session.id, url: session.url ?? null };
+}
+
+/**
+ * Read a PaymentIntent's metadata (deal_id / type). Used by the webhook's
+ * refund/dispute handlers, whose event objects (Charge / Dispute) carry only a
+ * payment_intent id, not the checkout metadata. Returns {} metadata when the
+ * seam has no stub or the PI predates the payment_intent_data stamp.
+ */
+export async function retrievePaymentIntentMetadata(
+  paymentIntentId: string
+): Promise<Record<string, string>> {
+  const intents = client().paymentIntents;
+  if (!intents) throw new Error("paymentIntents.retrieve is not available");
+  const intent = await intents.retrieve(paymentIntentId);
+  return (intent.metadata ?? {}) as Record<string, string>;
 }
 
 export type CheckoutSessionSnapshot = {

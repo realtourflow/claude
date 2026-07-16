@@ -1,7 +1,7 @@
 import type Stripe from "stripe";
 import { prisma } from "@/lib/db";
 import { error } from "@/lib/http";
-import { constructEvent } from "@/lib/stripe";
+import { constructEvent, retrievePaymentIntentMetadata } from "@/lib/stripe";
 
 export async function POST(req: Request): Promise<Response> {
   const sig = req.headers.get("stripe-signature") ?? "";
@@ -47,6 +47,39 @@ export async function POST(req: Request): Promise<Response> {
       if (dealId) {
         await markFeePaid(dealId, pi.id);
       }
+    } else if (
+      event.type === "charge.refunded" ||
+      event.type === "charge.dispute.created"
+    ) {
+      // #364: reverse a refunded/disputed closing fee. The event object is a
+      // Charge or Dispute, which carries only a payment_intent id — not the
+      // checkout metadata — so we retrieve the PaymentIntent to read deal_id/type
+      // (stamped at checkout via payment_intent_data). Fee only; fast_pass /
+      // smooth_exit refunds are sibling slices (#365/#366).
+      const obj = event.data.object as Stripe.Charge | Stripe.Dispute;
+      const piRef = (
+        obj as { payment_intent?: string | { id: string } | null }
+      ).payment_intent;
+      const piId = typeof piRef === "string" ? piRef : (piRef?.id ?? null);
+      // A partial refund (amount_refunded < amount) is a courtesy credit, not a
+      // reversal — leave the fee collected. Full refunds and disputes reverse it.
+      const charge = event.data.object as Stripe.Charge;
+      const isPartialRefund =
+        event.type === "charge.refunded" &&
+        (charge.amount_refunded ?? 0) < (charge.amount ?? 0);
+      if (piId && !isPartialRefund) {
+        const meta = await retrievePaymentIntentMetadata(piId);
+        if (meta.type === "closing_fee" && meta.deal_id) {
+          await markFeeRefunded(meta.deal_id);
+        }
+      }
+    } else if (event.type === "payment_intent.payment_failed") {
+      // #364: a failed charge on a still-pending fee frees the agent to retry.
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const dealId = pi.metadata?.deal_id;
+      if (dealId && pi.metadata?.type === "closing_fee") {
+        await revertPendingFee(dealId);
+      }
     }
   } catch (err) {
     console.error("stripe webhook handler error", err);
@@ -71,6 +104,24 @@ async function markFeePaid(dealId: string, sessionId: string): Promise<void> {
       fee_checkout_session_id: sessionId,
       fee_paid_at: new Date(),
     },
+  });
+}
+
+// #364: a refunded/disputed fee stops counting as collected revenue. Guarded on
+// fee_status='paid' so it's idempotent and can't resurrect a waived/unpaid deal.
+async function markFeeRefunded(dealId: string): Promise<void> {
+  await prisma.deals.updateMany({
+    where: { id: dealId, fee_status: "paid" },
+    data: { fee_status: "refunded" },
+  });
+}
+
+// #364: a failed payment on a still-pending fee reverts it to unpaid so the
+// agent can retry. Never touches a paid/refunded/waived fee.
+async function revertPendingFee(dealId: string): Promise<void> {
+  await prisma.deals.updateMany({
+    where: { id: dealId, fee_status: "pending" },
+    data: { fee_status: "unpaid" },
   });
 }
 

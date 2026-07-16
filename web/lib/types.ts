@@ -194,7 +194,7 @@ export type Deal = {
   openTaskCount?: number;
   overdueTaskCount?: number;
   /** Closing fee — populated from real API */
-  feeStatus?: 'unpaid' | 'pending' | 'paid' | 'waived';
+  feeStatus?: 'unpaid' | 'pending' | 'paid' | 'waived' | 'refunded';
   feeAmountCents?: number;
   feePaidAt?: string | null;
   /** Deal flags — populated from real API */

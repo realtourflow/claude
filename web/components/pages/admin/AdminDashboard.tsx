@@ -539,16 +539,21 @@ function StuckDeals({ deals }: { deals: Deal[] }) {
 // ─── Fees Collected ────────────────────────────────────────────────────────────
 
 const FEE_BADGE: Record<string, string> = {
-  paid:    'bg-green-100 text-green-700',
-  waived:  'bg-gray-100 text-gray-400',
-  pending: 'bg-amber-100 text-amber-700',
-  unpaid:  'bg-red-50 text-red-600',
+  paid:     'bg-green-100 text-green-700',
+  waived:   'bg-gray-100 text-gray-400',
+  pending:  'bg-amber-100 text-amber-700',
+  unpaid:   'bg-red-50 text-red-600',
+  refunded: 'bg-gray-200 text-gray-600',
 };
 
 function FeesCollected({ deals }: { deals: Deal[] }) {
   const postCloseDeals = deals.filter((d) => d.stage === 'post_close');
   const paidDeals      = postCloseDeals.filter((d) => d.feeStatus === 'paid');
   const unpaidDeals    = postCloseDeals.filter((d) => d.feeStatus === 'unpaid' || d.feeStatus === 'pending');
+  // #364: a refunded/disputed fee is neither collected nor outstanding — it was
+  // paid then reversed. Excluded from Collected (which only sums 'paid') and
+  // surfaced distinctly so a reversal isn't silently counted as revenue.
+  const refundedDeals  = postCloseDeals.filter((d) => d.feeStatus === 'refunded');
 
   const totalCollected = paidDeals.reduce((s, d) => s + (d.feeAmountCents ?? 7500), 0);
   const totalOutstanding = unpaidDeals.reduce((s, d) => s + (d.feeAmountCents ?? 7500), 0);
@@ -563,7 +568,9 @@ function FeesCollected({ deals }: { deals: Deal[] }) {
         <div className="rounded-xl bg-white px-5 py-5 shadow-sm">
           <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Collected</div>
           <div className="text-2xl font-bold text-green-600">${(totalCollected / 100).toFixed(2)}</div>
-          <div className="text-xs text-gray-400 mt-1">{paidDeals.length} deals paid</div>
+          <div className="text-xs text-gray-400 mt-1">
+            {paidDeals.length} deals paid{refundedDeals.length > 0 ? ` · ${refundedDeals.length} refunded` : ''}
+          </div>
         </div>
         <div className="rounded-xl bg-white px-5 py-5 shadow-sm">
           <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Outstanding</div>
