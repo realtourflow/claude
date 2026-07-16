@@ -31,6 +31,16 @@ export async function GET(_req: Request, ctx: Ctx): Promise<Response> {
   const row = rows[0];
   if (!row) return error("invite not found", 404);
 
+  // #278 — mirror the agent-invite GET: an expired-and-unclaimed invite signals
+  // expiry (410) so the /invite/[token] page can render an "ask your agent to
+  // resend" state BEFORE the user is walked into creating an Auth0 account. A
+  // claimed invite still returns its claimed state — a successful claim wins
+  // over expiry so a client who already accepted isn't shown a dead end.
+  const claimed = row.claimed_at !== null;
+  if (row.expires_at < new Date() && !claimed) {
+    return error("invite expired", 410);
+  }
+
   return json({
     token: row.token,
     deal_id: row.deal_id,
@@ -40,6 +50,6 @@ export async function GET(_req: Request, ctx: Ctx): Promise<Response> {
     agent_name: row.agent_name,
     deal_title: row.deal_title,
     expires_at: row.expires_at.toISOString(),
-    claimed: row.claimed_at !== null,
+    claimed,
   });
 }

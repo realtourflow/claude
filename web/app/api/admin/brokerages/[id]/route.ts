@@ -1,6 +1,8 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { hasRole } from "@/lib/roles";
+import { resolveUserId } from "@/lib/users";
+import { logAudit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -54,6 +56,18 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
     const status = body.action === "approve" ? "active" : "rejected";
     await prisma.brokerages.update({ where: { id }, data: { status } });
+
+    // Record the decision for the admin Audit Log (mirrors the sibling admin
+    // mutations). Awaited so the row commits before we respond; logAudit never
+    // throws, so an audit failure can't fail the review (best-effort contract).
+    const actorId = await resolveUserId(claims.sub);
+    await logAudit({
+      actorId: actorId ?? undefined,
+      eventType: status === "active" ? "brokerage_approve" : "brokerage_reject",
+      targetId: id,
+      metadata: { name: row.name },
+    });
+
     return json({ id, status });
   })) as Response;
 }

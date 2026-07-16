@@ -19,7 +19,7 @@ export type Vendor = {
   createdAt: string;
 };
 
-type ApiVendor = {
+export type ApiVendor = {
   id: string;
   agent_id: string;
   category: string;
@@ -34,7 +34,7 @@ type ApiVendor = {
   created_at: string;
 };
 
-function apiVendorToFrontend(v: ApiVendor): Vendor {
+export function apiVendorToFrontend(v: ApiVendor): Vendor {
   return {
     id: v.id,
     agentId: v.agent_id,

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { POST as clientInviteRoute } from "@/app/api/me/client-invite/route";
+import { GET as clientInviteGetRoute } from "@/app/api/invites/[token]/route";
 import { POST as claimInviteRoute } from "@/app/api/invites/[token]/claim/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setEmailForTesting } from "@/lib/email";
@@ -570,5 +571,72 @@ describe("upsertUser — keepExistingRole (#174)", () => {
       keepExistingRole: true,
     });
     expect(user.role).toBe("buyer");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #278 — the client-invite GET must signal expiry so the /invite/[token]
+// landing page can render an "ask your agent to resend" state BEFORE any Auth0
+// account is created. Mirrors the agent-invite GET: 410 when expires_at < now
+// AND the invite is unclaimed; a claimed invite still shows its claimed state.
+// ---------------------------------------------------------------------------
+
+/** Seeds an agent + deal + a deal_invites row with explicit expiry/claim state. */
+async function seedInviteRow(opts: { expiresAt: Date; claimedAt?: Date | null }) {
+  const agent = await createUser({ role: "agent" });
+  const deal = await createDeal({ agent_id: agent.id, title: "123 Main St" });
+  const invite = await prisma.deal_invites.create({
+    data: {
+      deal_id: deal.id,
+      email: "client@example.com",
+      name: "Invited Client",
+      role: "buyer",
+      invited_by: agent.id,
+      expires_at: opts.expiresAt,
+      claimed_at: opts.claimedAt ?? null,
+      claimed_by: opts.claimedAt ? agent.id : null,
+    },
+  });
+  return { agent, deal, invite };
+}
+
+function getReq(token: string) {
+  return new Request(`http://localhost/api/invites/${token}`);
+}
+
+describe("GET /api/invites/[token] — expiry (#278)", () => {
+  const past = () => new Date(Date.now() - 60_000); // 1 min ago
+  const future = () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days out
+
+  it("1. an unclaimed invite whose expires_at is in the past → 410", async () => {
+    const { invite } = await seedInviteRow({ expiresAt: past() });
+    const res = await clientInviteGetRoute(getReq(invite.token), ctx(invite.token));
+    expect(res.status).toBe(410);
+  });
+
+  it("2. an unclaimed, unexpired invite → normal 200 payload", async () => {
+    const { invite } = await seedInviteRow({ expiresAt: future() });
+    const res = await clientInviteGetRoute(getReq(invite.token), ctx(invite.token));
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as {
+      token: string;
+      claimed: boolean;
+      deal_title: string;
+      email: string;
+      role: string;
+    };
+    expect(out.token).toBe(invite.token);
+    expect(out.claimed).toBe(false);
+    expect(out.deal_title).toBe("123 Main St");
+    expect(out.email).toBe("client@example.com");
+    expect(out.role).toBe("buyer");
+  });
+
+  it("3. an expired but already-claimed invite still returns its claimed state (claim wins over expiry)", async () => {
+    const { invite } = await seedInviteRow({ expiresAt: past(), claimedAt: new Date() });
+    const res = await clientInviteGetRoute(getReq(invite.token), ctx(invite.token));
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as { claimed: boolean };
+    expect(out.claimed).toBe(true);
   });
 });

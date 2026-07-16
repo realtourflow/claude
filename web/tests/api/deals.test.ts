@@ -1,14 +1,16 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { GET as listDeals, POST as createDealRoute } from "@/app/api/deals/route";
-import { GET as getDealRoute } from "@/app/api/deals/[id]/route";
+import { GET as getDealRoute, PATCH as patchDealRoute } from "@/app/api/deals/[id]/route";
 import { PATCH as advanceStageRoute } from "@/app/api/deals/[id]/stage/route";
 import { PATCH as notesRoute } from "@/app/api/deals/[id]/notes/route";
 import { PATCH as commissionRoute } from "@/app/api/deals/[id]/commission/route";
 import { PATCH as flagsRoute } from "@/app/api/deals/[id]/flags/route";
 import { PATCH as buyerStatusRoute } from "@/app/api/deals/[id]/buyer-status/route";
 import { GET as myDealsRoute } from "@/app/api/me/deals/route";
+import { PUT as putConfig } from "@/app/api/admin/config/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import type { DealStage } from "@/lib/stages";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal, createTask } from "../helpers/factories";
@@ -136,6 +138,155 @@ describe("POST /api/deals", () => {
     });
     const res = await createDealRoute(req);
     expect(res.status).toBe(400);
+  });
+
+  it("403 when a buyer tries to create a deal — nothing written (#274)", async () => {
+    await createUser({ role: "buyer", auth0_id: "auth0|buyer-274" });
+    const req = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|buyer-274", ["buyer"]),
+      },
+      body: JSON.stringify({ title: "Sneaky buyer deal", type: "buy" }),
+    });
+    const res = await createDealRoute(req);
+    expect(res.status).toBe(403);
+    // No agent-owned deal was created for the non-agent caller.
+    expect(await prisma.deals.count()).toBe(0);
+  });
+
+  it("agent still creates a deal — happy path unchanged (#274)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|agent-274" });
+    const req = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|agent-274", ["agent"]),
+      },
+      body: JSON.stringify({ title: "456 Oak", type: "sell" }),
+    });
+    const res = await createDealRoute(req);
+    expect(res.status).toBe(201);
+    expect(await prisma.deals.count()).toBe(1);
+  });
+
+  it("admin may create a deal; tc and lending_partner are rejected 403 (#274)", async () => {
+    await createUser({ role: "admin", auth0_id: "auth0|admin-274" });
+    const adminReq = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|admin-274", ["admin"]),
+      },
+      body: JSON.stringify({ title: "Admin-created deal", type: "buy" }),
+    });
+    expect((await createDealRoute(adminReq)).status).toBe(201);
+
+    await createUser({ role: "tc", auth0_id: "auth0|tc-274" });
+    const tcReq = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|tc-274", ["tc"]),
+      },
+      body: JSON.stringify({ title: "TC deal", type: "buy" }),
+    });
+    expect((await createDealRoute(tcReq)).status).toBe(403);
+
+    await createUser({ role: "lending_partner", auth0_id: "auth0|lp-274" });
+    const lpReq = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|lp-274", ["lending_partner"]),
+      },
+      body: JSON.stringify({ title: "Lending partner deal", type: "buy" }),
+    });
+    expect((await createDealRoute(lpReq)).status).toBe(403);
+
+    // Only the admin's deal made it into the table.
+    expect(await prisma.deals.count()).toBe(1);
+  });
+});
+
+describe("POST /api/deals — closing_date (#253)", () => {
+  async function post(body: Record<string, unknown>) {
+    const req = new Request("http://localhost/api/deals", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|cd", ["agent"]),
+      },
+      body: JSON.stringify(body),
+    });
+    return createDealRoute(req);
+  }
+
+  it("persists closing_date and round-trips it on a fresh GET (Case 1)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "123 Elm", type: "buy", closing_date: "2026-09-30" });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { id: string; closing_date: string | null };
+    // The create response carries the date straight back.
+    expect(created.closing_date).toBe("2026-09-30");
+
+    // Stored server-side as a real date column.
+    const row = await prisma.deals.findUnique({ where: { id: created.id } });
+    expect(row?.closing_date?.toISOString().slice(0, 10)).toBe("2026-09-30");
+
+    // A brand-new request (reload) still sees it on the deal payload.
+    const getReq = new Request(`http://localhost/api/deals/${created.id}`, {
+      headers: { authorization: await authHeader("auth0|cd", ["agent"]) },
+    });
+    const getRes = await getDealRoute(getReq, ctx(created.id));
+    expect(getRes.status).toBe(200);
+    const body = (await getRes.json()) as { closing_date: string | null };
+    expect(body.closing_date).toBe("2026-09-30");
+  });
+
+  it("shows the manual closing_date on the pipeline list payload too", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "77 List", type: "sell", closing_date: "2026-10-15" });
+    expect(res.status).toBe(201);
+
+    const listReq = new Request("http://localhost/api/deals", {
+      headers: { authorization: await authHeader("auth0|cd", ["agent"]) },
+    });
+    const listRes = await listDeals(listReq);
+    expect(listRes.status).toBe(200);
+    const body = (await listRes.json()) as { title: string; closing_date: string | null }[];
+    expect(body.find((d) => d.title === "77 List")?.closing_date).toBe("2026-10-15");
+  });
+
+  it("201 with closing_date null when the field is omitted (Case 2)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "No date", type: "buy" });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { closing_date: string | null };
+    expect(body.closing_date).toBeNull();
+  });
+
+  it("400 (not silently dropped) for a garbage closing_date string (Case 2)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "Bad", type: "buy", closing_date: "banana" });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("closing_date");
+    expect(await prisma.deals.count()).toBe(0);
+  });
+
+  it("400 for an out-of-range calendar date (Case 2)", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "Bad", type: "buy", closing_date: "2026-13-99" });
+    expect(res.status).toBe(400);
+    expect(await prisma.deals.count()).toBe(0);
+  });
+
+  it("400 when closing_date is a non-string type", async () => {
+    await createUser({ role: "agent", auth0_id: "auth0|cd" });
+    const res = await post({ title: "Bad", type: "buy", closing_date: 20260930 });
+    expect(res.status).toBe(400);
+    expect(await prisma.deals.count()).toBe(0);
   });
 });
 
@@ -364,6 +515,86 @@ describe("PATCH /api/deals/[id]/stage", () => {
   });
 });
 
+describe("PATCH /api/deals/[id]/stage — direction-aware notifications (#267)", () => {
+  async function patchStage(dealId: string, token: string, stage: string) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/stage`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: token,
+      },
+      body: JSON.stringify({ stage }),
+    });
+    return advanceStageRoute(req, ctx(dealId));
+  }
+
+  it("retreat notifies participants with neutral copy, NOT 'moved forward' (#267)", async () => {
+    // A busted contract retreats under_contract → active_search. The buyer must
+    // not get a cheerful "moved forward" push about the worst news.
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const token = await authHeader("auth0|a", ["agent"]);
+    const res = await patchStage(deal.id, token, "active_search");
+    expect(res.status).toBe(200);
+
+    const notes = await prisma.notifications.findMany({
+      where: { deal_id: deal.id, user_id: buyer.id, type: "stage_change" },
+    });
+    expect(notes.length).toBe(1);
+    expect(notes[0].title).not.toContain("moved forward");
+    expect(notes[0].title).toBe("Your deal's stage was updated");
+    // Neutral, non-celebratory body — client-facing STAGE_LABELS label.
+    expect(notes[0].body).toBe("Stage: Property Search");
+  });
+
+  it("forward advance keeps the exact 'moved forward' copy (regression)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const token = await authHeader("auth0|a", ["agent"]);
+    const res = await patchStage(deal.id, token, "active_search");
+    expect(res.status).toBe(200);
+
+    const notes = await prisma.notifications.findMany({
+      where: { deal_id: deal.id, user_id: buyer.id, type: "stage_change" },
+    });
+    expect(notes.length).toBe(1);
+    expect(notes[0].title).toBe("Your deal has moved forward");
+    expect(notes[0].body).toBe("New stage: Property Search");
+  });
+
+  it("retreat with zero participants → 200, no notifications, no crash (#267)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "under_contract" });
+
+    const token = await authHeader("auth0|a", ["agent"]);
+    const res = await patchStage(deal.id, token, "active_search");
+    expect(res.status).toBe(200);
+
+    const notes = await prisma.notifications.findMany({
+      where: { deal_id: deal.id },
+    });
+    expect(notes.length).toBe(0);
+
+    // History is still written for the retreat (design principle).
+    const history = await prisma.deal_stage_history.findMany({
+      where: { deal_id: deal.id },
+    });
+    expect(history.length).toBe(1);
+    expect(history[0].from_stage).toBe("under_contract");
+    expect(history[0].to_stage).toBe("active_search");
+  });
+});
+
 describe("PATCH /api/deals/[id]/stage — auto-task seeding (#87)", () => {
   async function advance(dealId: string, token: string, stage: string) {
     const req = new Request(`http://localhost/api/deals/${dealId}/stage`, {
@@ -481,6 +712,158 @@ describe("PATCH /api/deals/[id]/stage — auto-task seeding (#87)", () => {
     await advance(deal.id, await authHeader("auth0|a", ["agent"]), "active_search");
     // The guard skipped seeding — still just the one pre-existing task.
     expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(1);
+  });
+});
+
+describe("PATCH /api/deals/[id]/stage — same-stage no-op + skipped gate (#263)", () => {
+  async function patchStage(
+    dealId: string,
+    token: string,
+    stage: string,
+    opts: { force?: boolean } = {}
+  ) {
+    const qs = opts.force ? "?force=true" : "";
+    const req = new Request(`http://localhost/api/deals/${dealId}/stage${qs}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: token },
+      body: JSON.stringify({ stage }),
+    });
+    return advanceStageRoute(req, ctx(dealId));
+  }
+
+  it("same-stage PATCH is a no-op — no history, notification, or audit rows", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      stage: "active_search",
+      type: "buy",
+      title: "Jane Buyer",
+    });
+    // A participant so the stage fan-out WOULD write a notification if it ran.
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    // PATCH to the stage the deal is already in (double-clicked confirm / retry).
+    const res = await patchStage(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage: string };
+    expect(body.stage).toBe("active_search");
+
+    // No junk written: the from===to history row, the audit row, and the
+    // "moved forward" participant notification are all skipped.
+    expect(
+      await prisma.deal_stage_history.count({ where: { deal_id: deal.id } })
+    ).toBe(0);
+    expect(
+      await prisma.notifications.count({
+        where: { deal_id: deal.id, type: "stage_change" },
+      })
+    ).toBe(0);
+    expect(
+      await prisma.audit_log.count({
+        where: { deal_id: deal.id, event_type: "stage_change" },
+      })
+    ).toBe(0);
+  });
+
+  it("a high-priority 'skipped' task does not block a forward advance", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await createTask({
+      deal_id: deal.id,
+      priority: "high",
+      status: "skipped",
+      stage_context: "intake",
+      title: "Explicitly skipped",
+    });
+
+    const res = await patchStage(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    // skipped == closed (matches deals.ts open-count / health semantics), so
+    // the blocking gate lets the advance through.
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage: string };
+    expect(body.stage).toBe("active_search");
+    expect(
+      await prisma.deal_stage_history.count({ where: { deal_id: deal.id } })
+    ).toBe(1);
+  });
+
+  it("a high-priority 'pending' task still blocks (gate regression guard)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await createTask({
+      deal_id: deal.id,
+      priority: "high",
+      status: "pending",
+      stage_context: "intake",
+      title: "Still open",
+    });
+
+    const res = await patchStage(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as {
+      gate: boolean;
+      blocking_tasks: { title: string }[];
+    };
+    expect(body.gate).toBe(true);
+    expect(body.blocking_tasks[0].title).toBe("Still open");
+    // A blocked advance wrote nothing.
+    expect(
+      await prisma.deal_stage_history.count({ where: { deal_id: deal.id } })
+    ).toBe(0);
+  });
+
+  it("a real advance still writes one history row, seeds tasks, notifies participants", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer" });
+    const deal = await createDeal({
+      agent_id: agent.id,
+      stage: "intake",
+      type: "buy",
+      title: "Jane Buyer",
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const res = await patchStage(
+      deal.id,
+      await authHeader("auth0|a", ["agent"]),
+      "active_search"
+    );
+    expect(res.status).toBe(200);
+
+    // Exactly one history row for the real transition.
+    const history = await prisma.deal_stage_history.findMany({
+      where: { deal_id: deal.id },
+    });
+    expect(history.length).toBe(1);
+    expect(history[0].from_stage).toBe("intake");
+    expect(history[0].to_stage).toBe("active_search");
+
+    // Buy-side auto-tasks seeded.
+    expect(await prisma.tasks.count({ where: { deal_id: deal.id } })).toBe(3);
+
+    // Participant notified of the move.
+    expect(
+      await prisma.notifications.count({
+        where: { user_id: buyer.id, deal_id: deal.id, type: "stage_change" },
+      })
+    ).toBe(1);
   });
 });
 
@@ -930,6 +1313,578 @@ describe("PATCH /api/deals/[id]/flags", () => {
     const row = await prisma.deals.findUnique({ where: { id: deal.id } });
     expect(row?.pre_approved).toBe(true);
     expect(row?.baa_signed).toBe(true);
+  });
+});
+
+describe("PATCH /api/deals/[id] — edit + soft-archive (#254)", () => {
+  async function patchDeal(dealId: string, token: string, body: unknown) {
+    const req = new Request(`http://localhost/api/deals/${dealId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", authorization: token },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+    return patchDealRoute(req, ctx(dealId));
+  }
+
+  // ── Case 1 (fails today: the route has no PATCH → 405): the owning agent
+  //    corrects title + price and a fresh GET reflects the new values.
+  it("owning agent edits title + price → 200 and GET returns the new values", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "Wrong Name" });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: { price: "400000", address: "1 Old St" },
+    });
+    const token = await authHeader("auth0|a", ["agent"]);
+
+    const res = await patchDeal(deal.id, token, { title: "Correct Name", price: 525000 });
+    expect(res.status).toBe(200);
+
+    // Persisted server-side.
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.title).toBe("Correct Name");
+    expect(row?.price?.toString()).toBe("525000");
+
+    // A brand-new request (reload) sees the corrected values.
+    const getReq = new Request(`http://localhost/api/deals/${deal.id}`, {
+      headers: { authorization: token },
+    });
+    const getRes = await getDealRoute(getReq, ctx(deal.id));
+    expect(getRes.status).toBe(200);
+    const body = (await getRes.json()) as { title: string; price: string | null };
+    expect(body.title).toBe("Correct Name");
+    expect(body.price).toBe("525000.00");
+  });
+
+  it("owning agent can also correct the address and closing_date", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const token = await authHeader("auth0|a", ["agent"]);
+
+    const res = await patchDeal(deal.id, token, {
+      address: "742 Evergreen Terrace",
+      closing_date: "2026-12-01",
+    });
+    expect(res.status).toBe(200);
+
+    const getRes = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: token },
+      }),
+      ctx(deal.id)
+    );
+    const body = (await getRes.json()) as { address: string | null; closing_date: string | null };
+    expect(body.address).toBe("742 Evergreen Terrace");
+    expect(body.closing_date).toBe("2026-12-01");
+  });
+
+  // ── Case 2: archive removes the deal from the default pipeline (but it stays
+  //    readable), writes an audit row, and a non-owner cannot touch it.
+  it("archiving hides the deal from GET /api/deals by default, writes an audit row, stays readable", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "Fell Through" });
+    const token = await authHeader("auth0|a", ["agent"]);
+
+    const res = await patchDeal(deal.id, token, { status: "archived" });
+    expect(res.status).toBe(200);
+
+    // Gone from the default pipeline list…
+    const listRes = await listDeals(
+      new Request("http://localhost/api/deals", { headers: { authorization: token } })
+    );
+    const listBody = (await listRes.json()) as { id: string }[];
+    expect(listBody.find((d) => d.id === deal.id)).toBeUndefined();
+
+    // …but returned when explicitly filtered by status…
+    const filteredRes = await listDeals(
+      new Request("http://localhost/api/deals?status=archived", {
+        headers: { authorization: token },
+      })
+    );
+    const filteredBody = (await filteredRes.json()) as { id: string; status: string }[];
+    expect(filteredBody.find((d) => d.id === deal.id)?.status).toBe("archived");
+
+    // …and still readable by direct GET (no hard delete).
+    const getRes = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: token },
+      }),
+      ctx(deal.id)
+    );
+    expect(getRes.status).toBe(200);
+    expect(((await getRes.json()) as { status: string }).status).toBe("archived");
+
+    // The row itself survives (soft archive) and an audit row was written.
+    expect(await prisma.deals.count({ where: { id: deal.id } })).toBe(1);
+    const audits = await prisma.audit_log.findMany({
+      where: { deal_id: deal.id, event_type: "deal_status_change" },
+    });
+    expect(audits.length).toBe(1);
+  });
+
+  it("can also mark a deal fallen_through", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const token = await authHeader("auth0|a", ["agent"]);
+
+    const res = await patchDeal(deal.id, token, { status: "fallen_through" });
+    expect(res.status).toBe(200);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.status).toBe("fallen_through");
+  });
+
+  it("404 when a non-owner agent tries to edit — nothing written", async () => {
+    const owner = await createUser({ role: "agent" });
+    await createUser({ role: "agent", auth0_id: "auth0|intruder" });
+    const deal = await createDeal({ agent_id: owner.id, title: "Owned" });
+
+    const res = await patchDeal(deal.id, await authHeader("auth0|intruder", ["agent"]), {
+      title: "Hijacked",
+    });
+    expect(res.status).toBe(404);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.title).toBe("Owned");
+    expect(row?.status).toBe("active");
+  });
+
+  it("404 when a deal participant (buyer) tries to edit — writes are agent-only", async () => {
+    const agent = await createUser({ role: "agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer-254" });
+    const deal = await createDeal({ agent_id: agent.id, title: "Owned" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const res = await patchDeal(deal.id, await authHeader("auth0|buyer-254", ["buyer"]), {
+      title: "Hijacked",
+    });
+    expect(res.status).toBe(404);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.title).toBe("Owned");
+  });
+
+  // ── Case 3: garbage is rejected with 400 and stage stays /stage-only.
+  it("400 for a non-numeric price — nothing written", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "Keep" });
+    const res = await patchDeal(deal.id, await authHeader("auth0|a", ["agent"]), {
+      price: "banana",
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("price");
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.title).toBe("Keep");
+  });
+
+  it("400 for an unknown status value", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const res = await patchDeal(deal.id, await authHeader("auth0|a", ["agent"]), {
+      status: "exploded",
+    });
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.status).toBe("active");
+  });
+
+  it("400 for an empty body (no editable fields)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const res = await patchDeal(deal.id, await authHeader("auth0|a", ["agent"]), {});
+    expect(res.status).toBe(400);
+  });
+
+  it("400 when a blank title is sent (title cannot be cleared)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "Keep" });
+    const res = await patchDeal(deal.id, await authHeader("auth0|a", ["agent"]), {
+      title: "   ",
+    });
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.title).toBe("Keep");
+  });
+
+  it("400 (stage stays /stage-only) when stage is in the PATCH body — stage unchanged", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    const res = await patchDeal(deal.id, await authHeader("auth0|a", ["agent"]), {
+      stage: "closing",
+    });
+    expect(res.status).toBe(400);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.stage).toBe("intake");
+    // No stage-history row was written (the /stage route owns that invariant).
+    expect(
+      await prisma.deal_stage_history.count({ where: { deal_id: deal.id } })
+    ).toBe(0);
+  });
+
+  it("400 (not 500) when the body is JSON null", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const res = await patchDeal(deal.id, await authHeader("auth0|a", ["agent"]), "null");
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("stage_entered_at anchor survives unrelated writes (#257)", () => {
+  async function advance(dealId: string, token: string, stage: string) {
+    return advanceStageRoute(
+      new Request(`http://localhost/api/deals/${dealId}/stage`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", authorization: token },
+        body: JSON.stringify({ stage }),
+      }),
+      ctx(dealId)
+    );
+  }
+  async function editNotes(dealId: string, token: string, notes: string) {
+    return notesRoute(
+      new Request(`http://localhost/api/deals/${dealId}/notes`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", authorization: token },
+        body: JSON.stringify({ notes }),
+      }),
+      ctx(dealId)
+    );
+  }
+  async function getDeal(dealId: string, token: string) {
+    return getDealRoute(
+      new Request(`http://localhost/api/deals/${dealId}`, {
+        headers: { authorization: token },
+      }),
+      ctx(dealId)
+    );
+  }
+
+  // Case 1: advance the stage, then touch the deal with an UNRELATED write
+  // (a note edit, which bumps deals.updated_at). stage_entered_at must reflect
+  // the stage change, not the later notes edit. FAILS pre-#257: the field did
+  // not exist on the response.
+  it("reports the stage-change time, not a later notes edit", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const token = await authHeader("auth0|a", ["agent"]);
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+
+    expect((await advance(deal.id, token, "active_search")).status).toBe(200);
+
+    // Pin the stage-entry moment to a fixed point in the past — deterministic,
+    // and unmistakably distinct from the notes edit that follows.
+    const enteredAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+    await prisma.deal_stage_history.updateMany({
+      where: { deal_id: deal.id },
+      data: { changed_at: enteredAt },
+    });
+
+    // Unrelated write: bumps deals.updated_at to ~now (the old bug's trigger).
+    expect((await editNotes(deal.id, token, "touched later")).status).toBe(200);
+
+    const res = await getDeal(deal.id, token);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage_entered_at?: string; updated_at: string };
+
+    expect(body.stage_entered_at).toBeDefined();
+    const enteredMs = new Date(body.stage_entered_at as string).getTime();
+    const updatedMs = new Date(body.updated_at).getTime();
+    // Equals the stage-change time (within a second of the pinned value)…
+    expect(Math.abs(enteredMs - enteredAt.getTime())).toBeLessThan(1000);
+    // …and did NOT follow the notes edit: updated_at jumped to ~now (~5 days later).
+    expect(updatedMs - enteredMs).toBeGreaterThan(4 * 24 * 60 * 60 * 1000);
+  });
+
+  // Case 2: a never-advanced intake deal has no stage history, so the anchor
+  // COALESCEs to created_at.
+  it("equals created_at for a never-advanced intake deal", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const token = await authHeader("auth0|a", ["agent"]);
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+
+    const res = await getDeal(deal.id, token);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { stage_entered_at?: string; created_at: string };
+    expect(body.stage_entered_at).toBeDefined();
+    expect(body.stage_entered_at).toBe(body.created_at);
+  });
+
+  // The deals LIST hot-path (listDealsForUser) exposes the same anchor column.
+  it("is present on every row of the deals list, defaulting to created_at", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const token = await authHeader("auth0|a", ["agent"]);
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", { headers: { authorization: token } })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      id: string;
+      stage_entered_at?: string;
+      created_at: string;
+    }[];
+    const row = body.find((d) => d.id === deal.id);
+    expect(row?.stage_entered_at).toBeDefined();
+    expect(row?.stage_entered_at).toBe(row?.created_at);
+  });
+
+  // The client portal (GET /api/me/deals) exposes it too.
+  it("is present on the client portal payload (/api/me/deals)", async () => {
+    const agent = await createUser({ role: "agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer-257" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const res = await myDealsRoute(
+      new Request("http://localhost/api/me/deals", {
+        headers: { authorization: await authHeader("auth0|buyer-257", ["buyer"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; stage_entered_at?: string }[];
+    expect(body.length).toBe(1);
+    expect(body[0]?.stage_entered_at).toBeDefined();
+  });
+});
+
+describe("deal health honors System Config stage_thresholds (#305)", () => {
+  // system_config is NOT cleared by truncateAll (tests/helpers/db.ts preserves
+  // it), and the suite shares one DB with fileParallelism:false. Isolate every
+  // case explicitly: start AND end with an empty config row so neither these
+  // tests nor any file that runs after this one see a stray override.
+  beforeEach(async () => {
+    await prisma.system_config.deleteMany({});
+  });
+  afterEach(async () => {
+    await prisma.system_config.deleteMany({});
+  });
+
+  // Backdate a deal so the health CASE sees it as `daysAgo` days into its
+  // current stage. Factory deals have no deal_stage_history rows, so the
+  // expression falls back to created_at — which is what we set here. Ages are
+  // always chosen 2+ days clear of a threshold so FLOOR(days) never straddles it.
+  async function ageDeal(dealId: string, daysAgo: number) {
+    const when = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+    await prisma.deals.update({
+      where: { id: dealId },
+      data: { created_at: when },
+    });
+  }
+
+  // The shipped defaults — must equal the pre-#305 hard-coded CASE values.
+  const DEFAULT_THRESHOLDS = {
+    intake: 5,
+    active_search: 30,
+    offer_active: 10,
+    under_contract: 35,
+    pre_close: 10,
+    closing: 5,
+    post_close: 21,
+  };
+
+  // Save a full SystemConfig via the real admin PUT endpoint (mirrors the UI).
+  async function saveConfig(stageThresholds: Record<string, number>) {
+    await createUser({ role: "admin", auth0_id: "auth0|admin-cfg-305" });
+    const req = new Request("http://localhost/api/admin/config", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|admin-cfg-305", ["admin"]),
+      },
+      body: JSON.stringify({
+        config: {
+          stage_thresholds: stageThresholds,
+          closing_fee_amount: 500,
+          fast_pass_base_price: 1500,
+          smooth_exit_pct: 1.0,
+        },
+      }),
+    });
+    const res = await putConfig(req);
+    expect(res.status).toBe(200);
+  }
+
+  // ── Case 1: a saved threshold actually changes health. FAILS on pre-#305
+  //    code, which ignores system_config and hard-codes intake=5.
+  it("lowering the intake threshold flips a 3-day-old intake deal to yellow", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake", title: "Wired" });
+    await ageDeal(deal.id, 3);
+    // One incomplete task (no due date ⇒ not overdue ⇒ not red) so the yellow
+    // branch is reachable.
+    await createTask({ deal_id: deal.id, status: "pending" });
+
+    // Baseline with NO saved config: 3 days < default intake threshold (5) ⇒ green.
+    const before = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(before.status).toBe(200);
+    expect(((await before.json()) as { health: string }).health).toBe("green");
+
+    // Admin lowers the intake threshold to 1 day via System Config.
+    await saveConfig({ ...DEFAULT_THRESHOLDS, intake: 1 });
+
+    // Same 3-day-old deal is now past its (1-day) intake threshold ⇒ yellow.
+    const after = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(after.status).toBe(200);
+    expect(((await after.json()) as { health: string }).health).toBe("yellow");
+  });
+
+  it("the lowered threshold also changes health in the deals LIST (hot path)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake", title: "ListWired" });
+    await ageDeal(deal.id, 3);
+    await createTask({ deal_id: deal.id, status: "pending" });
+    await saveConfig({ ...DEFAULT_THRESHOLDS, intake: 1 });
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; health: string }[];
+    expect(body.find((d) => d.title === "ListWired")?.health).toBe("yellow");
+  });
+
+  // ── Case 2 (CRITICAL regression guard): with NO config row, health is
+  //    byte-for-byte the shipped defaults across EVERY stage, both sides of
+  //    each threshold. This must pass before AND after the change.
+  it("with no saved config, every stage uses the shipped default thresholds", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+
+    const cases: { title: string; stage: DealStage; age: number; want: string }[] = [
+      { title: "intake-young", stage: "intake", age: 3, want: "green" }, // 3 < 5
+      { title: "intake-old", stage: "intake", age: 10, want: "yellow" }, // 10 > 5
+      { title: "search-young", stage: "active_search", age: 20, want: "green" }, // 20 < 30
+      { title: "search-old", stage: "active_search", age: 40, want: "yellow" }, // 40 > 30
+      { title: "offer-young", stage: "offer_active", age: 5, want: "green" }, // 5 < 10
+      { title: "offer-old", stage: "offer_active", age: 15, want: "yellow" }, // 15 > 10
+      { title: "uc-young", stage: "under_contract", age: 20, want: "green" }, // 20 < 35
+      { title: "uc-old", stage: "under_contract", age: 45, want: "yellow" }, // 45 > 35
+      { title: "pre-young", stage: "pre_close", age: 5, want: "green" }, // 5 < 10
+      { title: "pre-old", stage: "pre_close", age: 15, want: "yellow" }, // 15 > 10
+      { title: "closing-young", stage: "closing", age: 3, want: "green" }, // 3 < 5
+      { title: "closing-old", stage: "closing", age: 10, want: "yellow" }, // 10 > 5
+      { title: "post-young", stage: "post_close", age: 10, want: "green" }, // 10 < 21
+      { title: "post-old", stage: "post_close", age: 25, want: "yellow" }, // 25 > 21
+    ];
+
+    for (const c of cases) {
+      const d = await createDeal({ agent_id: agent.id, stage: c.stage, title: c.title });
+      await ageDeal(d.id, c.age);
+      await createTask({ deal_id: d.id, status: "pending" });
+    }
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; health: string }[];
+    const byTitle = Object.fromEntries(body.map((d) => [d.title, d.health]));
+    for (const c of cases) {
+      expect(byTitle[c.title], `${c.title} (${c.stage} @ ${c.age}d)`).toBe(c.want);
+    }
+  });
+
+  it("with no config, a past-threshold deal with NO incomplete tasks stays green", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake", title: "OldNoTasks" });
+    await ageDeal(deal.id, 30); // far past intake's 5-day default…
+    // …but no incomplete tasks, so the yellow branch cannot fire.
+
+    const res = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(((await res.json()) as { health: string }).health).toBe("green");
+  });
+
+  it("with no config, an overdue task is red regardless of stage age (red precedence)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake", title: "Overdue" });
+    await ageDeal(deal.id, 1); // 1 day: well UNDER intake's 5-day default
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await createTask({ deal_id: deal.id, status: "pending", due_date: yesterday });
+
+    const res = await getDealRoute(
+      new Request(`http://localhost/api/deals/${deal.id}`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(((await res.json()) as { health: string }).health).toBe("red");
+  });
+
+  // ── Robustness: a partial / absent stage_thresholds override must fall back
+  //    to the shipped default PER STAGE, never leave a stage unthresholded.
+  it("a partial stage_thresholds override falls back to defaults for unset stages", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Only intake overridden (to 1). active_search must still use its 30 default.
+    await saveConfig({ intake: 1 });
+
+    const intakeDeal = await createDeal({ agent_id: agent.id, stage: "intake", title: "PartIntake" });
+    await ageDeal(intakeDeal.id, 3);
+    await createTask({ deal_id: intakeDeal.id, status: "pending" });
+
+    const searchDeal = await createDeal({ agent_id: agent.id, stage: "active_search", title: "PartSearch" });
+    await ageDeal(searchDeal.id, 20); // 20 < 30 default ⇒ still green
+    await createTask({ deal_id: searchDeal.id, status: "pending" });
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      })
+    );
+    const body = (await res.json()) as { title: string; health: string }[];
+    const byTitle = Object.fromEntries(body.map((d) => [d.title, d.health]));
+    expect(byTitle["PartIntake"]).toBe("yellow"); // 3 > 1 (override applied)
+    expect(byTitle["PartSearch"]).toBe("green"); // 20 < 30 (default fallback)
+  });
+
+  it("a saved config with no stage_thresholds key at all uses every default", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Admin saved only a fee setting; stage_thresholds is entirely absent.
+    await createUser({ role: "admin", auth0_id: "auth0|admin-nofld" });
+    const putReq = new Request("http://localhost/api/admin/config", {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|admin-nofld", ["admin"]),
+      },
+      body: JSON.stringify({ config: { closing_fee_amount: 500 } }),
+    });
+    expect((await putConfig(putReq)).status).toBe(200);
+
+    const young = await createDeal({ agent_id: agent.id, stage: "intake", title: "NoFldYoung" });
+    await ageDeal(young.id, 3);
+    await createTask({ deal_id: young.id, status: "pending" });
+    const old = await createDeal({ agent_id: agent.id, stage: "intake", title: "NoFldOld" });
+    await ageDeal(old.id, 10);
+    await createTask({ deal_id: old.id, status: "pending" });
+
+    const res = await listDeals(
+      new Request("http://localhost/api/deals", {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      })
+    );
+    const body = (await res.json()) as { title: string; health: string }[];
+    const byTitle = Object.fromEntries(body.map((d) => [d.title, d.health]));
+    expect(byTitle["NoFldYoung"]).toBe("green"); // 3 < 5 default
+    expect(byTitle["NoFldOld"]).toBe("yellow"); // 10 > 5 default
   });
 });
 

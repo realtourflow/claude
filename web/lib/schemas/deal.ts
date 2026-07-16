@@ -12,7 +12,7 @@
  */
 import { z } from "zod";
 import { STAGE_ORDER } from "@/lib/stages";
-import { decimalString } from "./common";
+import { decimalString, dateOnlyString } from "./common";
 
 // ---------------------------------------------------------------------------
 // Request bodies
@@ -28,6 +28,10 @@ export const createDealBodySchema = z.object({
   // number, numeric string (always worked — SQL casts ::decimal), or null.
   price: z.union([z.number(), decimalString]).nullish(),
   arive_linked: z.boolean().nullish(),
+  // Agent-entered "Est. Closing Date" (#253). YYYY-MM-DD or null; garbage 400s
+  // here instead of being silently dropped. Fallback closing anchor for
+  // non-ARIVE deals (ARIVE key dates still win when present).
+  closing_date: dateOnlyString.nullish(),
 });
 export type CreateDealBody = z.output<typeof createDealBodySchema>;
 
@@ -43,6 +47,35 @@ export const buyerStatusPatchBodySchema = z.object({
   buyer_status: z.string().nullish(),
 });
 export type BuyerStatusPatchBody = z.output<typeof buyerStatusPatchBodySchema>;
+
+/**
+ * The deal lifecycle status (#254). `active` deals live in the pipeline;
+ * `archived` / `fallen_through` are soft-ended and excluded from the default
+ * list. Enforced at the DB by `deals_status_check` (migration 000056).
+ */
+export const DEAL_STATUSES = ["active", "archived", "fallen_through"] as const;
+export const dealStatusSchema = z.enum(DEAL_STATUSES);
+export type DealStatus = z.output<typeof dealStatusSchema>;
+
+/**
+ * PATCH /api/deals/[id] (#254) — correct a deal's core identity or soft-archive
+ * it. `.strict()` rejects unknown keys, which is how `stage` (owned solely by
+ * the /stage route + its history invariant) 400s here instead of silently
+ * doing nothing. All fields optional; an empty patch (no editable field) 400s
+ * in the handler. title cannot be null (NOT NULL); address/price/closing_date
+ * accept null to CLEAR. Garbage types (price "banana", bad status, bad date)
+ * 400 at the boundary instead of 500ing inside Postgres.
+ */
+export const dealPatchBodySchema = z
+  .object({
+    title: z.string().optional(),
+    address: z.string().nullish(),
+    price: z.union([z.number(), decimalString]).nullish(),
+    closing_date: dateOnlyString.nullish(),
+    status: dealStatusSchema.optional(),
+  })
+  .strict();
+export type DealPatchBody = z.output<typeof dealPatchBodySchema>;
 
 // ---------------------------------------------------------------------------
 // Responses (wire shape the hooks consume)
@@ -87,11 +120,24 @@ export const apiDealSchema = z.object({
   type: z.enum(["buy", "sell"]),
   stage: z.string(),
   health: z.enum(["green", "yellow", "red"]),
+  /**
+   * Lifecycle status (#254): active | archived | fallen_through. Optional —
+   * payloads that don't SELECT it (e.g. the create RETURNING, /api/me/deals)
+   * omit it and the adapter defaults to 'active'.
+   */
+  status: dealStatusSchema.optional(),
   title: z.string(),
   address: z.string().nullable(),
   /** Postgres DECIMAL serialized as text by the API (`price::text`). */
   price: z.string().nullable(),
   arive_linked: z.boolean(),
+  /**
+   * Agent-entered manual closing date (`deals.closing_date`), serialized as
+   * `YYYY-MM-DD` text by the API (#253). Fallback timeline anchor for non-ARIVE
+   * deals; ARIVE key dates take precedence in `apiDealToFrontend`. Optional:
+   * payloads that don't SELECT it (e.g. /api/me/deals) omit it.
+   */
+  closing_date: z.string().nullish(),
   arive_loan_id: z.string().nullish(),
   arive_milestones: z.array(ariveTrackerSchema).nullish(),
   arive_key_dates: ariveKeyDatesSchema.nullish(),
@@ -111,6 +157,14 @@ export const apiDealSchema = z.object({
   commission_pct: z.string().nullish(),
   created_at: z.string(),
   updated_at: z.string(),
+  /**
+   * ISO timestamp the deal entered its CURRENT stage — the server "days in
+   * stage" anchor (latest `deal_stage_history.changed_at`, else `created_at`).
+   * Unlike `updated_at` it is NOT bumped by unrelated writes (#257). Optional:
+   * responses that don't join stage history (e.g. the create response) omit
+   * it, and the adapter falls back to `created_at`.
+   */
+  stage_entered_at: z.string().optional(),
   agent_name: z.string().optional(),
   agent_email: z.string().optional(),
   agent_phone: z.string().nullish(),

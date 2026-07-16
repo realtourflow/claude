@@ -20,7 +20,7 @@ const ROLE_TO_GROUP: Record<string, GroupId> = {
   seller: 'seller',
   admin: 'admin',
   tc: 'tc',
-  lending_partner: 'agent',
+  lending_partner: 'lending_partner',
 };
 
 const ROLE_DISPLAY: Record<string, string> = {

@@ -4,6 +4,7 @@ import {
   verifyUpload,
   createClientUploadGrant,
   ALLOWED_KEY_PREFIXES,
+  validateUploadType,
 } from "@/lib/blob-storage";
 
 // #189 — the direct-to-Blob upload token route. @vercel/blob/client's
@@ -34,6 +35,13 @@ export async function POST(req: Request): Promise<Response> {
   // Defense-in-depth: only known key namespaces, and the capability must verify.
   if (!ALLOWED_KEY_PREFIXES.some((p) => key.startsWith(p))) return error("invalid key", 400);
   if (!verifyUpload(key, exp, sig)) return error("invalid or expired upload token", 403);
+
+  // Constrain the minted grant to allowed file types (#275): the grant is pinned
+  // to this exact key, so gating on its extension keeps a disallowed type (an
+  // .exe / .html / .svg dressed up as a doc) from ever being uploaded. The body's
+  // pathname is separately required to equal this key below.
+  const typeCheck = validateUploadType({ key });
+  if (!typeCheck.ok) return error(typeCheck.reason, 415);
 
   let body: GrantBody;
   try {

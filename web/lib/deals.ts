@@ -1,19 +1,58 @@
 import { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "./db";
 import { hasRole } from "./roles";
+import {
+  DEFAULT_STAGE_THRESHOLDS,
+  getStageThresholds,
+  type StageThresholds,
+} from "./system-config";
 
 /**
- * Health CASE expression. Ported verbatim from the legacy Go backend.
+ * The instant a deal entered its CURRENT stage: the latest
+ * `deal_stage_history.changed_at`, or `deals.created_at` if it has never
+ * advanced. This — NOT `deals.updated_at`, which ANY write bumps — is the true
+ * "days in stage" anchor (#257). Correlated on the outer `deals` row, so any
+ * SELECT with `deals` in its FROM can interpolate it.
+ *
+ * Both `healthExpr` (its yellow-branch age check) and the `stage_entered_at`
+ * response column build on this ONE fragment so the client's number can never
+ * drift from the server's health anchor. Parameter-free (pure column refs), so
+ * nesting it inside other `Prisma.sql` fragments never disturbs their bound
+ * parameters.
+ */
+export const stageEnteredAtExpr: Prisma.Sql = Prisma.sql`COALESCE(
+  (SELECT changed_at FROM deal_stage_history dsh
+   WHERE dsh.deal_id = deals.id ORDER BY dsh.changed_at DESC LIMIT 1),
+  deals.created_at
+)`;
+
+/**
+ * Health CASE expression. Ported verbatim from the legacy Go backend, then
+ * wired to the admin-editable per-stage thresholds (#305).
  *
  * Red    = any incomplete task with a past due_date.
  * Yellow = deal has been in current stage longer than the stage threshold AND has
  *          incomplete tasks.
  * Green  = otherwise.
  *
+ * The per-stage day thresholds come from System Config
+ * (system_config.stage_thresholds), falling back to DEFAULT_STAGE_THRESHOLDS.
+ * They are bound as query PARAMETERS (never string-interpolated), so this stays
+ * injection-safe. Read the thresholds ONCE per request via `getStageThresholds()`
+ * and pass them in — the expression runs inside a correlated subquery per deal
+ * row, so it must not re-read config itself.
+ *
  * Use as a column expression inside SELECTs that include the `deals` table:
- *   SELECT ${healthExpr} AS health, ... FROM deals ...
+ *   const thresholds = await getStageThresholds();
+ *   SELECT ${healthExpr(thresholds)} AS health, ... FROM deals ...
+ *
+ * Called with no argument it uses DEFAULT_STAGE_THRESHOLDS — i.e. exactly the
+ * pre-#305 hard-coded behavior.
  */
-export const healthExpr = Prisma.sql`
+export function healthExpr(
+  thresholds: StageThresholds = DEFAULT_STAGE_THRESHOLDS
+): Prisma.Sql {
+  return Prisma.sql`
 CASE
   WHEN EXISTS (
     SELECT 1 FROM tasks t
@@ -22,19 +61,15 @@ CASE
       AND t.due_date IS NOT NULL
       AND t.due_date < CURRENT_DATE
   ) THEN 'red'
-  WHEN FLOOR(EXTRACT(EPOCH FROM (NOW() - COALESCE(
-    (SELECT changed_at FROM deal_stage_history dsh
-     WHERE dsh.deal_id = deals.id ORDER BY dsh.changed_at DESC LIMIT 1),
-    deals.created_at
-  ))) / 86400)::INT >
+  WHEN FLOOR(EXTRACT(EPOCH FROM (NOW() - ${stageEnteredAtExpr})) / 86400)::INT >
     CASE deals.stage
-      WHEN 'intake'          THEN 5
-      WHEN 'active_search'   THEN 30
-      WHEN 'offer_active'    THEN 10
-      WHEN 'under_contract'  THEN 35
-      WHEN 'pre_close'       THEN 10
-      WHEN 'closing'         THEN 5
-      WHEN 'post_close'      THEN 21
+      WHEN 'intake'          THEN ${thresholds.intake}::int
+      WHEN 'active_search'   THEN ${thresholds.active_search}::int
+      WHEN 'offer_active'    THEN ${thresholds.offer_active}::int
+      WHEN 'under_contract'  THEN ${thresholds.under_contract}::int
+      WHEN 'pre_close'       THEN ${thresholds.pre_close}::int
+      WHEN 'closing'         THEN ${thresholds.closing}::int
+      WHEN 'post_close'      THEN ${thresholds.post_close}::int
       ELSE 30
     END
   AND EXISTS (
@@ -45,6 +80,7 @@ CASE
   ELSE 'green'
 END
 `;
+}
 
 export type DealRow = {
   id: string;
@@ -52,6 +88,8 @@ export type DealRow = {
   type: string;
   stage: string;
   health: string;
+  /** Lifecycle status (#254): active | archived | fallen_through. */
+  status: string;
   title: string;
   address: string | null;
   price: string | null;
@@ -69,9 +107,20 @@ export type DealRow = {
   disclosures_complete: boolean;
   /** Agent-set "Buyer's Progress" step shown on the seller portal (#184). */
   buyer_status: string | null;
+  /**
+   * Agent-entered manual closing date (`deals.closing_date`), serialized as
+   * `YYYY-MM-DD` text (`closing_date::text`). Fallback closing anchor for
+   * non-ARIVE deals; ARIVE key dates still win in the adapter (#253).
+   */
+  closing_date: string | null;
   commission_pct: string | null;
   created_at: Date;
   updated_at: Date;
+  /**
+   * When the deal entered its current stage (latest stage-history change, else
+   * created_at) — the stable "days in stage" anchor. See `stageEnteredAtExpr` (#257).
+   */
+  stage_entered_at: Date;
 };
 
 export type DealWithStats = DealRow & {
@@ -86,28 +135,51 @@ export type DealWithStats = DealRow & {
  * List deals visible to the given user. Agents see their own deals; TCs see
  * only the deals of agents who have linked them (users.tc_user_id = tc.id) —
  * never platform-wide (#172); admins see all.
+ *
+ * By default only `active` deals are returned — archived / fallen_through deals
+ * (#254) leave the pipeline, dashboards, and TC view. Pass `statusFilter` to
+ * override: a specific status ('archived' | 'fallen_through' | 'active') shows
+ * only that status; 'all' shows every status.
  */
 export async function listDealsForUser(
   userId: string,
-  opts: { isAdmin: boolean; isTC: boolean }
+  opts: { isAdmin: boolean; isTC: boolean; statusFilter?: string }
 ): Promise<DealWithStats[]> {
-  const filter = opts.isAdmin
-    ? Prisma.sql``
-    : opts.isTC
-      ? // Linked agents' deals, plus the caller's own (covers dual-role users).
-        Prisma.sql`WHERE (deals.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid) OR deals.agent_id = ${userId}::uuid)`
-      : Prisma.sql`WHERE deals.agent_id = ${userId}::uuid`;
+  // Read the admin-editable stage thresholds ONCE per list call — never per row
+  // (the health CASE runs as a correlated subquery for every deal).
+  const thresholds = await getStageThresholds();
+
+  // Visibility scope (agent owns / TC linked / admin sees all) AND lifecycle
+  // status, combined into one WHERE so archived deals never leak into a list
+  // scoped for someone else.
+  const conds: Prisma.Sql[] = [];
+  if (!opts.isAdmin) {
+    conds.push(
+      opts.isTC
+        ? // Linked agents' deals, plus the caller's own (covers dual-role users).
+          Prisma.sql`(deals.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid) OR deals.agent_id = ${userId}::uuid)`
+        : Prisma.sql`deals.agent_id = ${userId}::uuid`
+    );
+  }
+  if (opts.statusFilter !== "all") {
+    conds.push(Prisma.sql`deals.status = ${opts.statusFilter ?? "active"}`);
+  }
+  const filter = conds.length
+    ? Prisma.sql`WHERE ${Prisma.join(conds, " AND ")}`
+    : Prisma.sql``;
 
   return prisma.$queryRaw<DealWithStats[]>`
     SELECT deals.id, deals.agent_id, deals.type::text AS type, deals.stage::text AS stage,
-           ${healthExpr} AS health,
+           ${healthExpr(thresholds)} AS health, deals.status,
            deals.title, deals.address, deals.price::text AS price, deals.arive_linked,
            deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
            deals.fee_status, deals.fee_amount_cents, deals.fee_paid_at,
            deals.fast_pass, deals.smooth_exit,
            deals.pre_approved, deals.baa_signed, deals.disclosures_complete, deals.buyer_status,
+           deals.closing_date::text AS closing_date,
            deals.commission_pct::text AS commission_pct,
            deals.created_at, deals.updated_at,
+           ${stageEnteredAtExpr} AS stage_entered_at,
            u.name AS agent_name, u.email AS agent_email, u.phone AS agent_phone,
            (SELECT COUNT(*) FROM tasks t
             WHERE t.deal_id = deals.id AND t.status NOT IN ('completed','skipped'))::int AS open_task_count,
@@ -128,15 +200,18 @@ export async function getDealForAgent(
   dealId: string,
   agentId: string
 ): Promise<DealRow | null> {
+  const thresholds = await getStageThresholds();
   const rows = await prisma.$queryRaw<DealRow[]>`
     SELECT id, agent_id, type::text AS type, stage::text AS stage,
-           ${healthExpr} AS health,
+           ${healthExpr(thresholds)} AS health, status,
            title, address, price::text AS price, arive_linked,
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,
            fast_pass, smooth_exit, pre_approved, baa_signed, disclosures_complete,
-           buyer_status, commission_pct::text AS commission_pct,
-           created_at, updated_at
+           buyer_status, closing_date::text AS closing_date,
+           commission_pct::text AS commission_pct,
+           created_at, updated_at,
+           ${stageEnteredAtExpr} AS stage_entered_at
     FROM deals
     WHERE id = ${dealId}::uuid AND agent_id = ${agentId}::uuid
   `;
@@ -149,15 +224,18 @@ export async function getDealForAgent(
  * Same SELECT as `getDealForAgent` so both paths return an identical shape.
  */
 export async function getDealById(dealId: string): Promise<DealRow | null> {
+  const thresholds = await getStageThresholds();
   const rows = await prisma.$queryRaw<DealRow[]>`
     SELECT id, agent_id, type::text AS type, stage::text AS stage,
-           ${healthExpr} AS health,
+           ${healthExpr(thresholds)} AS health, status,
            title, address, price::text AS price, arive_linked,
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,
            fast_pass, smooth_exit, pre_approved, baa_signed, disclosures_complete,
-           buyer_status, commission_pct::text AS commission_pct,
-           created_at, updated_at
+           buyer_status, closing_date::text AS closing_date,
+           commission_pct::text AS commission_pct,
+           created_at, updated_at,
+           ${stageEnteredAtExpr} AS stage_entered_at
     FROM deals
     WHERE id = ${dealId}::uuid
   `;

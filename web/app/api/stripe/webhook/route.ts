@@ -1,7 +1,7 @@
 import type Stripe from "stripe";
 import { prisma } from "@/lib/db";
 import { error } from "@/lib/http";
-import { constructEvent } from "@/lib/stripe";
+import { constructEvent, retrievePaymentIntentMetadata } from "@/lib/stripe";
 
 export async function POST(req: Request): Promise<Response> {
   const sig = req.headers.get("stripe-signature") ?? "";
@@ -47,6 +47,48 @@ export async function POST(req: Request): Promise<Response> {
       if (dealId) {
         await markFeePaid(dealId, pi.id);
       }
+    } else if (
+      event.type === "charge.refunded" ||
+      event.type === "charge.dispute.created"
+    ) {
+      // #364/#365/#366: reverse a refunded/disputed charge. The event object is
+      // a Charge or Dispute, which carries only a payment_intent id — not the
+      // checkout metadata — so we retrieve the PaymentIntent to read deal_id/type
+      // (stamped at checkout via payment_intent_data). The type routes to the fee
+      // (#364), the Fast Pass enrollment (#365), or the Smooth Exit upsell (#366).
+      const obj = event.data.object as Stripe.Charge | Stripe.Dispute;
+      const piRef = (
+        obj as { payment_intent?: string | { id: string } | null }
+      ).payment_intent;
+      const piId = typeof piRef === "string" ? piRef : (piRef?.id ?? null);
+      // A partial refund (amount_refunded < amount) is a courtesy credit, not a
+      // reversal — leave the fee collected. Full refunds and disputes reverse it.
+      const charge = event.data.object as Stripe.Charge;
+      const isPartialRefund =
+        event.type === "charge.refunded" &&
+        (charge.amount_refunded ?? 0) < (charge.amount ?? 0);
+      if (piId && !isPartialRefund) {
+        const meta = await retrievePaymentIntentMetadata(piId);
+        if (meta.deal_id) {
+          // Route by the type stamped on the PaymentIntent at checkout. Each
+          // branch reverses only its own surface (#364 fee / #365 fast_pass /
+          // #366 smooth_exit); the others are left untouched.
+          if (meta.type === "closing_fee") {
+            await markFeeRefunded(meta.deal_id);
+          } else if (meta.type === "fast_pass") {
+            await markFastPassRefunded(meta.deal_id);
+          } else if (meta.type === "smooth_exit_upsell") {
+            await markSmoothExitUpsellRefunded(meta.deal_id);
+          }
+        }
+      }
+    } else if (event.type === "payment_intent.payment_failed") {
+      // #364: a failed charge on a still-pending fee frees the agent to retry.
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const dealId = pi.metadata?.deal_id;
+      if (dealId && pi.metadata?.type === "closing_fee") {
+        await revertPendingFee(dealId);
+      }
     }
   } catch (err) {
     console.error("stripe webhook handler error", err);
@@ -71,6 +113,24 @@ async function markFeePaid(dealId: string, sessionId: string): Promise<void> {
       fee_checkout_session_id: sessionId,
       fee_paid_at: new Date(),
     },
+  });
+}
+
+// #364: a refunded/disputed fee stops counting as collected revenue. Guarded on
+// fee_status='paid' so it's idempotent and can't resurrect a waived/unpaid deal.
+async function markFeeRefunded(dealId: string): Promise<void> {
+  await prisma.deals.updateMany({
+    where: { id: dealId, fee_status: "paid" },
+    data: { fee_status: "refunded" },
+  });
+}
+
+// #364: a failed payment on a still-pending fee reverts it to unpaid so the
+// agent can retry. Never touches a paid/refunded/waived fee.
+async function revertPendingFee(dealId: string): Promise<void> {
+  await prisma.deals.updateMany({
+    where: { id: dealId, fee_status: "pending" },
+    data: { fee_status: "unpaid" },
   });
 }
 
@@ -114,5 +174,43 @@ async function markFastPassPaid(
       '{paid_at}', to_jsonb(NOW()::text)
     )
     WHERE id = ${dealId}::uuid
+  `;
+}
+
+// #365: a refunded/disputed Fast Pass charge stops counting as paid. Mirrors
+// markFeeRefunded's guard: only acts on a currently-paid enrollment
+// (idempotent, and won't flip an unpaid/never-enrolled row). MERGES keys with
+// jsonb_set — flips paid=false, sets refunded=true + refunded_at, and preserves
+// every sibling field (status/selected_upsells/total_cents/…).
+async function markFastPassRefunded(dealId: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE deals
+    SET fast_pass = jsonb_set(
+      jsonb_set(
+        jsonb_set(COALESCE(fast_pass, '{}'::jsonb), '{refunded}', 'true'),
+        '{paid}', 'false'
+      ),
+      '{refunded_at}', to_jsonb(NOW()::text)
+    )
+    WHERE id = ${dealId}::uuid AND (fast_pass->>'paid')::boolean IS TRUE
+  `;
+}
+
+// #366: a refunded/disputed Smooth Exit upsell charge stops counting as paid.
+// Same shape as markFastPassRefunded, guarded on upsells_paid. MERGES keys with
+// jsonb_set (#260 clobber guard) — flips upsells_paid=false, sets
+// upsells_refunded=true + upsells_refunded_at, preserving siblings
+// (status/selected_upsells/upsell_total_cents/…).
+async function markSmoothExitUpsellRefunded(dealId: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE deals
+    SET smooth_exit = jsonb_set(
+      jsonb_set(
+        jsonb_set(COALESCE(smooth_exit, '{}'::jsonb), '{upsells_refunded}', 'true'),
+        '{upsells_paid}', 'false'
+      ),
+      '{upsells_refunded_at}', to_jsonb(NOW()::text)
+    )
+    WHERE id = ${dealId}::uuid AND (smooth_exit->>'upsells_paid')::boolean IS TRUE
   `;
 }

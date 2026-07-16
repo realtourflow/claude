@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { extractClosingDate } from "@/lib/arive-dates";
+import { resolveClosingDate } from "@/lib/arive-dates";
 import { AriveTracker, AriveKeyDates, Deal, DealStage, LoanMilestones, FastPassEnrollment, SmoothExitEnrollment } from "@/lib/types";
 import {
   apiDealSchema,
@@ -107,9 +107,20 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     );
   }
 
-  // Same key selection as the calendar push (lib/jobs.ts) and the iCal feed —
-  // see lib/arive-dates.ts (#196).
-  const closingDate = extractClosingDate(d.arive_key_dates) ?? undefined;
+  // ARIVE key dates win when present (same precedence as the calendar push in
+  // lib/jobs.ts and the iCal feed — see lib/arive-dates.ts (#196/#300)); the
+  // agent-entered manual closing_date is the fallback anchor for non-ARIVE
+  // deals — every seller deal and outside-lender buyer (#253).
+  const closingDate =
+    resolveClosingDate(d.arive_key_dates, d.closing_date) ?? undefined;
+
+  // Derive a live "days to close" counter from the closing date so the buyer /
+  // seller portal countdown blocks show real data. Guard unparseable dates so
+  // the counter is `undefined` (block hidden) rather than `NaN`.
+  const closingMs = closingDate ? new Date(closingDate).getTime() : NaN;
+  const daysToClose = Number.isFinite(closingMs)
+    ? Math.max(0, Math.ceil((closingMs - Date.now()) / 86_400_000))
+    : undefined;
 
   return {
     id: d.id,
@@ -130,13 +141,24 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     timeline: {
       createdAt: d.created_at,
       closingDate: closingDate ?? undefined,
+      daysToClose,
+      // Anchor "days in stage" to when the deal entered its current stage (the
+      // server health anchor), NOT updated_at — which ANY unrelated write
+      // (notes, commission, fee checkout, buyer-status, ARIVE sync) bumps,
+      // resetting the count to 0 (#257). Falls back to created_at when the wire
+      // omits stage_entered_at (e.g. the create response).
       daysInStage: Math.max(
         0,
-        Math.floor((Date.now() - new Date(d.updated_at).getTime()) / 86_400_000),
+        Math.floor(
+          (Date.now() - new Date(d.stage_entered_at ?? d.created_at).getTime()) /
+            86_400_000,
+        ),
       ),
     },
     flags: d.arive_linked ? ['mountain_mortgage'] : [],
-    status: 'active',
+    // Real lifecycle status from the API (#254). Payloads that don't SELECT it
+    // (create RETURNING, /api/me/deals) omit it — a fresh deal is 'active'.
+    status: d.status ?? 'active',
     estimatedCommission: Math.round(price * (commissionPct / 100)),
     commissionPct,
     agentName: d.agent_name,

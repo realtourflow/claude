@@ -7,7 +7,8 @@ import {
   VENDOR_CATEGORY_ORDER,
   VendorCategory,
 } from "@/lib/vendor-categories";
-import { useVendors, Vendor } from "@/hooks/useVendors";
+import { Vendor } from "@/hooks/useVendors";
+import { useDealVendors } from "@/hooks/useDealVendors";
 
 function CategorySection({ category, vendors }: { category: VendorCategory; vendors: Vendor[] }) {
   const [open, setOpen] = useState(false);
@@ -91,9 +92,9 @@ function CategorySection({ category, vendors }: { category: VendorCategory; vend
   );
 }
 
-export default function VendorDirectory({ agentId: _agentId }: { agentId: string }) {
+export default function VendorDirectory({ dealId }: { dealId: string }) {
   const [open, setOpen] = useState(false);
-  const { vendors, loading } = useVendors();
+  const { vendors, loading } = useDealVendors(dealId);
 
   const availableCategories = VENDOR_CATEGORY_ORDER.filter((cat) =>
     vendors.some((v) => v.category === cat)

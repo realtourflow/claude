@@ -9,7 +9,7 @@ export type PermissionGroup = {
   permissions: Permission[];
 };
 
-export type GroupId = 'agent' | 'buyer' | 'seller' | 'admin' | 'tc';
+export type GroupId = 'agent' | 'buyer' | 'seller' | 'admin' | 'tc' | 'lending_partner';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // BUYER
@@ -852,6 +852,17 @@ const ADMIN_PERMISSIONS: Permission[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LENDING PARTNER
+//
+// A real, assignable role (deal participant + Auth0 role) that does not yet have
+// a product surface. Until a dedicated read-only participant experience ships
+// (tracked as a follow-up to #307), this group grants no permissions — the app
+// routes it to an honest "not available yet" placeholder rather than the full
+// agent shell. Deliberately empty; do not borrow AGENT_PERMISSIONS here.
+// ─────────────────────────────────────────────────────────────────────────────
+const LENDING_PARTNER_PERMISSIONS: Permission[] = [];
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GROUPS registry
 // ─────────────────────────────────────────────────────────────────────────────
 export const GROUPS: Record<GroupId, PermissionGroup> = {
@@ -888,5 +899,12 @@ export const GROUPS: Record<GroupId, PermissionGroup> = {
     name: 'Admin',
     description: 'Administrator with full system access, override capabilities, and infrastructure control',
     permissions: ADMIN_PERMISSIONS,
+  },
+
+  lending_partner: {
+    id: 'lending_partner',
+    name: 'Lending Partner',
+    description: 'Loan partner on a deal — a real role without a product surface yet; placeholder access only',
+    permissions: LENDING_PARTNER_PERMISSIONS,
   },
 };

@@ -4,6 +4,7 @@ import { POST as createDocumentRoute } from "@/app/api/deals/[id]/documents/rout
 import { POST as createTaskRoute } from "@/app/api/deals/[id]/tasks/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setEmailForTesting } from "@/lib/email";
+import { setStorageForTesting } from "@/lib/blob-storage";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
@@ -16,11 +17,16 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await truncateAll();
+  // Document confirm now verifies the uploaded blob before inserting (#276).
+  // These are notification tests, not blob-existence tests, so install the
+  // recording backend with a default size — every confirmed key resolves.
+  setStorageForTesting()!.defaultSize = 1024;
 });
 
 afterEach(() => {
-  // Reset the seam so a stub from one test never leaks into the next.
+  // Reset the seams so a stub from one test never leaks into the next.
   setEmailForTesting(undefined);
+  setStorageForTesting(false);
 });
 
 function ctx(id: string) {
@@ -32,6 +38,7 @@ type SentEmail = {
   to: string | string[];
   subject: string;
   html: string;
+  headers?: Record<string, string>;
 };
 
 /**
@@ -204,6 +211,140 @@ describe("FF1 — notification emails (Resend)", () => {
     expect(sent[0].subject.toLowerCase()).toContain("document");
     // Client recipient links to their own portal (not the agent-only route).
     expect(sent[0].html).toContain(`/buyer/${buyer.id}`);
+  });
+
+  // #293 — a CLIENT uploading (the "please upload your pre-approval" reply)
+  // must reach the deal's agent. On the common single-participant deal the old
+  // recipient set (clients minus the uploader) was EMPTY → nobody was emailed
+  // and the request-a-doc loop dead-ended silently.
+  it("2b. CLIENT upload (sole participant) → emails the deal's agent (#293)", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/documents`,
+      "auth0|buyer",
+      ["buyer"],
+      { name: "PreApproval.pdf", s3_key: `deals/${deal.id}/1/preapproval.pdf` }
+    );
+    const res = await createDocumentRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+
+    // The agent is notified — previously the recipient set was empty here.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("agent@example.com");
+    expect(sent[0].to).not.toBe("buyer@example.com");
+    // Agent recipient links to the agent deal route (not a client portal).
+    expect(sent[0].html).toContain(`/agent/deals/${deal.id}`);
+  });
+
+  // #293 guard — an AGENT's own upload must NOT self-notify; only the clients
+  // hear about it (unchanged from before).
+  it("2c. AGENT upload → only clients emailed, never the agent (no self-notify; #293)", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer1 = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer1",
+      email: "buyer1@example.com",
+    });
+    const buyer2 = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer2",
+      email: "buyer2@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer1.id, role: "buyer" },
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer2.id, role: "buyer" },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/documents`,
+      "auth0|agent",
+      ["agent"],
+      { name: "Disclosures.pdf", s3_key: `deals/${deal.id}/1/disclosures.pdf` }
+    );
+    const res = await createDocumentRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+
+    const recipients = sent.map((e) => e.to);
+    expect(recipients).toHaveLength(2);
+    expect(recipients).toContain("buyer1@example.com");
+    expect(recipients).toContain("buyer2@example.com");
+    expect(recipients).not.toContain("agent@example.com");
+  });
+
+  // #293 — a CLIENT upload on a deal with a co-buyer must reach BOTH the
+  // co-buyer AND the agent, and never the uploader, with no duplicate sends.
+  it("2d. CLIENT upload with a co-buyer → co-buyer AND agent emailed, no dupes (#293)", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer1 = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer1",
+      email: "buyer1@example.com",
+    });
+    const buyer2 = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer2",
+      email: "buyer2@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer1.id, role: "buyer" },
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer2.id, role: "buyer" },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    // buyer1 uploads.
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/documents`,
+      "auth0|buyer1",
+      ["buyer"],
+      { name: "PreApproval.pdf", s3_key: `deals/${deal.id}/1/preapproval.pdf` }
+    );
+    const res = await createDocumentRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+
+    const recipients = sent.map((e) => e.to);
+    // The co-buyer AND the agent — but never the uploader.
+    expect(recipients).toHaveLength(2);
+    expect(recipients).toContain("buyer2@example.com");
+    expect(recipients).toContain("agent@example.com");
+    expect(recipients).not.toContain("buyer1@example.com");
+    // No address emailed twice.
+    expect(new Set(recipients).size).toBe(recipients.length);
   });
 
   it("3. task created with an assignee → emails the assignee", async () => {
@@ -421,5 +562,232 @@ describe("FF1 — notification emails (Resend)", () => {
       const count = await prisma.tasks.count({ where: { deal_id: deal.id } });
       expect(count).toBe(1);
     });
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// #292 — the Settings → Notifications "Email notifications" toggle persists to
+// user_settings.settings.notifications.email (via PUT /api/me/settings). Before
+// this fix nothing server-side read it, so a user who turned it off kept getting
+// emailed. These cases assert the gate is honored PER-RECIPIENT (default-on when
+// unset) and that every send carries a List-Unsubscribe header.
+// ───────────────────────────────────────────────────────────────────────────
+describe("#292 — email-notification preference gating + List-Unsubscribe", () => {
+  it("opted-out recipient (settings.notifications.email = false) is NOT emailed", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    // The buyer flipped "Email notifications" OFF — the exact JSONB path the
+    // Settings toggle writes: settings.notifications.email.
+    await prisma.user_settings.create({
+      data: { user_id: buyer.id, settings: { notifications: { email: false } } },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/messages`,
+      "auth0|agent",
+      ["agent"],
+      { body: "you opted out of this" }
+    );
+    const res = await createMessageRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+    // The sole recipient opted out → nobody is emailed.
+    expect(sent).toHaveLength(0);
+  });
+
+  it("gates PER-RECIPIENT: the opted-out client is skipped, the other still gets emailed", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    const seller = await createUser({
+      role: "seller",
+      auth0_id: "auth0|seller",
+      email: "seller@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: seller.id, role: "seller" },
+    });
+    // Only the buyer opted out; the seller never touched the setting (default-on).
+    await prisma.user_settings.create({
+      data: { user_id: buyer.id, settings: { notifications: { email: false } } },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/messages`,
+      "auth0|agent",
+      ["agent"],
+      { body: "fan-out to both clients" }
+    );
+    const res = await createMessageRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+
+    // Exactly one email — to the opted-in seller, never the opted-out buyer.
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("seller@example.com");
+  });
+
+  it("default-on: a recipient with NO user_settings row still gets emailed", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    // No user_settings row for the buyer at all → the default must be "send".
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/documents`,
+      "auth0|agent",
+      ["agent"],
+      { name: "Disclosures.pdf", s3_key: `deals/${deal.id}/1/disclosures.pdf` }
+    );
+    const res = await createDocumentRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("buyer@example.com");
+  });
+
+  it("explicit email:true (opted-in) is still emailed even alongside other settings", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    await prisma.user_settings.create({
+      data: {
+        user_id: buyer.id,
+        settings: { theme: "dark", notifications: { email: true, push: false } },
+      },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/messages`,
+      "auth0|agent",
+      ["agent"],
+      { body: "still subscribed" }
+    );
+    const res = await createMessageRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe("buyer@example.com");
+  });
+
+  it("task assignment respects the assignee's opt-out", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    await prisma.user_settings.create({
+      data: { user_id: buyer.id, settings: { notifications: { email: false } } },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/tasks`,
+      "auth0|agent",
+      ["agent"],
+      { title: "Upload pre-approval", assigned_to: buyer.id }
+    );
+    const res = await createTaskRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+    expect(sent).toHaveLength(0);
+  });
+
+  it("every sent notification email carries a List-Unsubscribe header", async () => {
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|agent",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|buyer",
+      email: "buyer@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+
+    const req = await jsonReq(
+      `/api/deals/${deal.id}/documents`,
+      "auth0|agent",
+      ["agent"],
+      { name: "Disclosures.pdf", s3_key: `deals/${deal.id}/1/disclosures.pdf` }
+    );
+    const res = await createDocumentRoute(req, ctx(deal.id));
+    expect(res.status).toBe(201);
+
+    expect(sent).toHaveLength(1);
+    const unsub = sent[0].headers?.["List-Unsubscribe"];
+    expect(unsub).toBeTruthy();
+    // RFC 2369: the header value is enclosed in angle brackets.
+    expect(unsub).toMatch(/^<.+>$/);
   });
 });

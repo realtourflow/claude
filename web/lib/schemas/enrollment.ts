@@ -20,6 +20,8 @@ export const fastPassEnrollBodySchema = z.object({
   // now | at_closing | seller_concession — whitelist stays in the handler.
   payment_option: z.string().nullish(),
   selected_upsells: z.array(z.string()).optional(),
+  /** Optional promo code (#281); the server validates it + prices the discount. */
+  promo_code: z.string().nullish(),
   /** Client-sent; deliberately ignored — the server prices the enrollment. */
   total_cents: z.unknown().optional(),
   /** Arbitrary JSON from the survey. */

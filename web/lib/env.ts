@@ -97,6 +97,15 @@ const shape = z.object({
   ARIVE_CLIENT_ID: z.string().default(""),
   ARIVE_CLIENT_SECRET: z.string().default(""),
   ARIVE_WEBHOOK_URL: z.string().default(""),
+  // Shared secret the ARIVE loan-milestone webhook (/api/arive/webhook)
+  // authenticates against — a token in the `x-arive-token` header or a
+  // `?token=` query param must equal this value. Same fail-closed shape as
+  // INDEXNOW_WEBHOOK_SECRET: empty = the endpoint is disabled (503; never
+  // compare against an empty secret); wrong/missing token = 401. ARIVE exposes
+  // no HMAC request-signing scheme, so a static shared secret is the gate; the
+  // handler re-fetches authoritative loan state from ARIVE anyway, so the body
+  // is never trusted beyond loanId (#270).
+  ARIVE_WEBHOOK_SECRET: z.string().default(""),
 
   GOOGLE_OAUTH_CLIENT_ID: z.string().default(""),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().default(""),

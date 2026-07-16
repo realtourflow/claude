@@ -30,6 +30,8 @@ export type UploadedForm = {
   fileName: string;
   fieldCount: number;
   needsReviewCount: number;
+  // The admin's rejection reason (#295), when the form was rejected with a note.
+  reviewNotes: string | null;
   createdAt: string;
 };
 
@@ -41,6 +43,7 @@ type ApiForm = {
   source_file_name: string;
   field_count: number;
   needs_review_count: number;
+  review_notes: string | null;
   created_at: string;
 };
 
@@ -53,6 +56,7 @@ function fromApi(f: ApiForm): UploadedForm {
     fileName: f.source_file_name,
     fieldCount: f.field_count,
     needsReviewCount: f.needs_review_count,
+    reviewNotes: f.review_notes ?? null,
     createdAt: f.created_at,
   };
 }

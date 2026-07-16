@@ -3,17 +3,14 @@ import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasRole } from "@/lib/roles";
 import { getObjectBytes, getObjectSize, deleteObject } from "@/lib/s3";
+import { PDFDocument } from "pdf-lib";
 import {
   FORM_SIDES,
   type FormSide,
   getAttestationStatement,
   sha256Hex,
 } from "@/lib/uploaded-forms";
-import {
-  createUploadedForm,
-  FormTypeRequiredError,
-  FormDetectEnqueueError,
-} from "@/lib/create-uploaded-form";
+import { createUploadedForm, FormTypeRequiredError } from "@/lib/create-uploaded-form";
 import { sendNotificationEmail } from "@/lib/email";
 
 const ADMIN_NOTIFY_EMAIL = "paul@mountain.mortgage";
@@ -56,6 +53,9 @@ type FormListRow = {
   created_at: Date;
   field_count: number;
   needs_review_count: number;
+  // The admin's rejection reason (#295) — surfaced under the "Rejected" chip in
+  // My Forms so an agent learns WHY, not just THAT, their form was rejected.
+  review_notes: string | null;
 };
 
 function serializeListRow(r: FormListRow) {
@@ -68,6 +68,7 @@ function serializeListRow(r: FormListRow) {
     created_at: r.created_at.toISOString(),
     field_count: Number(r.field_count),
     needs_review_count: Number(r.needs_review_count),
+    review_notes: r.review_notes,
   };
 }
 
@@ -81,6 +82,7 @@ export async function GET(req: Request): Promise<Response> {
 
       const rows = await prisma.$queryRaw<FormListRow[]>`
         SELECT f.id, f.label, f.side, f.status, f.source_file_name, f.created_at,
+               f.review_notes,
                COUNT(ff.id)::int AS field_count,
                COUNT(ff.id) FILTER (WHERE ff.needs_review)::int AS needs_review_count
         FROM uploaded_forms f
@@ -182,6 +184,21 @@ export async function POST(req: Request): Promise<Response> {
         return error("uploaded file not found", 400);
       }
 
+      // Validate the bytes actually parse as a PDF BEFORE either path proceeds.
+      // A non-PDF (a JPEG renamed .pdf) or a truncated/corrupt PDF would otherwise
+      // throw an unexplained 500 downstream on the flat path (and orphan the blob,
+      // since only the two typed errors deleted it) — or, on the bundle path
+      // (which never parses), be accepted as pending_split and only fail later at
+      // admin split. This single gate covers BOTH paths: on failure delete the
+      // orphaned blob and return an agent-readable 400. (ignoreEncryption mirrors
+      // what the downstream extractor does anyway.)
+      try {
+        await PDFDocument.load(bytes, { ignoreEncryption: true });
+      } catch {
+        await deleteObject(body.s3_key);
+        return error("that file isn't a readable PDF — please upload a PDF", 400);
+      }
+
       const agentUser = await prisma.users.findUnique({
         where: { id: userId },
         select: { market: true, markets: true, brokerage: true, name: true, email: true },
@@ -275,10 +292,6 @@ export async function POST(req: Request): Promise<Response> {
             "pick the document type so we can detect this form's fields",
             422
           );
-        }
-        if (err instanceof FormDetectEnqueueError) {
-          await deleteObject(body.s3_key);
-          return error("couldn't start form detection — please try again", 503);
         }
         throw err;
       }

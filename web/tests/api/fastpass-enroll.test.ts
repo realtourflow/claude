@@ -3,6 +3,10 @@ import type Stripe from "stripe";
 import { POST as fastPassRoute } from "@/app/api/deals/[id]/fastpass/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { setStripeForTesting } from "@/lib/stripe";
+import {
+  FAST_PASS_BASE_PRICE_CENTS,
+  FAST_PASS_UPSELL_PRICE_CENTS,
+} from "@/lib/fast-pass-catalog";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
@@ -31,9 +35,13 @@ function ctx(id: string) {
 
 // Base 297700 + utility_setup 9700 + staging_consult 24700 = 332100.
 const EXPECTED_TOTAL = 332100;
+// "Pay at closing" defers the charge and adds a 15% premium to the FULL basket
+// (base + upsells) exactly once. "now" / "seller_concession" carry no premium.
+// Literal 1.15 here (not the catalog constant) so a wrong multiplier is caught.
+const EXPECTED_AT_CLOSING_TOTAL = Math.round(EXPECTED_TOTAL * 1.15); // 381915
 
 describe("POST /api/deals/[id]/fastpass", () => {
-  it("owner enrolls deferred (at_closing) → 200 {ok:true}, enrollment persisted with server total + deduped upsells", async () => {
+  it("owner enrolls deferred (at_closing) → 200 {ok:true}, persisted with server total (+15% premium) + deduped upsells", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     const deal = await createDeal({ agent_id: agent.id, title: "123 Main St" });
 
@@ -81,12 +89,126 @@ describe("POST /api/deals/[id]/fastpass", () => {
     const row = rows[0];
     expect(row.status).toBe("active");
     expect(row.payment_option).toBe("at_closing");
-    expect(row.total_cents).toBe(String(EXPECTED_TOTAL));
+    // at_closing stores the marked-up basket, NOT the un-marked EXPECTED_TOTAL.
+    expect(row.total_cents).toBe(String(EXPECTED_AT_CLOSING_TOTAL));
     expect(row.paid).toBe(false);
     expect(row.survey_situation).toBe("renting");
     // Deduped — staging_consult appears once.
     expect(row.selected_upsells).toEqual(["utility_setup", "staging_consult"]);
     expect(row.enrolled_at).toBeTruthy();
+  });
+
+  // ── #280: server-side pricing is payment-option-aware ──────────────────────
+  it("at_closing with NO upsells → persisted total = base + 15% deferral premium (#280)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "1 Premium Way" });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/fastpass`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ payment_option: "at_closing", selected_upsells: [] }),
+    });
+    const res = await fastPassRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.$queryRaw<{ total_cents: string }[]>`
+      SELECT fast_pass->>'total_cents' AS total_cents
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    // Pre-fix this equalled the un-marked base (297700) — the revenue leak.
+    expect(rows[0].total_cents).toBe(
+      String(Math.round(FAST_PASS_BASE_PRICE_CENTS * 1.15)) // 342355
+    );
+    expect(rows[0].total_cents).not.toBe(String(FAST_PASS_BASE_PRICE_CENTS));
+  });
+
+  it("payment_option 'now' → stored total AND Stripe amount = base + upsells with NO premium (#280)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "2 Upfront Rd" });
+
+    let captured: Stripe.Checkout.SessionCreateParams | undefined;
+    setStripeForTesting({
+      checkout: {
+        sessions: {
+          create: async (params: Stripe.Checkout.SessionCreateParams) => {
+            captured = params;
+            return {
+              id: "cs_now_nomarkup",
+              url: "https://stripe.test/checkout/cs_now_nomarkup",
+            };
+          },
+        },
+      },
+      webhooks: {
+        constructEvent: () => {
+          throw new Error("not used");
+        },
+      },
+    });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/fastpass`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        payment_option: "now",
+        selected_upsells: ["utility_setup", "staging_consult"],
+      }),
+    });
+    const res = await fastPassRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+
+    // Stripe is charged the un-marked basket…
+    expect(captured!.line_items?.[0]?.price_data?.unit_amount).toBe(EXPECTED_TOTAL);
+    // …never the at-closing (marked-up) figure.
+    expect(captured!.line_items?.[0]?.price_data?.unit_amount).not.toBe(
+      EXPECTED_AT_CLOSING_TOTAL
+    );
+
+    const rows = await prisma.$queryRaw<{ total_cents: string }[]>`
+      SELECT fast_pass->>'total_cents' AS total_cents
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].total_cents).toBe(String(EXPECTED_TOTAL));
+  });
+
+  it("at_closing + one upsell → premium applied to full basket once; tampered total_cents still ignored (#280 + #78)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id, title: "3 Basket Ln" });
+
+    const r = new Request(`http://localhost/api/deals/${deal.id}/fastpass`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({
+        payment_option: "at_closing",
+        selected_upsells: ["utility_setup"],
+        // Hostile client tries to set its own price — must be ignored (#78).
+        total_cents: 1,
+      }),
+    });
+    const res = await fastPassRoute(r, ctx(deal.id));
+    expect(res.status).toBe(200);
+
+    // (base + one upsell) * 1.15, rounded — the premium hits the WHOLE basket
+    // once, not the upsell marked up separately.
+    const expected = Math.round(
+      (FAST_PASS_BASE_PRICE_CENTS + FAST_PASS_UPSELL_PRICE_CENTS.utility_setup) * 1.15
+    ); // 353510
+    const rows = await prisma.$queryRaw<{ total_cents: string }[]>`
+      SELECT fast_pass->>'total_cents' AS total_cents
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].total_cents).toBe(String(expected));
+    // The client's 1-cent claim was ignored (#78 anti-tamper unchanged).
+    expect(rows[0].total_cents).not.toBe("1");
   });
 
   it("payment_option 'now' → 200 {checkout_url}; tampered total_cents ignored, Stripe gets catalog amount + fast_pass metadata", async () => {

@@ -105,6 +105,12 @@ vi.mock("@/hooks/useTasks", () => ({
   patchTaskStatus: vi.fn(),
 }));
 
+// The Timeline tab (the default landing tab here) fetches stage history via
+// TanStack Query (#256); stub it so these tests need no QueryClientProvider.
+vi.mock("@/hooks/useStageHistory", () => ({
+  useStageHistory: () => ({ history: [], loading: false }),
+}));
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ dealId: DEAL_ID }),
   useRouter: () => ({ back: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -117,10 +123,6 @@ vi.mock("@/lib/store/authStore", () => ({
     const state = { activeUser: { id: "agent-1", groupId: "agent", name: "Agent Amy" } };
     return sel ? sel(state) : state;
   },
-}));
-
-vi.mock("@/lib/store/taskStore", () => ({
-  useTaskStore: () => ({ reassign: vi.fn(), effectiveAssignee: () => undefined }),
 }));
 
 vi.mock("@/permissions/usePermission", () => ({
@@ -403,7 +405,7 @@ describe("Stage advance posts the drafted client message (#185)", () => {
     const user = await openAdvanceModal();
 
     // Edit the drafted message, exactly like the repro in the ticket.
-    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     const textarea = screen.getByRole("textbox");
     await user.clear(textarea);
     await user.type(textarea, "Custom note for my client");
@@ -437,7 +439,7 @@ describe("Stage advance posts the drafted client message (#185)", () => {
   it("an empty draft posts nothing (stage still advances)", async () => {
     const user = await openAdvanceModal();
 
-    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await user.clear(screen.getByRole("textbox"));
     await user.click(screen.getByRole("button", { name: /confirm & advance/i }));
 
@@ -593,7 +595,7 @@ describe("StageAdvanceModal automation claims match reality (#185)", () => {
     );
     expect(screen.getByText(/client message sent to jane buyer/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await user.clear(screen.getByRole("textbox"));
 
     expect(screen.queryByText(/client message sent/i)).not.toBeInTheDocument();

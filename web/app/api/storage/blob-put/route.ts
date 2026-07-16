@@ -5,6 +5,7 @@ import {
   putBlob,
   MAX_UPLOAD_BYTES,
   ALLOWED_KEY_PREFIXES,
+  validateUploadType,
 } from "@/lib/blob-storage";
 
 // The client PUTs the file body here (Blob has no native pre-signed PUT). Authorized
@@ -33,11 +34,16 @@ export async function PUT(req: Request): Promise<Response> {
   if (!ALLOWED_PREFIXES.some((p) => key.startsWith(p))) return error("invalid key", 400);
   if (!verifyUpload(key, exp, sig)) return error("invalid or expired upload token", 403);
 
+  // Reject disallowed file types (executables, scripts, …) BEFORE buffering the
+  // body — an upload is later downloaded by other participants as a trusted doc.
+  const contentType = req.headers.get("content-type") || "application/pdf";
+  const typeCheck = validateUploadType({ key, contentType });
+  if (!typeCheck.ok) return error(typeCheck.reason, 415);
+
   const buf = await req.arrayBuffer();
   if (buf.byteLength > MAX_BYTES) {
     return error(`file too large — max ${MAX_BYTES / (1024 * 1024)}MB`, 413);
   }
-  const contentType = req.headers.get("content-type") || "application/pdf";
   try {
     await putBlob(key, new Uint8Array(buf), contentType);
   } catch (err) {

@@ -22,14 +22,17 @@ export const createTaskBodySchema = z.object({
 export type CreateTaskBody = z.output<typeof createTaskBodySchema>;
 
 /**
- * PATCH /api/tasks/[id]/status — accepts any combination of the three
- * editable fields (#187); "no fields to update" presence check stays in the
+ * PATCH /api/tasks/[id]/status — accepts any combination of the editable
+ * fields (#187 status/due_date/assigned_to; #255 `role`, the agent/tc/buyer/
+ * seller/third_party/admin bucket the Tasks-tab reassign dropdown changes).
+ * "no fields to update" presence check + the role whitelist stay in the
  * handler (zod preserves key presence for JSON inputs).
  */
 export const patchTaskBodySchema = z.object({
   status: z.string().optional(),
   due_date: z.string().nullish(),
   assigned_to: z.string().nullish(),
+  role: z.string().optional(),
 });
 export type PatchTaskBody = z.output<typeof patchTaskBodySchema>;
 

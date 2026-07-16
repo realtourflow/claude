@@ -390,3 +390,95 @@ describe("participant access — sellers only see ready sheets", () => {
     expect((await getNetSheet(req, ctx(deal.id))).status).toBe(404);
   });
 });
+
+/**
+ * POST /net-sheet/ready is the share/unshare toggle (#258). It previously
+ * ignored the request body and unconditionally set status='ready', so the
+ * editor's "Revert to Draft" was a no-op — an agent could not unshare a sheet
+ * from the seller. It also 500'd (P2025) when no sheet row existed yet.
+ */
+describe("POST /api/deals/:id/net-sheet/ready — draft/ready toggle (#258)", () => {
+  async function markReady(dealId: string, body?: { ready?: boolean }): Promise<Response> {
+    const req = new Request(`http://localhost/api/deals/${dealId}/net-sheet/ready`, {
+      method: "POST",
+      headers: { authorization: await authHeader("auth0|agent-ns", ["agent"]) },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    return markReadyRoute(req, ctx(dealId));
+  }
+
+  async function addSeller(dealId: string) {
+    const seller = await createUser({ role: "seller", auth0_id: "auth0|seller-ns" });
+    await prisma.deal_participants.create({
+      data: { deal_id: dealId, user_id: seller.id, role: "seller" },
+    });
+    return seller;
+  }
+
+  async function sellerGet(dealId: string): Promise<Response> {
+    const req = new Request(`http://localhost/api/deals/${dealId}/net-sheet`, {
+      headers: { authorization: await authHeader("auth0|seller-ns", ["seller"]) },
+    });
+    return getNetSheet(req, ctx(dealId));
+  }
+
+  // Case 1 — the bug: "Revert to Draft" must actually revert and re-hide the sheet.
+  it("reverts a ready sheet to draft on { ready: false } and re-hides it from the seller", async () => {
+    const { deal } = await makeAgentWithDeal({});
+    await addSeller(deal.id);
+    await agentGet(deal.id); // agent creates the draft
+
+    // Share it: mark ready, the seller can now see it.
+    expect((await markReady(deal.id, { ready: true })).status).toBe(200);
+    expect((await sellerGet(deal.id)).status).toBe(200);
+
+    // Unshare it: revert to draft.
+    const res = await markReady(deal.id, { ready: false });
+    expect(res.status).toBe(200);
+    const sheet = (await res.json()) as { status: string; ready_at: string | null };
+    expect(sheet.status).toBe("draft");
+    expect(sheet.ready_at).toBeNull();
+
+    const row = await prisma.net_sheets.findUnique({ where: { deal_id: deal.id } });
+    expect(row?.status).toBe("draft");
+    expect(row?.ready_at).toBeNull();
+
+    // Seller is locked out again.
+    expect((await sellerGet(deal.id)).status).toBe(403);
+  });
+
+  // Case 2 — regression: marking ready still works and stamps ready_at.
+  it("marks a draft sheet ready on { ready: true } and stamps ready_at", async () => {
+    const { deal } = await makeAgentWithDeal({});
+    await agentGet(deal.id);
+
+    const res = await markReady(deal.id, { ready: true });
+    expect(res.status).toBe(200);
+    const sheet = (await res.json()) as { status: string; ready_at: string | null };
+    expect(sheet.status).toBe("ready");
+    expect(sheet.ready_at).not.toBeNull();
+
+    const row = await prisma.net_sheets.findUnique({ where: { deal_id: deal.id } });
+    expect(row?.status).toBe("ready");
+    expect(row?.ready_at).toBeInstanceOf(Date);
+  });
+
+  // Back-compat: an absent body still marks ready (older clients sent no body).
+  it("defaults to marking ready when the body is absent", async () => {
+    const { deal } = await makeAgentWithDeal({});
+    await agentGet(deal.id);
+
+    const res = await markReady(deal.id); // no body
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { status: string }).status).toBe("ready");
+  });
+
+  // Case 3 — no 500 when there's no sheet row to update.
+  it("returns 404 (not 500) when the deal has no net_sheets row", async () => {
+    const { deal } = await makeAgentWithDeal({});
+    expect(await prisma.net_sheets.count({ where: { deal_id: deal.id } })).toBe(0);
+
+    const res = await markReady(deal.id, { ready: true });
+    expect(res.status).toBe(404);
+  });
+});

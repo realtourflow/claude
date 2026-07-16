@@ -15,6 +15,46 @@ export type DefaultChecklistItem = {
   assignedTo: "tc" | "agent" | "buyer" | "seller" | "third_party";
 };
 
+// ── Seller-portal defaults (#261) ────────────────────────────────────────────
+// The seller portal's Listing Prep and Pre-Close cards are backed by real,
+// persisted checklist_items (assigned_to='seller') instead of cosmetic local
+// state. These sets are keyed by deal TYPE + STAGE (see sellerDefaultsFor), NOT
+// by CHECKLIST_ELIGIBLE_STAGES, so they seed at active_search / pre_close for
+// sell deals only. Labels intentionally match the seller-portal card copy so a
+// seeded item shows up as the same row the seller already expects to see.
+
+// Seeded at active_search ("Listing Prep") for sell deals.
+export const SELLER_LISTING_PREP_ITEMS: DefaultChecklistItem[] = [
+  { label: "Deep clean / declutter", category: "Listing Prep", assignedTo: "seller" },
+  { label: "Minor repairs completed", category: "Listing Prep", assignedTo: "seller" },
+  { label: "Professional photos scheduled", category: "Listing Prep", assignedTo: "seller" },
+  { label: "Listing copy approved", category: "Listing Prep", assignedTo: "seller" },
+  { label: "Disclosures package complete", category: "Listing Prep", assignedTo: "seller" },
+  { label: "Lockbox installed", category: "Listing Prep", assignedTo: "seller" },
+];
+
+// Seeded at pre_close for sell deals.
+export const SELLER_PRE_CLOSE_ITEMS: DefaultChecklistItem[] = [
+  { label: "Complete agreed repairs", category: "Pre-Close", assignedTo: "seller" },
+  { label: "Remove all personal belongings", category: "Pre-Close", assignedTo: "seller" },
+  { label: "Schedule final walkthrough access", category: "Pre-Close", assignedTo: "seller" },
+  { label: "Confirm possession date", category: "Pre-Close", assignedTo: "seller" },
+  { label: "Utilities transfer arranged", category: "Pre-Close", assignedTo: "seller" },
+];
+
+// Which seller default set (if any) belongs to a deal at a given type + stage.
+// Only sell deals seed seller items; buy deals get none here (their loan-side
+// coordination lives in the TC set below). Returns [] when nothing applies.
+export function sellerDefaultsFor(
+  type: string,
+  stage: string
+): DefaultChecklistItem[] {
+  if (type !== "sell") return [];
+  if (stage === "active_search") return SELLER_LISTING_PREP_ITEMS;
+  if (stage === "pre_close") return SELLER_PRE_CLOSE_ITEMS;
+  return [];
+}
+
 export const DEFAULT_CHECKLIST_ITEMS: DefaultChecklistItem[] = [
   { label: "Contract received and reviewed", category: "Contract", assignedTo: "tc" },
   { label: "Earnest money deposit verified", category: "Contract", assignedTo: "tc" },

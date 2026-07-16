@@ -10,6 +10,7 @@ import { dealStagePatchBodySchema } from "@/lib/schemas/deal";
 import { parseBody } from "@/lib/schemas/parse";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
+import { recipientUrl } from "@/lib/notification-email";
 import { enqueuePushDealClosingEvent } from "@/lib/jobs";
 import { seedStandardContingencies } from "@/lib/contingency-seed";
 import { seedStageAutoTasks } from "@/lib/stage-task-seed";
@@ -39,13 +40,29 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     });
     if (!current) return error("deal not found", 404);
 
+    // Same-stage PATCH is a no-op (#263). A double-clicked confirm or a retry
+    // targeting the stage the deal is ALREADY in must not run the transaction —
+    // otherwise it writes a from===to deal_stage_history row, an audit row, a
+    // "moved forward" notification to every participant, and a calendar push,
+    // spamming clients and polluting history. Return the fresh deal so the
+    // caller still gets current state (retry-safe). No seed needed: a deal
+    // already in this stage was seeded when it advanced in.
+    if (current.stage === newStage) {
+      const fresh = await getDealForAgent(dealId, userId);
+      return json(fresh);
+    }
+
     // Blocking-task gate (skipped on force).
     if (!force && isForwardAdvance(current.stage, newStage)) {
       const blocking = await prisma.tasks.findMany({
         where: {
           deal_id: dealId,
           priority: "high",
-          status: { not: "completed" },
+          // 'skipped' is closed, not open (#263) — mirrors deals.ts open-count
+          // + healthExpr, the iCal feed, and calendar push, all of which treat
+          // NOT IN ('completed','skipped') as the open set. A task the agent
+          // explicitly skipped must not 422 the advance.
+          status: { notIn: ["completed", "skipped"] },
           OR: [{ stage_context: current.stage }, { stage_context: null }],
         },
         select: { id: true, title: true },
@@ -116,16 +133,27 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     try {
       const participants = await prisma.deal_participants.findMany({
         where: { deal_id: dealId },
-        select: { user_id: true },
+        select: { user_id: true, role: true },
       });
       const label = STAGE_LABELS[newStage] ?? newStage;
+      // Direction-aware copy (#267): a retreat — e.g. a busted contract moving
+      // under_contract → active_search — must not push clients a celebratory
+      // "moved forward" about bad news. Advance copy is kept byte-identical
+      // (other tests assert it); retreats get neutral wording.
+      const advanced = isForwardAdvance(current.stage, newStage);
+      const title = advanced
+        ? "Your deal has moved forward"
+        : "Your deal's stage was updated";
+      const body = advanced ? `New stage: ${label}` : `Stage: ${label}`;
       for (const p of participants) {
         await createNotification({
           userId: p.user_id,
-          title: "Your deal has moved forward",
-          body: `New stage: ${label}`,
+          title,
+          body,
           kind: "stage_change",
           dealId,
+          // Role-appropriate deep link so the bell navigates, not '#' (#291).
+          href: recipientUrl("", p.role, p.user_id, dealId),
         });
       }
     } catch (err) {

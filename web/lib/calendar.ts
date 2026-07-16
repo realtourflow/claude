@@ -128,6 +128,31 @@ async function loadToken(userId: string, provider: string): Promise<TokenRow | n
   });
 }
 
+/**
+ * Persist the "this token's refresh path is dead" flag on the oauth_tokens row
+ * (#296) so /me/integrations + the Settings UI can surface a Reconnect CTA
+ * instead of a permanently-green "Connected" badge. Best-effort: the row may
+ * have been disconnected between load and write, so a failure is logged, never
+ * thrown (a calendar push must not fail because a status flag couldn't be set).
+ */
+async function markNeedsReconnect(
+  provider: string,
+  userId: string,
+  needsReconnect: boolean
+): Promise<void> {
+  try {
+    await prisma.oauth_tokens.update({
+      where: { user_id_provider: { user_id: userId, provider } },
+      data: { needs_reconnect: needsReconnect },
+    });
+  } catch (err) {
+    console.warn(
+      `calendar: could not persist needs_reconnect=${needsReconnect} for ${provider} user ${userId}`,
+      err
+    );
+  }
+}
+
 // ─── provider config + shared core ──────────────────────────────────────
 type ProviderConfig = {
   provider: string;
@@ -161,6 +186,7 @@ async function ensureFresh(
     console.warn(
       `calendar: ${cfg.provider} token expired and no refresh_token for user ${userId} — reconnect needed`
     );
+    await markNeedsReconnect(cfg.provider, userId, true);
     return null;
   }
   const res = await http()(cfg.tokenUrl(), {
@@ -173,6 +199,7 @@ async function ensureFresh(
   });
   if (!res.ok) {
     console.warn(`calendar: ${cfg.provider} token refresh failed for user ${userId}: ${res.status}`);
+    await markNeedsReconnect(cfg.provider, userId, true);
     return null;
   }
   const data = (await res.json()) as {
@@ -180,7 +207,10 @@ async function ensureFresh(
     refresh_token?: string;
     expires_in?: number;
   };
-  if (!data.access_token) return null;
+  if (!data.access_token) {
+    await markNeedsReconnect(cfg.provider, userId, true);
+    return null;
+  }
   const expiresAt = new Date(Date.now() + (data.expires_in ?? 3600) * 1000);
   await prisma.oauth_tokens.update({
     where: { user_id_provider: { user_id: userId, provider: cfg.provider } },
@@ -188,6 +218,9 @@ async function ensureFresh(
       access_token: data.access_token,
       expires_at: expiresAt,
       updated_at: new Date(),
+      // A working refresh means the connection is healthy again — clear any
+      // stale reconnect flag a prior failure may have left behind (#296).
+      needs_reconnect: false,
       ...(cfg.rotatesRefreshToken && data.refresh_token
         ? { refresh_token: data.refresh_token }
         : {}),

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasDealAccess } from "@/lib/deals";
 import { createNotification } from "@/lib/notifications";
-import { emailOfferRequested } from "@/lib/notification-email";
+import { emailOfferRequested, recipientUrl } from "@/lib/notification-email";
 
 type Ctx = { params: Promise<{ id: string; propId: string }> };
 
@@ -93,6 +93,8 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
         body: `Your client wants to make an offer on ${existing.address}.`,
         kind: "offer_requested",
         dealId,
+        // Deep-link the agent to the deal, not '#' (#291).
+        href: recipientUrl("", "agent", access.agentId, dealId),
       });
       try {
         await emailOfferRequested({

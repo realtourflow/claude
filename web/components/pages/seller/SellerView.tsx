@@ -8,6 +8,7 @@ import { STAGE_ORDER } from "@/lib/stages";
 import ClientNotifications from "@/components/ClientNotifications";
 import { BUYER_STATUS_STEPS } from "@/lib/buyer-status";
 import { useMyDeals } from "@/hooks/useMyDeals";
+import { useNotifications } from "@/hooks/useNotifications";
 import PortalDealDocuments from "@/components/portal/PortalDealDocuments";
 import { useTasks } from "@/hooks/useTasks";
 import { useTaskCompletion } from "@/hooks/useTaskCompletion";
@@ -15,6 +16,7 @@ import { useMessages, postMessage } from "@/hooks/useMessages";
 import { useShowingAvailability, DAYS_OF_WEEK, ShowingSlot, DayOfWeek } from "@/hooks/useShowingAvailability";
 import { useOffers } from "@/hooks/useOffers";
 import { useNetSheet, recalcLines, calcNetProceeds } from "@/hooks/useNetSheet";
+import { useChecklist } from "@/hooks/useChecklist";
 import {
   CheckCircle2, Circle, AlertCircle, Loader2, XCircle,
   MapPin, Calendar, MessageSquare, FileText,
@@ -120,15 +122,20 @@ function MessagesTab({ dealId }: { dealId: string }) {
   const { messages, loading, refresh } = useMessages(dealId, 'client_thread');
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   async function handleSend() {
     if (!draft.trim() || sending) return;
     setSending(true);
+    setSendError(null);
     try {
       await postMessage(dealId, 'client_thread', draft.trim());
       setDraft('');
       await refresh();
-    } catch {}
+    } catch {
+      // Keep the draft so the seller can retry instead of losing what they typed.
+      setSendError('Message failed to send. Please try again.');
+    }
     setSending(false);
   }
 
@@ -160,6 +167,12 @@ function MessagesTab({ dealId }: { dealId: string }) {
           </div>
         );
       })}
+      {sendError && (
+        <div role="alert" className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-100 px-4 py-3">
+          <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
+          <p className="text-xs font-medium text-red-600">{sendError}</p>
+        </div>
+      )}
       <div className="pt-1 flex items-center gap-2">
         <input
           type="text"
@@ -293,43 +306,38 @@ function IntakeCard({ firstName }: { firstName: string }) {
   );
 }
 
-function ListingPrepCard() {
-  const DEFAULT_ITEMS = [
-    'Deep clean / declutter',
-    'Minor repairs completed',
-    'Professional photos scheduled',
-    'Listing copy approved',
-    'Disclosures package complete',
-    'Lockbox installed',
-  ];
-  const [done, setDone] = useState<Set<number>>(new Set([0, 1]));
-
-  function toggle(i: number) {
-    setDone((prev) => {
-      const next = new Set(prev);
-      if (next.has(i)) next.delete(i); else next.add(i);
-      return next;
-    });
-  }
-
-  const pct = Math.round((done.size / DEFAULT_ITEMS.length) * 100);
+function ListingPrepCard({ deal }: { deal: Deal }) {
+  // Backed by the persisted checklist API (#261): the seller's ticks survive
+  // reload and are visible to the agent on the same deal checklist. We show the
+  // seller-assigned items only (the TC/agent closing set seeds later at
+  // under_contract+ and isn't the seller's to work). No fabricated pre-checks.
+  const { items, loading, toggle } = useChecklist(deal.id);
+  const prepItems = items.filter((i) => i.assignedTo === 'seller');
+  const doneCount = prepItems.filter((i) => i.checked).length;
+  const pct = prepItems.length > 0 ? Math.round((doneCount / prepItems.length) * 100) : 0;
 
   return (
     <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
       <div className="bg-indigo-50 border-b border-indigo-100 px-5 py-3 flex items-center justify-between">
         <span className="text-sm font-bold text-indigo-800">Listing Prep Checklist</span>
-        <span className="text-sm font-black text-indigo-700">{done.size}/{DEFAULT_ITEMS.length} done</span>
+        <span className="text-sm font-black text-indigo-700">{doneCount}/{prepItems.length} done</span>
       </div>
       <div className="h-1.5 bg-gray-100">
         <div className="h-full bg-indigo-400 transition-all duration-300" style={{ width: `${pct}%` }} />
       </div>
       <div className="p-5 space-y-1">
-        {DEFAULT_ITEMS.map((item, i) => {
-          const isDone = done.has(i);
+        {loading && prepItems.length === 0 && (
+          <p className="px-2 py-2.5 text-sm text-gray-400">Loading your checklist…</p>
+        )}
+        {!loading && prepItems.length === 0 && (
+          <p className="px-2 py-2.5 text-sm text-gray-400">Your agent will add your prep checklist shortly.</p>
+        )}
+        {prepItems.map((item) => {
+          const isDone = item.checked;
           return (
             <button
-              key={i}
-              onClick={() => toggle(i)}
+              key={item.id}
+              onClick={() => toggle(item.id)}
               className="w-full flex items-center gap-3 rounded-lg px-2 py-2.5 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors"
             >
               <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full transition-all ${
@@ -338,12 +346,12 @@ function ListingPrepCard() {
                 {isDone && <CheckCircle2 size={12} className="text-white" />}
               </div>
               <span className={`text-sm transition-all ${isDone ? 'line-through text-gray-300' : 'text-gray-700'}`}>
-                {item}
+                {item.label}
               </span>
             </button>
           );
         })}
-        {done.size === DEFAULT_ITEMS.length && (
+        {prepItems.length > 0 && doneCount === prepItems.length && (
           <div className="mt-3 rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-center">
             <p className="text-sm font-bold text-green-700">🎉 All prep items complete!</p>
             <p className="text-xs text-green-600 mt-0.5">Your agent will review and schedule your listing date.</p>
@@ -456,6 +464,21 @@ function ShowingAvailabilityModal({ dealId, onClose }: { dealId: string; onClose
 
 // ─── ListingActiveCard ────────────────────────────────────────────────────────
 
+// Format an offer's close date defensively. `close_date` serializes to a
+// UTC-midnight ISO string ("2026-08-15T00:00:00.000Z"); parsing that with
+// `new Date(iso)` and formatting in a negative-offset timezone shifts the day
+// backwards. Take the calendar-date PART only and build a local Date so the day
+// can't drift. Falls back to the raw value if the shape is unexpected.
+function formatCloseDate(value: string): string {
+  const [y, m, d] = value.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return value;
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 function ListingActiveCard({ deal }: { deal: Deal }) {
   const [showAvailModal, setShowAvailModal] = useState(false);
   const { slots: availability } = useShowingAvailability(deal.id);
@@ -546,7 +569,9 @@ function ListingActiveCard({ deal }: { deal: Deal }) {
                 <div className="flex items-start justify-between gap-2 mb-2">
                   <div>
                     <p className="text-lg font-black text-brand-navy">${offer.offerPrice.toLocaleString()}</p>
-                    <p className="text-xs text-gray-400">{offer.buyerName} · Close {offer.closeDate}</p>
+                    <p className="text-xs text-gray-400">
+                      {offer.buyerName}{offer.closeDate ? ` · Close ${formatCloseDate(offer.closeDate)}` : ''}
+                    </p>
                   </div>
                 </div>
                 {offer.contingencies.length > 0 && (
@@ -655,13 +680,10 @@ function UnderContractCard({ deal }: { deal: Deal }) {
 }
 
 function PreCloseCard({ deal }: { deal: Deal }) {
-  const items = [
-    { label: 'Complete agreed repairs',           done: false },
-    { label: 'Remove all personal belongings',    done: false },
-    { label: 'Schedule final walkthrough access', done: false },
-    { label: 'Confirm possession date',           done: false },
-    { label: 'Utilities transfer arranged',       done: false },
-  ];
+  // Persisted, clickable pre-close checklist (#261) — seller-assigned items from
+  // the same deal checklist the agent sees. Was a static, non-interactive array.
+  const { items, loading, toggle } = useChecklist(deal.id);
+  const preCloseItems = items.filter((i) => i.assignedTo === 'seller');
   return (
     <div className="space-y-3">
       <div className="rounded-2xl bg-white border border-gray-100 shadow-sm overflow-hidden">
@@ -675,18 +697,31 @@ function PreCloseCard({ deal }: { deal: Deal }) {
           )}
         </div>
         <div className="p-5 space-y-2.5">
-          {items.map((item, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
-                item.done ? 'bg-green-400' : 'border-2 border-gray-200'
-              }`}>
-                {item.done && <CheckCircle2 size={12} className="text-white" />}
-              </div>
-              <span className={`text-sm ${item.done ? 'line-through text-gray-300' : 'text-gray-700'}`}>
-                {item.label}
-              </span>
-            </div>
-          ))}
+          {loading && preCloseItems.length === 0 && (
+            <p className="text-sm text-gray-400">Loading your checklist…</p>
+          )}
+          {!loading && preCloseItems.length === 0 && (
+            <p className="text-sm text-gray-400">Your agent will add your pre-close checklist shortly.</p>
+          )}
+          {preCloseItems.map((item) => {
+            const isDone = item.checked;
+            return (
+              <button
+                key={item.id}
+                onClick={() => toggle(item.id)}
+                className="w-full flex items-center gap-3 text-left rounded-lg -mx-1 px-1 py-0.5 hover:bg-gray-50 transition-colors"
+              >
+                <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+                  isDone ? 'bg-green-400' : 'border-2 border-gray-200'
+                }`}>
+                  {isDone && <CheckCircle2 size={12} className="text-white" />}
+                </div>
+                <span className={`text-sm ${isDone ? 'line-through text-gray-300' : 'text-gray-700'}`}>
+                  {item.label}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
       <NetSheetReadOnlyCard dealId={deal.id} compact />
@@ -785,6 +820,19 @@ function NetSheetReadOnlyCard({ dealId, compact }: { dealId: string; compact?: b
 
 function PostCloseCard({ deal, firstName }: { deal: Deal; firstName: string }) {
   const [showReferral, setShowReferral] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const referralUrl = 'realtourflow.com/refer';
+
+  async function copyReferral() {
+    try {
+      await navigator.clipboard.writeText(referralUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can reject (insecure context / permission denied). Leave the
+      // link on screen so the seller can still select and copy it manually.
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -864,9 +912,12 @@ function PostCloseCard({ deal, firstName }: { deal: Deal; firstName: string }) {
               Please refer us to all your friends and family who would love to share the same awesome experience you had with your home transaction. We will pay you <strong>$50 for every referral</strong> you send our way who completes a transaction with us.
             </p>
             <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 mb-4 flex items-center gap-2">
-              <p className="flex-1 text-xs font-mono text-gray-600 truncate">realtourflow.com/refer</p>
-              <button className="text-xs font-bold text-brand-navy hover:text-brand-navy/70 transition-colors flex-shrink-0">
-                Copy
+              <p className="flex-1 text-xs font-mono text-gray-600 truncate">{referralUrl}</p>
+              <button
+                onClick={copyReferral}
+                className="text-xs font-bold text-brand-navy hover:text-brand-navy/70 transition-colors flex-shrink-0"
+              >
+                {copied ? 'Copied' : 'Copy'}
               </button>
             </div>
             <button
@@ -922,7 +973,7 @@ function StageCard({ deal, firstName }: { deal: Deal; firstName: string }) {
   if (deal.status === 'fallen_through') return <FallenThroughCard deal={deal} firstName={firstName} />;
   switch (deal.stage) {
     case 'intake':         return <IntakeCard firstName={firstName} />;
-    case 'active_search':  return <ListingPrepCard />;
+    case 'active_search':  return <ListingPrepCard deal={deal} />;
     case 'offer_active':   return <ListingActiveCard deal={deal} />;
     case 'under_contract': return <UnderContractCard deal={deal} />;
     case 'pre_close':      return <PreCloseCard deal={deal} />;
@@ -982,7 +1033,8 @@ export default function SellerView() {
     return false;
   });
 
-  // Notifications are pulled via <ClientNotifications /> which uses useNotifications hook
+  // Notifications feed both <ClientNotifications /> and the Messages tab badge below.
+  const { notifications, markRead } = useNotifications();
   const { deals, loading: dealsLoading, error: dealsError, refresh: refreshDeals } = useMyDeals();
   const deal = deals.find((d) => d.type === 'sell');
   const { tasks, refresh: refreshTasks } = useTasks(deal?.id ?? '');
@@ -1031,6 +1083,17 @@ export default function SellerView() {
   const firstName = activeUser?.name.split(' ')[0] ?? 'there';
   const isFallenThrough = deal.status === 'fallen_through';
 
+  // Unread "new_message" notifications for THIS deal drive the Messages tab badge.
+  const unreadMessageNotifications = notifications.filter(
+    (n) => n.dealId === deal.id && n.type === 'new_message' && !n.read,
+  );
+  const handleTabChange = (t: Tab) => {
+    setActiveTab(t);
+    // Opening Messages clears the badge — mark this deal's unread messages read.
+    if (t === 'messages') {
+      unreadMessageNotifications.forEach((n) => { void markRead(n.id); });
+    }
+  };
 
   return (
     <div className="mx-auto max-w-lg space-y-4 pb-10">
@@ -1115,9 +1178,9 @@ export default function SellerView() {
         <>
           <TabBar
             active={activeTab}
-            onChange={setActiveTab}
+            onChange={handleTabChange}
             taskCount={openTasks.length}
-            msgCount={0}
+            msgCount={unreadMessageNotifications.length}
           />
           {activeTab === 'tasks' && (
             <div className="space-y-2">
@@ -1153,7 +1216,7 @@ export default function SellerView() {
       {isFallenThrough && <MessagesTab dealId={deal.id} />}
 
       <JourneyTracker deal={deal} />
-      <VendorDirectory agentId={deal.agentId} />
+      <VendorDirectory dealId={deal.id} />
       <AgentCard agentName={deal.agentName} agentEmail={deal.agentEmail} agentPhone={deal.agentPhone} />
 
       {/* Welcome modal — shown once after onboarding completes */}

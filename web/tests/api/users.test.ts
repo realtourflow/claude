@@ -5,6 +5,8 @@ import { PATCH as activateRoute } from "@/app/api/users/[id]/activate/route";
 import { PATCH as deactivateRoute } from "@/app/api/users/[id]/deactivate/route";
 import { GET as listDealsRoute } from "@/app/api/deals/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
+import { isEmailUniqueViolation } from "@/lib/users";
+import { ROLES, isValidRole, resolveRole } from "@/lib/roles";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
@@ -125,6 +127,129 @@ describe("POST /api/users/sync", () => {
     const body = (await res.json()) as { role: string; name: string };
     expect(body.role).toBe("agent");
     expect(body.name).toBe("Invited User");
+  });
+
+  // #277 — a second Auth0 identity presenting an already-used email must get a
+  // clean, recoverable 409, not the opaque 500 the raw unique violation caused.
+  it("returns 409 when a new sub presents an email already used by another user", async () => {
+    // An existing account already owns dup@example.com under a different sub.
+    await createUser({
+      auth0_id: "auth0|original-owner",
+      email: "dup@example.com",
+      name: "Original Owner",
+      role: "agent",
+    });
+    // syncBody authenticates as auth0|new-agent — a brand-new Auth0 identity —
+    // and tries to claim the same email.
+    const res = await syncRoute(
+      await syncBody({ email: "dup@example.com", name: "Impostor" })
+    );
+    expect(res.status).toBe(409);
+    const text = (await res.text()).toLowerCase();
+    expect(text).toContain("already exists");
+  });
+
+  // #277 Case 2 (unchanged happy path): a new sub + a fresh email still creates.
+  it("creates the user when both the sub and the email are new", async () => {
+    const res = await syncRoute(
+      await syncBody({ email: "fresh@example.com", name: "Fresh Agent" })
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { email: string };
+    expect(body.email).toBe("fresh@example.com");
+  });
+
+  // #277 Case 3 (regression): re-syncing the SAME sub with its own email must
+  // update, never 409 — ON CONFLICT (auth0_id) owns that row's email, so the
+  // email-unique guard must not fire on a legitimate re-sync.
+  it("re-syncs an existing sub with its own email without a collision", async () => {
+    const first = await syncRoute(
+      await syncBody({ email: "keep@example.com", name: "Keeper" })
+    );
+    expect(first.status).toBe(200);
+    const second = await syncRoute(
+      await syncBody({ email: "keep@example.com", name: "Keeper Renamed" })
+    );
+    expect(second.status).toBe(200);
+  });
+
+  // #308 — a roles claim carrying only an unrecognized value must fail loudly
+  // with a 400. Before the whitelist check, the bad string was cast straight to
+  // Role and only rejected by the user_role enum inside upsertUser, surfacing as
+  // an opaque 500.
+  it("returns 400 when the JWT role claim is not a recognized role", async () => {
+    const req = new Request("http://localhost/api/users/sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|bad-role", ["not_a_real_role"]),
+      },
+      body: JSON.stringify({ email: "bad@example.com", name: "Bad Role" }),
+    });
+    const res = await syncRoute(req);
+    expect(res.status).toBe(400);
+    const text = (await res.text()).toLowerCase();
+    expect(text).toContain("role");
+    // Nothing should have been written for the rejected claim.
+    const row = await prisma.users.findUnique({
+      where: { auth0_id: "auth0|bad-role" },
+    });
+    expect(row).toBeNull();
+  });
+
+  // #308 Case 2 — a single recognized role (other than the default agent) still
+  // upserts unchanged. Guards against the whitelist over-rejecting.
+  it("upserts normally for a valid single non-default role (tc)", async () => {
+    const req = new Request("http://localhost/api/users/sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|tc-user", ["tc"]),
+      },
+      body: JSON.stringify({ email: "tc@example.com", name: "Terry Coordinator" }),
+    });
+    const res = await syncRoute(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { role: string };
+    expect(body.role).toBe("tc");
+  });
+
+  // #308 Case 3 — a claim with multiple recognized roles resolves to the single
+  // most-privileged one (documented precedence: admin > tc > agent >
+  // lending_partner > seller > buyer). Array order must NOT decide it — before
+  // the fix this was silent first-wins ("buyer").
+  it("resolves a multi-role claim to the most-privileged role", async () => {
+    const req = new Request("http://localhost/api/users/sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // buyer listed first, admin last — precedence, not array order, wins.
+        authorization: await authHeader("auth0|multi", ["buyer", "agent", "admin"]),
+      },
+      body: JSON.stringify({ email: "multi@example.com", name: "Multi Role" }),
+    });
+    const res = await syncRoute(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { role: string };
+    expect(body.role).toBe("admin");
+  });
+
+  // #308 — an unrecognized entry alongside a valid one is ignored, not fatal:
+  // the recognized role still wins. The 400 fires only when NOTHING is
+  // recognized (see the bad-role case above).
+  it("ignores an unrecognized role when a valid one is also present", async () => {
+    const req = new Request("http://localhost/api/users/sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|mixed", ["not_a_real_role", "seller"]),
+      },
+      body: JSON.stringify({ email: "mixed@example.com", name: "Mixed" }),
+    });
+    const res = await syncRoute(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { role: string };
+    expect(body.role).toBe("seller");
   });
 });
 
@@ -369,5 +494,135 @@ describe("GET /api/users — market + brokerage (admin)", () => {
     const row = rows.find((r) => r.id === agent.id);
     expect(row?.market).toBe("BALDWIN_GULF_COAST");
     expect(row?.brokerage).toBe("RE/MAX");
+  });
+});
+
+// #277 — the collision detector is pure, so exercise every error shape it must
+// recognize directly (the live DB only ever produces the P2010 branch below).
+describe("isEmailUniqueViolation", () => {
+  it("detects the real P2010 raw-query shape upsertUser throws", () => {
+    const err = {
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          name: "DriverAdapterError",
+          cause: {
+            originalCode: "23505",
+            kind: "UniqueConstraintViolation",
+            constraint: { fields: ["email"] },
+            originalMessage:
+              'duplicate key value violates unique constraint "users_email_key"',
+          },
+        },
+      },
+      message:
+        'Raw query failed. Code: `23505`. Message: `duplicate key value violates unique constraint "users_email_key"`',
+    };
+    expect(isEmailUniqueViolation(err)).toBe(true);
+  });
+
+  it("ignores a unique violation on a non-email field (e.g. auth0_id)", () => {
+    const err = {
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          cause: {
+            originalCode: "23505",
+            kind: "UniqueConstraintViolation",
+            constraint: { fields: ["auth0_id"] },
+          },
+        },
+      },
+    };
+    expect(isEmailUniqueViolation(err)).toBe(false);
+  });
+
+  it("detects a model-style P2002 targeting email", () => {
+    expect(isEmailUniqueViolation({ code: "P2002", meta: { target: ["email"] } })).toBe(true);
+  });
+
+  it("ignores a P2002 targeting a different field", () => {
+    expect(
+      isEmailUniqueViolation({ code: "P2002", meta: { target: ["auth0_id"] } })
+    ).toBe(false);
+  });
+
+  it("detects a bare pg 23505 passthrough on the email constraint", () => {
+    expect(isEmailUniqueViolation({ code: "23505", constraint: "users_email_key" })).toBe(true);
+  });
+
+  it("falls back to the message when the nested meta shape is absent", () => {
+    const err = {
+      code: "P2010",
+      message:
+        'Raw query failed. Code: `23505`. Message: `duplicate key value violates unique constraint "users_email_key"`',
+    };
+    expect(isEmailUniqueViolation(err)).toBe(true);
+  });
+
+  it("returns false for unrelated errors and non-objects", () => {
+    expect(isEmailUniqueViolation(new Error("connection refused"))).toBe(false);
+    expect(isEmailUniqueViolation({ code: "P2025" })).toBe(false);
+    expect(isEmailUniqueViolation(null)).toBe(false);
+    expect(isEmailUniqueViolation("boom")).toBe(false);
+    expect(isEmailUniqueViolation(undefined)).toBe(false);
+  });
+});
+
+// #308 — the role whitelist guard + multi-role precedence resolver are pure, so
+// exercise them directly. This pins the contract independent of the route.
+describe("isValidRole", () => {
+  it("accepts every canonical role", () => {
+    for (const r of ROLES) {
+      expect(isValidRole(r)).toBe(true);
+    }
+  });
+
+  it("rejects unknown strings, wrong case, and non-strings", () => {
+    expect(isValidRole("superuser")).toBe(false);
+    expect(isValidRole("")).toBe(false);
+    expect(isValidRole("Admin")).toBe(false); // case-sensitive
+    expect(isValidRole("AGENT")).toBe(false);
+    expect(isValidRole(null)).toBe(false);
+    expect(isValidRole(undefined)).toBe(false);
+    expect(isValidRole(123)).toBe(false);
+    expect(isValidRole(["admin"])).toBe(false);
+  });
+});
+
+describe("resolveRole (multi-role precedence)", () => {
+  it("returns the sole role when the claim has exactly one valid role", () => {
+    expect(resolveRole(["agent"])).toBe("agent");
+    expect(resolveRole(["lending_partner"])).toBe("lending_partner");
+    expect(resolveRole(["buyer"])).toBe("buyer");
+  });
+
+  // Coverage guard: every role in the source-of-truth list must be resolvable
+  // on its own. Catches a future role added to ROLES but not to the precedence
+  // list (which would make resolveRole silently 400 a legitimate token).
+  it("resolves every canonical role to itself when alone", () => {
+    for (const r of ROLES) {
+      expect(resolveRole([r])).toBe(r);
+    }
+  });
+
+  it("prefers the most-privileged role regardless of array order", () => {
+    // Documented order: admin > tc > agent > lending_partner > seller > buyer.
+    expect(resolveRole(["buyer", "admin"])).toBe("admin");
+    expect(resolveRole(["admin", "buyer"])).toBe("admin");
+    expect(resolveRole(["seller", "agent", "tc"])).toBe("tc");
+    expect(resolveRole(["agent", "lending_partner"])).toBe("agent");
+    expect(resolveRole(["buyer", "seller"])).toBe("seller");
+  });
+
+  it("ignores unrecognized entries when a valid role is present", () => {
+    expect(resolveRole(["nonsense", "seller"])).toBe("seller");
+    expect(resolveRole(["nonsense", "admin", "junk"])).toBe("admin");
+  });
+
+  it("returns null when no recognized role is present", () => {
+    expect(resolveRole([])).toBeNull();
+    expect(resolveRole(["nonsense"])).toBeNull();
+    expect(resolveRole(["Admin", "AGENT"])).toBeNull(); // case-sensitive
   });
 });

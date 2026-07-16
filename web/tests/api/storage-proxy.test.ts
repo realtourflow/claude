@@ -13,6 +13,9 @@ import {
   verifyDownload,
   presignedPutUrlToPayload,
   MAX_UPLOAD_BYTES,
+  validateUploadType,
+  ALLOWED_UPLOAD_EXTENSIONS,
+  ALLOWED_UPLOAD_MIME_TYPES,
 } from "@/lib/blob-storage";
 import { resetEnvForTesting } from "@/lib/env";
 
@@ -482,5 +485,124 @@ describe("capability HMAC secret (#188 — dedicated BLOB_CAP_SECRET, store id n
       );
       expect(res.status).toBe(400);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #275 — upload content-type / extension allowlist.
+//
+// Uploads are handed to other deal participants as trusted "documents", so an
+// attacker who can upload must NOT be able to distribute an executable (.exe),
+// a script-bearing page (.html / .svg), or any other active-content type dressed
+// up as a document. BOTH upload entry points — the blob-put proxy AND the
+// client-upload grant route — reject anything whose extension or content-type
+// falls outside a single shared allowlist (validateUploadType in
+// lib/blob-storage), so there is one definition and no drift between the routes.
+// ---------------------------------------------------------------------------
+describe("#275 upload content-type / extension allowlist", () => {
+  const EXE_KEY = "deals/deal-1/1700000000/malware.exe";
+
+  function mintReq(url: string, body: unknown): Request {
+    return new Request(`http://localhost${url}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+  function mintBody(pathname: string, multipart = false): unknown {
+    return {
+      type: "blob.generate-presigned-url",
+      payload: { pathname, multipart, clientPayload: null },
+    };
+  }
+
+  // --- the ONE shared definition both routes import ---
+  it("the shared allowlist covers the app's document/image types, not executables/scripts", () => {
+    // What the app actually needs.
+    for (const ext of ["pdf", "png", "jpg", "jpeg", "gif", "webp", "doc", "docx", "xls", "xlsx", "txt"]) {
+      expect(ALLOWED_UPLOAD_EXTENSIONS).toContain(ext);
+    }
+    expect(ALLOWED_UPLOAD_MIME_TYPES).toContain("application/pdf");
+    expect(ALLOWED_UPLOAD_MIME_TYPES).toContain("image/png");
+    // Active-content types are absent.
+    for (const ext of ["exe", "html", "svg", "js"]) {
+      expect(ALLOWED_UPLOAD_EXTENSIONS).not.toContain(ext);
+    }
+    for (const mime of ["text/html", "image/svg+xml", "application/x-msdownload"]) {
+      expect(ALLOWED_UPLOAD_MIME_TYPES).not.toContain(mime);
+    }
+  });
+
+  it("validateUploadType passes allowed keys (case-insensitive) and fails disallowed ones", () => {
+    for (const key of [
+      "deals/d/1/contract.pdf",
+      "agent-forms/a/1/scan.PNG", // extension is case-insensitive
+      "deals/d/1/photo.jpeg",
+      "agent-templates/a/1/sheet.xlsx",
+      "deals/d/1/notes.txt",
+    ]) {
+      expect(validateUploadType({ key }).ok).toBe(true);
+    }
+    for (const key of [
+      "deals/d/1/malware.exe",
+      "deals/d/1/evil.html",
+      "deals/d/1/vector.svg",
+      "deals/d/1/script.js",
+      "deals/d/1/noextension",
+    ]) {
+      expect(validateUploadType({ key }).ok).toBe(false);
+    }
+  });
+
+  it("validateUploadType rejects an allowed extension carrying a disallowed content-type", () => {
+    expect(validateUploadType({ key: KEY, contentType: "text/html" }).ok).toBe(false);
+    expect(validateUploadType({ key: KEY, contentType: "image/svg+xml" }).ok).toBe(false);
+    // The matching / generic content-types are fine.
+    expect(validateUploadType({ key: KEY, contentType: "application/pdf" }).ok).toBe(true);
+    expect(
+      validateUploadType({ key: "deals/d/1/n.txt", contentType: "text/plain; charset=utf-8" }).ok
+    ).toBe(true);
+    // A generic/unknown content-type falls back to the (allowed) extension gate.
+    expect(validateUploadType({ key: KEY, contentType: "application/octet-stream" }).ok).toBe(true);
+  });
+
+  // --- Case 1: a disallowed type is rejected at the blob-put proxy, no blob written ---
+  it("blob-put rejects a disallowed extension (.exe) with 415 and writes no blob", async () => {
+    const uploadUrl = await getUploadUrl({ key: EXE_KEY });
+    const res = await blobPut(putReq(uploadUrl, BYTES, "application/x-msdownload"));
+    expect(res.status).toBe(415);
+    expect(storage.puts).toHaveLength(0);
+  });
+
+  it("blob-put rejects an allowed extension carrying a script content-type (.pdf + text/html)", async () => {
+    const uploadUrl = await getUploadUrl({ key: KEY });
+    const res = await blobPut(putReq(uploadUrl, BYTES, "text/html"));
+    expect(res.status).toBe(415);
+    expect(storage.puts).toHaveLength(0);
+  });
+
+  // --- Case 2: an allowed type still succeeds exactly as before ---
+  it("blob-put still accepts an allowed type (application/pdf)", async () => {
+    const uploadUrl = await getUploadUrl({ key: KEY });
+    const res = await blobPut(putReq(uploadUrl, BYTES, "application/pdf"));
+    expect(res.status).toBe(200);
+    expect(storage.puts).toHaveLength(1);
+    expect(storage.puts[0].key).toBe(KEY);
+  });
+
+  // --- Case 3: the client-upload grant route enforces the SAME allowlist ---
+  it("client-upload mints no grant for a disallowed extension (.exe) — 415", async () => {
+    const url = await getClientUploadUrl({ key: EXE_KEY });
+    const res = await clientUpload(mintReq(url, mintBody(EXE_KEY)));
+    expect(res.status).toBe(415);
+    expect(storage.clientUploadGrants).toHaveLength(0);
+  });
+
+  it("client-upload still mints a grant for an allowed type (.pdf)", async () => {
+    const url = await getClientUploadUrl({ key: KEY });
+    const res = await clientUpload(mintReq(url, mintBody(KEY)));
+    expect(res.status).toBe(200);
+    expect(storage.clientUploadGrants).toHaveLength(1);
+    expect(storage.clientUploadGrants[0].key).toBe(KEY);
   });
 });

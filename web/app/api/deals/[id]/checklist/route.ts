@@ -5,6 +5,7 @@ import {
   CHECKLIST_ELIGIBLE_STAGES,
   DEFAULT_CHECKLIST_ITEMS,
   checklistHasAccess,
+  sellerDefaultsFor,
 } from "@/lib/checklist";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -18,20 +19,25 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       return error("deal not found", 404);
     }
 
-    // Auto-seed defaults if eligible stage + empty.
-    const count = await prisma.checklist_items.count({ where: { deal_id: dealId } });
-    if (count === 0) {
-      const deal = await prisma.deals.findUnique({
-        where: { id: dealId },
-        select: { stage: true },
-      });
-      if (deal && CHECKLIST_ELIGIBLE_STAGES.has(deal.stage)) {
-        // Two concurrent first-opens can both see count === 0 (#90).
-        // skipDuplicates emits ON CONFLICT DO NOTHING, so the loser of that
-        // race no-ops against the partial unique index on (deal_id, label)
-        // WHERE NOT is_custom and both callers read the winner's rows below.
+    const deal = await prisma.deals.findUnique({
+      where: { id: dealId },
+      select: { type: true, stage: true, checklist_seeded_at: true },
+    });
+
+    // Seller-portal defaults (#261): seed the stage-appropriate seller set for
+    // sell deals (listing prep at active_search, final prep at pre_close). This
+    // is intentionally INDEPENDENT of the checklist_seeded_at marker: a sell
+    // deal seeds seller items at active_search AND, later, the TC set at
+    // under_contract, so one boolean marker can't gate both. Idempotency here
+    // comes from the partial unique index on (deal_id, label) WHERE NOT
+    // is_custom — skipDuplicates makes a re-GET at the same stage a no-op — and
+    // we deliberately do NOT stamp checklist_seeded_at, leaving the TC seeding
+    // path (#264) untouched.
+    if (deal) {
+      const sellerDefaults = sellerDefaultsFor(deal.type, deal.stage);
+      if (sellerDefaults.length > 0) {
         await prisma.checklist_items.createMany({
-          data: DEFAULT_CHECKLIST_ITEMS.map((d, i) => ({
+          data: sellerDefaults.map((d, i) => ({
             deal_id: dealId,
             label: d.label,
             category: d.category,
@@ -41,6 +47,40 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
           skipDuplicates: true,
         });
       }
+    }
+
+    // Auto-seed the TC closing defaults exactly once per deal, at an eligible
+    // stage. The persistent marker deals.checklist_seeded_at — NOT a live item
+    // count — decides "seeded before?", so an intentionally emptied checklist
+    // stays empty instead of resurrecting all 17 defaults on the next load
+    // (#264).
+    if (
+      deal &&
+      deal.checklist_seeded_at === null &&
+      CHECKLIST_ELIGIBLE_STAGES.has(deal.stage)
+    ) {
+      // Seed the rows and stamp the marker in one transaction. Two concurrent
+      // first-opens can both read checklist_seeded_at IS NULL (#90):
+      // skipDuplicates emits ON CONFLICT DO NOTHING so the loser no-ops against
+      // the partial unique index on (deal_id, label) WHERE NOT is_custom, and
+      // the marker UPDATE is idempotent (both write ~now()); both callers then
+      // read the winner's rows below.
+      await prisma.$transaction([
+        prisma.checklist_items.createMany({
+          data: DEFAULT_CHECKLIST_ITEMS.map((d, i) => ({
+            deal_id: dealId,
+            label: d.label,
+            category: d.category,
+            assigned_to: d.assignedTo,
+            sort_order: i,
+          })),
+          skipDuplicates: true,
+        }),
+        prisma.deals.update({
+          where: { id: dealId },
+          data: { checklist_seeded_at: new Date() },
+        }),
+      ]);
     }
 
     const items = await prisma.$queryRaw<

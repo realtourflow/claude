@@ -13,7 +13,7 @@
 import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
-import { getSimplyretsClient } from "@/lib/simplyrets";
+import { getSimplyretsClient, SimplyRetsAuthError } from "@/lib/simplyrets";
 
 export async function GET(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -47,12 +47,23 @@ export async function PATCH(req: Request): Promise<Response> {
 
     // Validate the credentials against SimplyRETS before saving (unless
     // clearing). Mirrors the test-before-save check in the Go handler.
+    //
+    // Distinguish a genuine auth failure from a transient outage (#309): only a
+    // real 401 (SimplyRetsAuthError) means the credentials are wrong. A 5xx /
+    // timeout / network error means SimplyRETS is down — we must NOT reject the
+    // agent's (possibly correct) creds as invalid, and we return before the DB
+    // write below so their previously-saved creds are left untouched.
     if (key !== "" && secret !== "") {
       try {
         await getSimplyretsClient().search(key, secret, { limit: 1 });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        return error(`MLS credentials are invalid: ${msg}`, 400);
+        if (e instanceof SimplyRetsAuthError) {
+          return error(`MLS credentials are invalid: ${e.message}`, 400);
+        }
+        return error(
+          "SimplyRETS is temporarily unavailable — try again shortly",
+          502
+        );
       }
     }
 

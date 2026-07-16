@@ -7,9 +7,11 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { Deal, LoanMilestones } from "@/lib/types";
 import { AGENT_STAGE_LABELS as STAGE_LABELS } from "@/lib/stages";
 import { useDeals } from "@/hooks/useDeals";
+import { useDocuments } from "@/hooks/useDocuments";
 import { useContingencies, useAllContingenciesForDeals, ContingencyStatus, ContingencyType } from "@/hooks/useContingencies";
 import { AddContingencyForm } from "@/components/contingencies/AddContingencyForm";
 import { useChecklist, ChecklistAssignee } from "@/hooks/useChecklist";
+import { useAllChecklistsForDeals } from "@/hooks/useAllChecklists";
 import { useAgentTasks } from "@/hooks/useTasks";
 import { usePermission } from "@/permissions/usePermission";
 import { PERMISSIONS } from "@/permissions/permissions";
@@ -18,47 +20,8 @@ import {
   CalendarClock, ClipboardList, Loader2, AlertCircle,
   CheckSquare, RefreshCw, Pencil, Building2, Plus, X, Lock,
   Shield, ShieldCheck, ShieldOff, Phone, Copy, Zap,
-  CalendarDays, User, FileCheck, Eye, FileX, Upload, ChevronDown,
+  CalendarDays, User, ChevronDown,
 } from 'lucide-react';
-
-// ─── Documents mock data ──────────────────────────────────────────────────────
-
-type DocStatus = 'signed' | 'pending_signature' | 'pending_review' | 'missing' | 'uploaded';
-
-type DocRecord = {
-  id: string;
-  name: string;
-  status: DocStatus;
-  date: string;
-  required: boolean;
-};
-
-const INIT_DOCS: Record<string, DocRecord[]> = {
-  'deal-smith': [
-    { id: 'ds1', name: 'Purchase Agreement',          status: 'signed',            date: '2026-02-01', required: true  },
-    { id: 'ds2', name: 'ARIVE Disclosures',            status: 'pending_signature', date: '2026-02-12', required: true  },
-    { id: 'ds3', name: 'Inspection Report',            status: 'pending_review',    date: '2026-02-10', required: true  },
-    { id: 'ds4', name: 'Proof of Funds',               status: 'missing',           date: '—',          required: true  },
-    { id: 'ds5', name: 'Title Commitment',             status: 'pending_review',    date: '2026-02-14', required: true  },
-    { id: 'ds6', name: 'Homeowners Insurance Binder',  status: 'missing',           date: '—',          required: true  },
-  ],
-  'deal-williams': [
-    { id: 'dw1', name: 'Listing Agreement',            status: 'signed',            date: '2026-01-10', required: true  },
-    { id: 'dw2', name: 'Seller Disclosures',           status: 'signed',            date: '2026-01-12', required: true  },
-    { id: 'dw3', name: 'Purchase Agreement',           status: 'signed',            date: '2026-02-01', required: true  },
-    { id: 'dw4', name: 'Repair Request Response',      status: 'pending_review',    date: '2026-02-13', required: false },
-    { id: 'dw5', name: 'Wire Instructions',            status: 'missing',           date: '—',          required: true  },
-    { id: 'dw6', name: 'Settlement Statement',         status: 'missing',           date: '—',          required: true  },
-  ],
-};
-
-const DOC_STATUS: Record<DocStatus, { label: string; style: string; dot: string; Icon: React.ElementType }> = {
-  signed:            { label: 'Signed',          style: 'bg-green-100 text-green-700', dot: 'bg-green-400',  Icon: FileCheck },
-  pending_review:    { label: 'Review needed',   style: 'bg-amber-100 text-amber-700', dot: 'bg-amber-400',  Icon: Eye       },
-  pending_signature: { label: 'Needs signature', style: 'bg-red-100 text-red-700',     dot: 'bg-red-400',    Icon: Pencil    },
-  missing:           { label: 'Missing',         style: 'bg-gray-100 text-gray-500',   dot: 'bg-gray-300',   Icon: FileX     },
-  uploaded:          { label: 'Uploaded',        style: 'bg-blue-100 text-blue-700',   dot: 'bg-blue-400',   Icon: Upload    },
-};
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -266,10 +229,12 @@ type DeadlineEntry = {
   source: 'task' | 'checklist' | 'contingency';
 };
 
-function Deadlines() {
-  const deals            = useMyDeals();
-  const { tasks }        = useAgentTasks();
-  const allContingencies = useAllContingenciesForDeals(deals.map((d) => d.id));
+// Exported for tests (tests/components/TCDeadlines.test.tsx).
+export function Deadlines() {
+  const deals             = useMyDeals();
+  const { tasks }         = useAgentTasks();
+  const allContingencies  = useAllContingenciesForDeals(deals.map((d) => d.id));
+  const allChecklistItems = useAllChecklistsForDeals(deals.map((d) => d.id));
 
   const taskEntries: DeadlineEntry[] = tasks
     .filter((t) => t.dueDate && t.status !== 'completed')
@@ -283,7 +248,20 @@ function Deadlines() {
       source: 'task' as const,
     }));
 
-  const checklistEntries: DeadlineEntry[] = [];
+  // Checklist due dates were silently dropped (#302): this used to be a
+  // hardcoded []. Surface every unchecked checklist item that has a due date,
+  // mirroring how taskEntries/contingencyEntries are built.
+  const checklistEntries: DeadlineEntry[] = allChecklistItems
+    .filter((i) => i.dueDate && !i.checked)
+    .map((i) => ({
+      id: i.id,
+      dealId: i.dealId,
+      title: i.label,
+      dueDate: i.dueDate!,
+      assignedTo: i.assignedTo,
+      status: 'pending' as const,
+      source: 'checklist' as const,
+    }));
 
   const contingencyEntries: DeadlineEntry[] = allContingencies
     .filter((c) => c.status === 'active' && c.deadline)
@@ -536,104 +514,112 @@ function ContingenciesSection() {
 
 // ─── Documents ────────────────────────────────────────────────────────────────
 
+// Maps a document's DocuSign envelope status to a TC-facing badge. Documents
+// with no envelope are just uploaded files → "Unsigned". Same status vocabulary
+// as the agent DocumentsTab / buyer-seller portal, so the TC reads one source.
+const DOC_STATUS_META: Record<string, { label: string; style: string; dot: string }> = {
+  sent:      { label: 'Awaiting signature', style: 'bg-blue-100 text-blue-700',     dot: 'bg-blue-400'   },
+  delivered: { label: 'Viewed',             style: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-400' },
+  completed: { label: 'Signed',             style: 'bg-green-100 text-green-700',    dot: 'bg-green-400'  },
+  declined:  { label: 'Declined',           style: 'bg-red-100 text-red-700',        dot: 'bg-red-400'    },
+  voided:    { label: 'Voided',             style: 'bg-gray-100 text-gray-500',      dot: 'bg-gray-300'   },
+};
+
+const DOC_UNSIGNED_META = { label: 'Unsigned', style: 'bg-gray-100 text-gray-500', dot: 'bg-gray-300' };
+
+function docStatusMeta(status?: string) {
+  return (status && DOC_STATUS_META[status]) || DOC_UNSIGNED_META;
+}
+
+function formatDocDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Per-deal documents card. Reads the deal's REAL uploaded documents via
+// useDocuments — the same hook the agent Documents tab uses (TC read access on
+// GET /api/deals/:id/documents landed in #235). Extracted into its own
+// component so the hook runs once per deal instead of inside a .map (React
+// hooks can't be called in a loop). Exported for tests
+// (tests/components/TCDocuments.test.tsx).
+export function DealDocumentsCard({ deal }: { deal: Deal }) {
+  const { docs, loading } = useDocuments(deal.id);
+
+  const total   = docs.length;
+  const signed  = docs.filter((d) => d.docusignStatus === 'completed').length;
+  const pending = docs.filter((d) => d.docusignStatus === 'sent' || d.docusignStatus === 'delivered').length;
+  const pct     = total > 0 ? Math.round((signed / total) * 100) : 0;
+
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <h2 className="text-sm font-bold text-brand-navy">{deal.clientName}</h2>
+        <span className="text-xs text-gray-400">{deal.property.address}</span>
+        <span className="ml-auto text-xs font-semibold text-gray-500">{signed}/{total} signed</span>
+        {pending > 0 && (
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+            {pending} awaiting signature
+          </span>
+        )}
+      </div>
+
+      {/* Progress bar — signed / total documents */}
+      <div className="mb-2 h-1.5 rounded-full bg-gray-100">
+        <div
+          className={`h-1.5 rounded-full transition-all duration-300 ${pct === 100 ? 'bg-green-400' : pct >= 60 ? 'bg-amber-400' : 'bg-red-400'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="px-4 py-6 text-center text-xs text-gray-300">Loading…</div>
+        ) : docs.length === 0 ? (
+          <div className="px-4 py-6 text-center text-xs text-gray-400 italic">No documents uploaded yet</div>
+        ) : (
+          docs.map((doc, i) => {
+            const meta = docStatusMeta(doc.docusignStatus);
+            return (
+              <div
+                key={doc.id}
+                className={`flex items-center gap-3 px-4 py-3 ${i < docs.length - 1 ? 'border-b border-gray-50' : ''}`}
+              >
+                <span className={`h-2 w-2 rounded-full flex-shrink-0 ${meta.dot}`} />
+                <FileText size={14} className="text-gray-300 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-brand-navy truncate">{doc.name}</p>
+                  <p className="text-[11px] text-gray-400">
+                    {doc.uploaderName ? `${doc.uploaderName} · ` : ''}{formatDocDate(doc.createdAt)}
+                  </p>
+                </div>
+                <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold flex-shrink-0 ${meta.style}`}>
+                  {meta.label}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Documents() {
   const deals = useMyDeals();
-  const [docs, setDocs] = useState(INIT_DOCS);
-
-  function markOK(dealId: string, docId: string) {
-    setDocs((prev) => ({
-      ...prev,
-      [dealId]: prev[dealId].map((d) =>
-        d.id === docId
-          ? { ...d, status: 'signed' as DocStatus, date: new Date().toISOString().slice(0, 10) }
-          : d,
-      ),
-    }));
-  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-brand-navy">Documents</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Track and action all required documents across your files</p>
+        <p className="text-sm text-gray-400 mt-0.5">Uploaded documents and signature status across your files</p>
       </div>
 
-      {deals.map((deal) => {
-        const dealDocs    = docs[deal.id] ?? [];
-        const total       = dealDocs.length;
-        const signed      = dealDocs.filter((d) => d.status === 'signed').length;
-        const pct         = total > 0 ? Math.round((signed / total) * 100) : 0;
-        const needsAction = dealDocs.filter((d) => d.status !== 'signed').length;
-
-        return (
-          <section key={deal.id}>
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <h2 className="text-sm font-bold text-brand-navy">{deal.clientName}</h2>
-              <span className="text-xs text-gray-400">{deal.property.address}</span>
-              <span className="ml-auto text-xs font-semibold text-gray-500">{signed}/{total} complete</span>
-              {needsAction > 0 && (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
-                  {needsAction} need action
-                </span>
-              )}
-            </div>
-
-            {/* Progress bar */}
-            <div className="mb-2 h-1.5 rounded-full bg-gray-100">
-              <div
-                className={`h-1.5 rounded-full transition-all duration-300 ${pct === 100 ? 'bg-green-400' : pct >= 60 ? 'bg-amber-400' : 'bg-red-400'}`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-
-            <div className="rounded-xl bg-white shadow-sm overflow-hidden">
-              {dealDocs.map((doc, i) => {
-                const s = DOC_STATUS[doc.status];
-                const DocIcon = s.Icon;
-                return (
-                  <div
-                    key={doc.id}
-                    className={`flex items-center gap-3 px-4 py-3 ${i < dealDocs.length - 1 ? 'border-b border-gray-50' : ''}`}
-                  >
-                    <span className={`h-2 w-2 rounded-full flex-shrink-0 ${s.dot}`} />
-                    <DocIcon size={14} className="text-gray-300 flex-shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <p className="text-sm font-medium text-brand-navy truncate">{doc.name}</p>
-                        {doc.required && (
-                          <span className="text-[9px] font-bold text-gray-300 uppercase flex-shrink-0">Required</span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-gray-400">{doc.date}</p>
-                    </div>
-                    <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold flex-shrink-0 ${s.style}`}>
-                      {s.label}
-                    </span>
-                    {doc.status === 'missing' && (
-                      <button className="rounded-lg bg-brand-navy px-2.5 py-1 text-[11px] font-bold text-white hover:bg-brand-navy/80 transition-colors flex-shrink-0">
-                        Request
-                      </button>
-                    )}
-                    {doc.status === 'pending_signature' && (
-                      <button className="rounded-lg bg-red-500 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-red-600 transition-colors flex-shrink-0">
-                        Send Reminder
-                      </button>
-                    )}
-                    {doc.status === 'pending_review' && (
-                      <button
-                        onClick={() => markOK(deal.id, doc.id)}
-                        className="rounded-lg bg-amber-500 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-amber-600 transition-colors flex-shrink-0"
-                      >
-                        Mark OK
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        );
-      })}
+      {deals.length === 0 ? (
+        <div className="rounded-xl bg-white px-5 py-10 text-center text-gray-400 shadow-sm">No active files</div>
+      ) : (
+        deals.map((deal) => <DealDocumentsCard key={deal.id} deal={deal} />)
+      )}
     </div>
   );
 }

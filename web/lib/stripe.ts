@@ -18,6 +18,12 @@ type StripeLike = {
       create: (
         params: Stripe.Checkout.SessionCreateParams
       ) => Promise<Pick<Stripe.Checkout.Session, "id" | "url">>;
+      // Optional so existing test stubs that only stub `create` still satisfy
+      // the type (backward-compatible seam). The real Stripe client always has
+      // it; only routes that call retrieveCheckoutSession need a stub for it.
+      retrieve?: (
+        id: string
+      ) => Promise<Pick<Stripe.Checkout.Session, "id" | "url" | "status">>;
     };
   };
   webhooks: {
@@ -26,6 +32,15 @@ type StripeLike = {
       header: string,
       secret: string
     ) => Stripe.Event;
+  };
+  // Optional so existing stubs that don't touch refunds stay valid. Needed by
+  // the webhook's refund/dispute handling (#364): a charge/dispute event only
+  // carries a payment_intent id, so we retrieve the PI to read the deal_id/type
+  // metadata we stamp at checkout.
+  paymentIntents?: {
+    retrieve: (
+      id: string
+    ) => Promise<Pick<Stripe.PaymentIntent, "id" | "metadata">>;
   };
 };
 
@@ -72,11 +87,64 @@ export async function createCheckoutSession(
       },
     ],
     mode: "payment",
+    // Stamp the same deal_id/type onto the PaymentIntent (Checkout session
+    // metadata does NOT propagate to the PaymentIntent/Charge). A refund/dispute
+    // webhook only references the PaymentIntent, so this is what lets the handler
+    // resolve the deal for refunds (#364). Forward-only: fees paid before this
+    // shipped have no PI metadata and are reconciled manually.
+    payment_intent_data: {
+      metadata: { deal_id: input.dealId, type: "closing_fee" },
+    },
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata: { deal_id: input.dealId, type: "closing_fee" },
   });
   return { id: session.id, url: session.url ?? null };
+}
+
+/**
+ * Read a PaymentIntent's metadata (deal_id / type). Used by the webhook's
+ * refund/dispute handlers, whose event objects (Charge / Dispute) carry only a
+ * payment_intent id, not the checkout metadata. Returns {} metadata when the
+ * seam has no stub or the PI predates the payment_intent_data stamp.
+ */
+export async function retrievePaymentIntentMetadata(
+  paymentIntentId: string
+): Promise<Record<string, string>> {
+  const intents = client().paymentIntents;
+  if (!intents) throw new Error("paymentIntents.retrieve is not available");
+  const intent = await intents.retrieve(paymentIntentId);
+  return (intent.metadata ?? {}) as Record<string, string>;
+}
+
+export type CheckoutSessionSnapshot = {
+  id: string;
+  url: string | null;
+  // Stripe's session status ('open' | 'complete' | 'expired') or null. Indexed
+  // access (not `Session.Status`) — the namespace isn't reachable through the
+  // default import.
+  status: Stripe.Checkout.Session["status"];
+};
+
+/**
+ * Fetch the live status of an existing Checkout Session. Lets a caller tell an
+ * abandoned/`expired` session (safe to replace) from one still `open` (must be
+ * reused — minting a second payable session would double-charge). Used by the
+ * closing-fee checkout route (#282).
+ */
+export async function retrieveCheckoutSession(
+  sessionId: string
+): Promise<CheckoutSessionSnapshot> {
+  const sessions = client().checkout.sessions;
+  if (!sessions.retrieve) {
+    throw new Error("checkout.sessions.retrieve is not available");
+  }
+  const session = await sessions.retrieve(sessionId);
+  return {
+    id: session.id,
+    url: session.url ?? null,
+    status: session.status ?? null,
+  };
 }
 
 export type CreateUpsellCheckoutInput = {
@@ -112,6 +180,12 @@ export async function createSmoothExitUpsellCheckout(
       },
     ],
     mode: "payment",
+    // Stamp deal_id/type onto the PaymentIntent so a later refund/dispute webhook
+    // (which references only the PaymentIntent, not the checkout metadata) can
+    // resolve the deal and reverse the upsell (#366). Same pattern as the fee (#364).
+    payment_intent_data: {
+      metadata: { deal_id: input.dealId, type: "smooth_exit_upsell" },
+    },
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata: { deal_id: input.dealId, type: "smooth_exit_upsell" },
@@ -144,6 +218,12 @@ export async function createFastPassCheckout(
       },
     ],
     mode: "payment",
+    // Stamp deal_id/type onto the PaymentIntent so a later refund/dispute webhook
+    // (which references only the PaymentIntent, not the checkout metadata) can
+    // resolve the deal and reverse the enrollment (#365). Same pattern as the fee (#364).
+    payment_intent_data: {
+      metadata: { deal_id: input.dealId, type: "fast_pass" },
+    },
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata: { deal_id: input.dealId, type: "fast_pass" },

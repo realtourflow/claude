@@ -34,6 +34,86 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
  * capability — shared by blob-put, blob-get, and client-upload. */
 export const ALLOWED_KEY_PREFIXES = ["deals/", "agent-templates/", "agent-forms/"];
 
+// ---------------------------------------------------------------------------
+// Upload content-type / extension allowlist (#275)
+// ---------------------------------------------------------------------------
+// Every upload is later handed to OTHER deal participants as a trusted
+// "document" (they download it by name). Without a type gate, a participant
+// could distribute an executable (.exe), a script-bearing page (.html / .svg),
+// or any other active-content file dressed up as a doc. So both upload entry
+// points — the blob-put proxy AND the client-upload grant route — restrict
+// uploads to the inert document/image types the app actually needs, via the
+// single validateUploadType() below (one definition, no drift between routes).
+
+/** extension (lowercase, no dot) -> the content-types we accept for it. */
+const ALLOWED_UPLOAD_TYPE_MAP: Record<string, readonly string[]> = {
+  pdf: ["application/pdf"],
+  png: ["image/png"],
+  jpg: ["image/jpeg"],
+  jpeg: ["image/jpeg"],
+  gif: ["image/gif"],
+  webp: ["image/webp"],
+  doc: ["application/msword"],
+  docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  xls: ["application/vnd.ms-excel"],
+  xlsx: ["application/vnd.openxmlformats-officedocument.spreadsheetml.document"],
+  txt: ["text/plain"],
+};
+
+/** The allowed file extensions (lowercase, no leading dot). */
+export const ALLOWED_UPLOAD_EXTENSIONS: readonly string[] =
+  Object.keys(ALLOWED_UPLOAD_TYPE_MAP);
+
+/** The allowed content-types (deduped across the extension map). */
+export const ALLOWED_UPLOAD_MIME_TYPES: readonly string[] = [
+  ...new Set(Object.values(ALLOWED_UPLOAD_TYPE_MAP).flat()),
+];
+
+// Content-types a browser sends when it can't identify a file. These are inert
+// (the browser downloads rather than renders them), so we don't reject on them —
+// the extension gate is the reliable signal and still applies.
+const GENERIC_CONTENT_TYPES = new Set([
+  "application/octet-stream",
+  "binary/octet-stream",
+]);
+
+/** The lowercase extension (no dot) of a key/filename, or "" when it has none. */
+function extensionOf(keyOrName: string): string {
+  const base = keyOrName.split(/[?#]/)[0].split("/").pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  // dot must be present and not the leading char (".env" is not an extension).
+  return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+}
+
+export type UploadTypeCheck = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Validate an upload against the allowlist (#275). The key/filename's extension
+ * MUST be allowed; a provided content-type (when present and not a generic
+ * unknown type) MUST also be allowed. `contentType` may be omitted — the
+ * client-upload grant route only has the pinned key at mint time — in which case
+ * the extension gate stands alone. Returns `{ok:true}` or `{ok:false, reason}`
+ * so the route can surface a clear 415.
+ */
+export function validateUploadType(input: {
+  key: string;
+  contentType?: string | null;
+}): UploadTypeCheck {
+  const ext = extensionOf(input.key);
+  if (!ext || !(ext in ALLOWED_UPLOAD_TYPE_MAP)) {
+    return {
+      ok: false,
+      reason: `file type "${ext ? `.${ext}` : "(none)"}" is not allowed — allowed: ${ALLOWED_UPLOAD_EXTENSIONS.join(", ")}`,
+    };
+  }
+  // Normalize: drop any "; charset=…" parameter, trim, lowercase.
+  const ct = (input.contentType ?? "").split(";")[0].trim().toLowerCase();
+  if (ct && !GENERIC_CONTENT_TYPES.has(ct) && !ALLOWED_UPLOAD_MIME_TYPES.includes(ct)) {
+    return { ok: false, reason: `content-type "${ct}" is not an allowed document type` };
+  }
+  return { ok: true };
+}
+
 type StoredBlob = { bytes: Uint8Array; contentType: string };
 
 /** A direct-upload grant recorded by the test seam (#189). */
@@ -65,6 +145,12 @@ export class TestStorage {
   defaultSize: number | undefined;
   /** When true, deleteBlob throws (to exercise best-effort delete failure). */
   failDeletes = false;
+  /**
+   * When set, putBlob throws for any key this predicate returns true for — lets a
+   * test simulate a storage failure on a specific object (e.g. one part of a
+   * best-effort bundle split) without failing the others.
+   */
+  failPut?: (key: string) => boolean;
   readonly seeded = new Map<string, StoredBlob>();
   readonly puts: Array<{ key: string; bytes: Uint8Array; contentType: string }> = [];
   readonly deletes: string[] = [];
@@ -332,6 +418,7 @@ export async function putBlob(
   contentType: string
 ): Promise<void> {
   if (testStore) {
+    if (testStore.failPut?.(key)) throw new Error("blob put failed (test)");
     testStore.puts.push({ key, bytes, contentType });
     testStore.seed(key, bytes, contentType);
     return;

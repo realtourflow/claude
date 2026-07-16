@@ -30,19 +30,26 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     } catch {
       return error("invalid request body", 400);
     }
+    // #272 — the claim is bound to the INVITED email (mirror of the client
+    // claim in invites/[token]/claim). The caller must present the email the
+    // invite was issued to; a token holder can't self-provision `agent` under
+    // an arbitrary email. Require it up front so an omitted email can never
+    // fall back to the invited address.
+    if (!body.email) return error("email is required", 400);
 
     const rows = await prisma.$queryRaw<InviteRow[]>`
       SELECT id, email, claimed_at, expires_at
       FROM agent_invites
-      WHERE token = ${token}::uuid
+      WHERE token = ${token}::uuid AND email = ${body.email}
     `;
     const invite = rows[0];
     if (!invite) return error("invite not found", 404);
     if (invite.claimed_at !== null) return error("invite already claimed", 409);
     if (invite.expires_at < new Date()) return error("invite expired", 410);
 
-    // Fall back to the invited email/name when the request omits them.
-    const claimEmail = body.email || invite.email;
+    // The lookup already guarantees body.email === invite.email; use the
+    // invited email as canonical. Name stays optional (falls back to email).
+    const claimEmail = invite.email;
     const claimName = body.name || invite.email;
 
     // #224 (mirror of #174) — a claim must never rewrite an existing account.

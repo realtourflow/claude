@@ -53,6 +53,28 @@ async function datedConnectedDeal() {
   return { agent, deal };
 }
 
+// #300: a NON-ARIVE deal (no arive_key_dates) whose closing anchor is the
+// agent-entered manual `deals.closing_date`, with a connected Google calendar.
+async function manualDatedConnectedDeal(closingDate = "2026-11-20") {
+  const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+  const deal = await createDeal({ agent_id: agent.id, title: "Manual St" });
+  await prisma.deals.update({
+    where: { id: deal.id },
+    data: { closing_date: new Date(closingDate) },
+  });
+  await prisma.oauth_tokens.create({
+    data: {
+      user_id: agent.id,
+      provider: "google_calendar",
+      access_token: "tok",
+      refresh_token: "r",
+      account_email: "agent@gmail.com",
+      expires_at: new Date(Date.now() + 60 * 60 * 1000),
+    },
+  });
+  return { agent, deal };
+}
+
 function advanceReq(dealId: string) {
   return authHeader("auth0|a", ["agent"]).then(
     (auth) =>
@@ -117,6 +139,59 @@ describe("calendar push on stage advance", () => {
 
     expect(res.status).toBe(200);
     expect(calls).toBe(0);
+  });
+
+  // #300 Case 2: a non-ARIVE deal with only a manual closing_date must still
+  // push a closing event — the push job read arive_key_dates directly and was
+  // blind to deals.closing_date before this fix.
+  it("#300: advancing a non-ARIVE deal with a manual closing_date pushes one closing event", async () => {
+    const { agent, deal } = await manualDatedConnectedDeal("2026-11-20");
+    const posted: Array<{ start?: { date?: string } }> = [];
+    setCalendarHttpForTesting(async (_url, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        posted.push(JSON.parse(String(init?.body ?? "{}")));
+      }
+      return new Response(JSON.stringify({ id: "gevt-manual" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const res = await stageRoute(await advanceReq(deal.id), ctx(deal.id));
+
+    expect(res.status).toBe(200);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.start?.date).toBe("2026-11-20");
+    const map = await prisma.calendar_event_map.findFirst({
+      where: { user_id: agent.id, internal_uid: `close-${deal.id}` },
+    });
+    expect(map?.external_event_id).toBe("gevt-manual");
+  });
+
+  // #300 Case 3: when BOTH an ARIVE key date and a manual closing_date exist,
+  // the ARIVE date wins — same precedence as apiDealToFrontend.
+  it("#300: the ARIVE key date wins over a manual closing_date on push", async () => {
+    const { deal } = await datedConnectedDeal(); // arive_key_dates = 2026-09-15
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: { closing_date: new Date("2026-11-20") },
+    });
+    const posted: Array<{ start?: { date?: string } }> = [];
+    setCalendarHttpForTesting(async (_url, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        posted.push(JSON.parse(String(init?.body ?? "{}")));
+      }
+      return new Response(JSON.stringify({ id: "gevt-1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    const res = await stageRoute(await advanceReq(deal.id), ctx(deal.id));
+
+    expect(res.status).toBe(200);
+    expect(posted).toHaveLength(1);
+    expect(posted[0]?.start?.date).toBe("2026-09-15");
   });
 });
 
@@ -339,6 +414,96 @@ describe("dual-provider fan-out (T5b)", () => {
   });
 });
 
+// ── #296: ensureFresh persists needs_reconnect on a dead refresh path ──────
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+
+async function datedDealWithToken(tok: {
+  refresh_token: string | null;
+  expires_at: Date;
+  needs_reconnect?: boolean;
+}) {
+  const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+  const deal = await createDeal({ agent_id: agent.id, title: "Reconnect St" });
+  await prisma.deals.update({
+    where: { id: deal.id },
+    data: { arive_key_dates: { estimatedFundingDate: "2026-09-15" } },
+  });
+  await prisma.oauth_tokens.create({
+    data: {
+      user_id: agent.id,
+      provider: "google_calendar",
+      access_token: "tok",
+      refresh_token: tok.refresh_token,
+      account_email: "agent@gmail.com",
+      needs_reconnect: tok.needs_reconnect ?? false,
+      expires_at: tok.expires_at,
+    },
+  });
+  return { agent, deal };
+}
+
+describe("ensureFresh persists needs_reconnect (#296)", () => {
+  it("expired token with no refresh_token → flags needs_reconnect, makes zero HTTP calls", async () => {
+    const { agent, deal } = await datedDealWithToken({
+      refresh_token: null,
+      expires_at: new Date(Date.now() - 60_000),
+    });
+    const calls = recorder(() => jsonRes({ id: "x" }));
+
+    const res = await stageRoute(await advanceReq(deal.id), ctx(deal.id));
+    expect(res.status).toBe(200);
+    // No refresh possible and no write attempted.
+    expect(calls).toHaveLength(0);
+
+    const row = await prisma.oauth_tokens.findFirst({
+      where: { user_id: agent.id, provider: "google_calendar" },
+    });
+    expect(row?.needs_reconnect).toBe(true);
+  });
+
+  it("expired token whose refresh call fails → flags needs_reconnect", async () => {
+    const { agent, deal } = await datedDealWithToken({
+      refresh_token: "revoked",
+      expires_at: new Date(Date.now() - 60_000),
+    });
+    setCalendarHttpForTesting(async (url) => {
+      if (url === GOOGLE_TOKEN_URL) return new Response("invalid_grant", { status: 400 });
+      return jsonRes({ id: "x" });
+    });
+
+    const res = await stageRoute(await advanceReq(deal.id), ctx(deal.id));
+    expect(res.status).toBe(200);
+
+    const row = await prisma.oauth_tokens.findFirst({
+      where: { user_id: agent.id, provider: "google_calendar" },
+    });
+    expect(row?.needs_reconnect).toBe(true);
+  });
+
+  it("a successful refresh clears a previously-set needs_reconnect", async () => {
+    const { agent, deal } = await datedDealWithToken({
+      refresh_token: "good-refresh",
+      expires_at: new Date(Date.now() - 60_000),
+      needs_reconnect: true,
+    });
+    setCalendarHttpForTesting(async (url) => {
+      if (url === GOOGLE_TOKEN_URL) {
+        return jsonRes({ access_token: "fresh-access", expires_in: 3600 });
+      }
+      return jsonRes({ id: "gevt-1" }); // event write
+    });
+
+    const res = await stageRoute(await advanceReq(deal.id), ctx(deal.id));
+    expect(res.status).toBe(200);
+
+    const row = await prisma.oauth_tokens.findFirst({
+      where: { user_id: agent.id, provider: "google_calendar" },
+    });
+    expect(row?.needs_reconnect).toBe(false);
+    expect(row?.access_token).toBe("fresh-access");
+  });
+});
+
 // ── #196: the iCal feed must read the same ARIVE key-date keys as the push ─
 
 const FEED_TOKEN = "a".repeat(48);
@@ -347,13 +512,21 @@ describe("iCal feed closing dates (#196)", () => {
   async function agentWithKeyDates(
     keyDates: Record<string, string> | null
   ): Promise<{ agentId: string; dealId: string }> {
+    return agentWithDates({ keyDates });
+  }
+
+  // #300: also lets a test set the agent-entered manual `deals.closing_date`.
+  async function agentWithDates(opts: {
+    keyDates?: Record<string, string> | null;
+    closingDate?: string | null;
+  }): Promise<{ agentId: string; dealId: string }> {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|feed" });
     const deal = await createDeal({ agent_id: agent.id, title: "Elm St" });
-    if (keyDates) {
-      await prisma.deals.update({
-        where: { id: deal.id },
-        data: { arive_key_dates: keyDates },
-      });
+    const data: Record<string, unknown> = {};
+    if (opts.keyDates) data.arive_key_dates = opts.keyDates;
+    if (opts.closingDate) data.closing_date = new Date(opts.closingDate);
+    if (Object.keys(data).length > 0) {
+      await prisma.deals.update({ where: { id: deal.id }, data });
     }
     await prisma.users.update({
       where: { id: agent.id },
@@ -415,5 +588,30 @@ describe("iCal feed closing dates (#196)", () => {
 
     expect(body).toContain("BEGIN:VCALENDAR");
     expect(body).not.toContain("UID:close-");
+  });
+
+  // #300 Case 1 (fails today): a non-ARIVE deal with only a manual
+  // closing_date must still surface a closing event in the feed.
+  it("#300: a non-ARIVE deal with a manual closing_date emits a closing VEVENT", async () => {
+    const { dealId } = await agentWithDates({ closingDate: "2026-11-20" });
+
+    const body = await fetchFeed();
+
+    expect(body).toContain(`UID:close-${dealId}@realtourflow`);
+    expect(body).toContain("SUMMARY:Closing: Elm St");
+    expect(body).toContain("DTSTART;VALUE=DATE:20261120");
+  });
+
+  // #300 Case 3: ARIVE key date wins over the manual closing_date in the feed.
+  it("#300: prefers the ARIVE key date over the manual closing_date", async () => {
+    await agentWithDates({
+      keyDates: { estimatedFundingDate: "2026-09-15" },
+      closingDate: "2026-11-20",
+    });
+
+    const body = await fetchFeed();
+
+    expect(body).toContain("DTSTART;VALUE=DATE:20260915");
+    expect(body).not.toContain("DTSTART;VALUE=DATE:20261120");
   });
 });

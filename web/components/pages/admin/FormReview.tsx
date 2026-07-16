@@ -23,16 +23,40 @@ const STATUS_TABS = [
 
 const STATUS_CHIP: Record<string, string> = {
   pending_review: "bg-amber-50 text-amber-700 border-amber-200",
+  detecting: "bg-blue-50 text-blue-700 border-blue-200",
   ready: "bg-green-50 text-green-700 border-green-200",
   rejected: "bg-red-50 text-red-700 border-red-200",
   archived: "bg-gray-100 text-gray-500 border-gray-200",
 };
 
+// A detect job exhausts its 3 pg-boss retries within ~30min; past an hour in
+// 'detecting' the form is almost certainly stranded (#284) — badge it + offer a retry.
+const STUCK_DETECTING_MS = 60 * 60 * 1000;
+
 export function FormReview() {
   const [statusFilter, setStatusFilter] = useState("pending_review");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
+  // "Now" captured once per mount via the lazy initializer (calling Date.now()
+  // during render is impure) — enough to badge forms stuck > 1h in 'detecting'.
+  const [now] = useState(() => Date.now());
   const list = useAdminFormsList(statusFilter);
   const forms = list.data ?? [];
+
+  // Re-run detection for a form stranded in 'detecting' (its detect job died).
+  // Best-effort: on failure the row simply stays in the queue to retry again.
+  async function retryDetect(id: string) {
+    if (retrying) return;
+    setRetrying(id);
+    try {
+      await api.post(`/admin/forms/${id}/retry-detect`, {});
+    } catch {
+      // swallow — the queue row remains, so the admin can retry once more
+    } finally {
+      setRetrying(null);
+      void list.refetch();
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -68,32 +92,65 @@ export function FormReview() {
             <p className="text-sm text-gray-400">Nothing here.</p>
           ) : (
             <ul className="space-y-2">
-              {forms.map((f) => (
-                <li key={f.id}>
-                  <button
-                    onClick={() => setSelectedId(f.id)}
-                    className={`w-full rounded-lg border px-3 py-2 text-left ${
-                      selectedId === f.id
-                        ? "border-brand-navy bg-brand-navy/5"
-                        : "border-gray-100 hover:border-gray-200"
-                    }`}
-                  >
-                    <div className="truncate text-sm font-semibold text-brand-navy">
-                      {f.label}
-                    </div>
-                    <div className="mt-0.5 text-xs text-gray-400">
-                      {f.agent_name}
-                      {f.status === "pending_split"
-                        ? " · Bundle — needs splitting"
-                        : ` · ${f.field_count} fields${
-                            f.needs_review_count > 0
-                              ? ` · ${f.needs_review_count} need review`
-                              : ""
-                          }`}
-                    </div>
-                  </button>
-                </li>
-              ))}
+              {forms.map((f) => {
+                const isDetecting = f.status === "detecting";
+                const stuck =
+                  isDetecting &&
+                  now - new Date(f.created_at).getTime() > STUCK_DETECTING_MS;
+                return (
+                  <li key={f.id}>
+                    <button
+                      onClick={() => setSelectedId(f.id)}
+                      className={`w-full rounded-lg border px-3 py-2 text-left ${
+                        selectedId === f.id
+                          ? "border-brand-navy bg-brand-navy/5"
+                          : "border-gray-100 hover:border-gray-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="flex-1 truncate text-sm font-semibold text-brand-navy">
+                          {f.label}
+                        </span>
+                        {isDetecting && (
+                          <span
+                            className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
+                              stuck
+                                ? "border-red-200 bg-red-50 text-red-700"
+                                : "border-blue-200 bg-blue-50 text-blue-700"
+                            }`}
+                          >
+                            {stuck ? "Stuck" : "Detecting…"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-xs text-gray-400">
+                        {f.agent_name}
+                        {isDetecting
+                          ? stuck
+                            ? " · Detection stalled"
+                            : " · Detecting fields…"
+                          : f.status === "pending_split"
+                            ? " · Bundle — needs splitting"
+                            : ` · ${f.field_count} fields${
+                                f.needs_review_count > 0
+                                  ? ` · ${f.needs_review_count} need review`
+                                  : ""
+                              }`}
+                      </div>
+                    </button>
+                    {stuck && (
+                      <button
+                        type="button"
+                        onClick={() => retryDetect(f.id)}
+                        disabled={retrying === f.id}
+                        className="mt-1 w-full rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 disabled:opacity-40"
+                      >
+                        {retrying === f.id ? "Retrying…" : "Retry detection"}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -498,7 +555,7 @@ function PromotionManager({
 type FormTypeOpt = { key: string; label: string; side: string };
 type SplitPart = { start: string; end: string; formType: string; label: string; side: string };
 type SplitResult = {
-  created: { id: string; label: string }[];
+  created: { id: string; label: string; already_existed?: boolean }[];
   failed: { label: string; error: string }[];
 };
 
@@ -562,14 +619,17 @@ function BundleSplit({
     parts.every((p) => p.start && p.end && p.formType && p.label.trim());
 
   if (result) {
+    const partial = result.failed.length > 0;
     return (
       <div className="space-y-3">
-        <h2 className="text-lg font-bold text-brand-navy">Split complete</h2>
+        <h2 className="text-lg font-bold text-brand-navy">
+          {partial ? "Some parts still need splitting" : "Split complete"}
+        </h2>
         <p className="text-sm text-green-700">
           Created {result.created.length} form{result.created.length !== 1 ? "s" : ""} — now in the
           Pending queue for review.
         </p>
-        {result.failed.length > 0 && (
+        {partial && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             <p className="font-semibold">{result.failed.length} part(s) failed:</p>
             <ul className="mt-1 list-disc pl-5">
@@ -579,6 +639,17 @@ function BundleSplit({
                 </li>
               ))}
             </ul>
+            <p className="mt-2 text-red-800">
+              This bundle is still in the Pending queue. Fix the issue and re-split it — submit
+              every range again and the forms that already succeeded won&apos;t be duplicated.
+            </p>
+            <button
+              type="button"
+              onClick={() => setResult(null)}
+              className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100"
+            >
+              Re-split this bundle
+            </button>
           </div>
         )}
       </div>

@@ -24,12 +24,14 @@ import {
   Sliders,
   ClipboardList,
   UserPlus,
+  User,
   Users,
   LogOut,
   Bell,
   X,
   ScrollText,
   Menu,
+  Landmark,
   type LucideIcon,
 } from 'lucide-react';
 import InviteModal from '../InviteModal';
@@ -143,13 +145,13 @@ const ADMIN_NAV = [
   { label: 'Settings', icon: Settings, href: '/admin/settings' },
 ];
 
-const TC_NAV = [
+export const TC_NAV = [
   { label: 'Overview',         icon: FolderOpen,    href: '/tc'              },
   { label: 'Documents',        icon: FileText,      href: '/tc/documents'    },
   { label: 'Loan Milestones',  icon: ClipboardList, href: '/tc/disclosures'  },
   { label: 'Checklists',       icon: CheckSquare,   href: '/tc/checklists'   },
   { label: 'Calendar',         icon: Calendar,      href: '/tc/calendar'     },
-  { label: 'Contacts',         icon: MessageSquare, href: '/tc/messages'     },
+  { label: 'Contacts',         icon: User,          href: '/tc/messages'     },
   { label: 'Settings',         icon: Settings,      href: '/tc/settings'     },
 ];
 
@@ -492,6 +494,45 @@ function ClientLayout({ children, roleLabel }: { children: ReactNode; roleLabel:
   );
 }
 
+// Lending Partner Layout (#307)
+//
+// `lending_partner` is a real, assignable role with no product surface yet.
+// Rather than dropping it into the full AgentLayout shell (Pipeline/Deals/
+// Vendors — none of which is theirs), we render a self-contained, honest
+// "not available yet" placeholder. It reads only the auth store (no network),
+// so it fires zero agent-scoped API calls, and it intentionally does NOT render
+// the routed page's children — a lending_partner who lands on any agent route
+// still sees only this placeholder, never an agent page mounting its data hooks.
+
+function LendingPartnerLayout() {
+  return (
+    <div
+      data-testid="lending-partner-layout"
+      className="flex min-h-screen flex-col bg-brand-bg"
+    >
+      <TopHeader roleLabel="Lending Partner" roleBgClass="bg-brand-gold/20 text-brand-gold" />
+      <main className="flex flex-1 items-center justify-center px-4 py-10 sm:px-6">
+        <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-sm border border-gray-100">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-brand-gold/15 text-brand-gold">
+            <Landmark size={26} />
+          </div>
+          <h1 className="text-lg font-bold text-brand-navy">
+            Your lending partner workspace isn&apos;t available yet
+          </h1>
+          <p className="mt-3 text-sm leading-relaxed text-gray-500">
+            There&apos;s nothing for you to do here right now. Lending partner tools
+            are coming soon — until then, the agent you&apos;re working with will keep
+            you in the loop directly.
+          </p>
+          <p className="mt-4 text-xs text-gray-400">
+            Reached this by mistake? Contact the agent who added you to the deal.
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}
+
 // ─── Smart AppLayout ───────────────────────────────────────────────────────────
 
 type AppLayoutProps = {
@@ -531,6 +572,12 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   if (groupId === 'tc') {
     return <TCLayout>{children}</TCLayout>;
+  }
+
+  if (groupId === 'lending_partner') {
+    // Self-contained placeholder — deliberately ignores `children` so no agent
+    // page mounts under a lending_partner (see LendingPartnerLayout).
+    return <LendingPartnerLayout />;
   }
 
   // Fallback

@@ -1,9 +1,11 @@
 /**
  * FF1 — best-effort notification emails on top of lib/email.ts.
  *
- * The app already persists in-app notifications (the `notifications` table) for
- * new messages, document uploads, and task assignments. These helpers add email
- * delivery for the same three events. Each helper:
+ * These helpers add best-effort EMAIL delivery for deal activity — new messages,
+ * document uploads, task assignments, and offer requests. The matching in-app
+ * `notifications` rows are persisted separately by the routes via
+ * lib/notifications.ts (#290 wired up the document-upload and task-assignment
+ * rows this header used to claim existed but did not). Each helper:
  *   - resolves recipients server-side from the deal (agent_id + deal_participants),
  *   - never emails the actor (sender / uploader / assigner),
  *   - is invoked best-effort by the route: a throw must never block the mutation
@@ -17,13 +19,19 @@
  * route. The origin is taken from the request (`protocol://host`) so links work
  * across local / preview / prod without a hardcoded scheme.
  *
- * Preference / opt-out: `user_settings` has only a free-form JSONB `settings`
- * column with no email-notification field and no existing convention for one, so
- * the behavior is DEFAULT-ON (always send). If a typed opt-out column is added
- * later, gate the sends here in one place.
+ * Preference / opt-out (#292): the Settings → Notifications "Email
+ * notifications" toggle persists to `user_settings.settings.notifications.email`.
+ * Every send here is gated PER-RECIPIENT on that key via `lib/notification-prefs`
+ * — opted-out recipients are skipped while everyone else in the same fan-out
+ * still gets theirs. It stays DEFAULT-ON: a missing row/key means "not yet
+ * configured", which is opted-in (matching the Settings UI default).
  */
-import { prisma } from "./db";
 import { sendNotificationEmail } from "./email";
+import {
+  emailNotificationsEnabled,
+  emailNotificationsEnabledFor,
+} from "./notification-prefs";
+import { prisma } from "./db";
 
 function originFromRequest(req: Request): string {
   const url = new URL(req.url);
@@ -34,8 +42,13 @@ function originFromRequest(req: Request): string {
  * Role-appropriate deep link for a recipient. Clients land on their own portal
  * (keyed by their userId — the app's only client deal view); agents/admins use
  * the agent deal route; TCs use the TC deals dashboard.
+ *
+ * Exported (#291) so in-app notification hrefs reuse the EXACT same role→URL
+ * mapping as these emails. Pass `origin=""` for a relative path (what the
+ * Next `<Link>` in the notification bell wants); pass a real origin for the
+ * absolute links the emails need.
  */
-function recipientUrl(
+export function recipientUrl(
   origin: string,
   role: string,
   userId: string,
@@ -54,7 +67,7 @@ function recipientUrl(
 }
 
 type Participant = { user_id: string; email: string; role: string };
-type Recipient = { email: string; url: string };
+type Recipient = { userId: string; email: string; url: string };
 
 /** The deal's client participants (buyers/sellers) with their emails + roles. */
 async function clientParticipants(dealId: string): Promise<Participant[]> {
@@ -101,15 +114,27 @@ async function dealAgent(
   return rows[0] ?? null;
 }
 
-/** Send to each unique recipient with their own role-appropriate link. */
+/**
+ * Send to each unique recipient with their own role-appropriate link, skipping
+ * anyone who has turned email notifications OFF (#292). The preference is read
+ * PER-RECIPIENT in one batched query, so opting one person out never suppresses
+ * the others in the same fan-out.
+ */
 async function fanOut(
   recipients: Recipient[],
   fields: { subject: string; heading: string; body: string }
 ): Promise<void> {
   const seen = new Set<string>();
-  for (const r of recipients) {
-    if (!r.email || seen.has(r.email)) continue;
+  const unique = recipients.filter((r) => {
+    if (!r.email || seen.has(r.email)) return false;
     seen.add(r.email);
+    return true;
+  });
+  if (unique.length === 0) return;
+
+  const prefs = await emailNotificationsEnabledFor(unique.map((r) => r.userId));
+  for (const r of unique) {
+    if (prefs.get(r.userId) === false) continue; // recipient opted out
     await sendNotificationEmail({
       to: r.email,
       subject: fields.subject,
@@ -148,6 +173,7 @@ export async function emailNewMessage(input: {
     recipients = tcs
       .filter((tc) => tc.user_id !== senderId)
       .map((tc) => ({
+        userId: tc.user_id,
         email: tc.email,
         url: recipientUrl(origin, tc.role, tc.user_id, dealId),
       }));
@@ -156,6 +182,7 @@ export async function emailNewMessage(input: {
     recipients = clients
       .filter((c) => c.user_id !== senderId)
       .map((c) => ({
+        userId: c.user_id,
         email: c.email,
         url: recipientUrl(origin, c.role, c.user_id, dealId),
       }));
@@ -164,6 +191,7 @@ export async function emailNewMessage(input: {
     if (agent && agent.id !== senderId) {
       recipients = [
         {
+          userId: agent.id,
           email: agent.email,
           url: recipientUrl(origin, "agent", agent.id, dealId),
         },
@@ -178,7 +206,20 @@ export async function emailNewMessage(input: {
   });
 }
 
-/** Document uploaded/confirmed: email the deal's client(s). Never the uploader. */
+/**
+ * Document uploaded/confirmed: email the deal's client(s) AND the deal's agent.
+ * Never the uploader.
+ *
+ * The agent belongs in the recipient set whenever they are not the uploader
+ * (#293): when a CLIENT uploads (the "please upload your pre-approval" reply),
+ * the agent is the party waiting on it, yet the old client-only fan-out left
+ * them out entirely — and on the common single-participant deal the recipient
+ * set (clients minus the uploader) was empty, so nobody was emailed and the
+ * request-a-doc loop dead-ended silently. When the AGENT uploads, `agent.id ===
+ * uploaderId` so they are skipped and only the clients hear about it (unchanged,
+ * no self-notify). fanOut dedupes by email, so an agent who is somehow also a
+ * client participant is never emailed twice.
+ */
 export async function emailDocumentUploaded(input: {
   req: Request;
   dealId: string;
@@ -192,9 +233,19 @@ export async function emailDocumentUploaded(input: {
   const recipients = clients
     .filter((c) => c.user_id !== uploaderId)
     .map((c) => ({
+      userId: c.user_id,
       email: c.email,
       url: recipientUrl(origin, c.role, c.user_id, dealId),
     }));
+
+  const agent = await dealAgent(dealId);
+  if (agent && agent.id !== uploaderId) {
+    recipients.push({
+      userId: agent.id,
+      email: agent.email,
+      url: recipientUrl(origin, "agent", agent.id, dealId),
+    });
+  }
 
   await fanOut(recipients, {
     subject: "A document was shared on your RealTourFlow deal",
@@ -213,6 +264,8 @@ export async function emailTaskAssigned(input: {
 }): Promise<void> {
   const { req, dealId, assigneeId, actorId, taskTitle } = input;
   if (!assigneeId || assigneeId === actorId) return;
+  // #292 — skip if the assignee turned email notifications off.
+  if (!(await emailNotificationsEnabled(assigneeId))) return;
 
   // Resolve the assignee's email + their role RELATIVE TO THIS DEAL so the link
   // points at the right area (agent route vs client portal vs TC dashboard).
@@ -259,6 +312,7 @@ export async function emailOfferRequested(input: {
   await fanOut(
     [
       {
+        userId: agent.id,
         email: agent.email,
         url: recipientUrl(origin, "agent", agent.id, dealId),
       },
@@ -269,6 +323,100 @@ export async function emailOfferRequested(input: {
       body: `Your client requested to make an offer on "${propertyAddress}". Reach out to discuss next steps.`,
     }
   );
+}
+
+/**
+ * Form reviewed (#295): an admin approved or rejected an agent-uploaded form.
+ * Email the OWNING AGENT so they learn the outcome without having to reopen
+ * Settings → My Forms and notice a status chip changed. A rejection carries the
+ * admin's stated reason (`reviewNotes`) when present; an approval is a simple
+ * "it's ready to use" confirmation.
+ *
+ * Single-recipient (the form's owner), gated on that agent's email-notification
+ * preference (#292). Invoked best-effort by POST /api/admin/forms/:id AFTER the
+ * status write, wrapped in the route's try/catch so a send failure can never
+ * block the admin's approve/reject action.
+ */
+export async function emailFormReviewed(input: {
+  req: Request;
+  formId: string;
+  action: "approve" | "reject";
+  reviewNotes?: string | null;
+}): Promise<void> {
+  const { req, formId, action, reviewNotes } = input;
+
+  // Resolve the owning agent (id + email) + the form label from the form row.
+  const rows = await prisma.$queryRaw<
+    { agent_id: string; email: string; label: string }[]
+  >`
+    SELECT f.agent_id, u.email, f.label
+    FROM uploaded_forms f
+    JOIN users u ON u.id = f.agent_id
+    WHERE f.id = ${formId}::uuid
+  `;
+  const row = rows[0];
+  if (!row?.email) return;
+  // #292 — respect the agent's "Email notifications" opt-out.
+  if (!(await emailNotificationsEnabled(row.agent_id))) return;
+
+  const origin = originFromRequest(req);
+  // The agent's forms live under Settings → My Forms; there is no per-form deep
+  // link, so point at their settings page (the actionable surface).
+  const formsUrl = `${origin}/agent/settings`;
+  const label = row.label || "your form";
+
+  if (action === "approve") {
+    await sendNotificationEmail({
+      to: row.email,
+      subject: `Your form "${label}" is ready to use`,
+      heading: "Your form was approved",
+      body: `"${label}" passed review and is now available to send on your deals.`,
+      dealUrl: formsUrl,
+    });
+    return;
+  }
+
+  // reject — include the admin's stated reason when one was given.
+  const reason = (reviewNotes ?? "").trim();
+  const body = reason
+    ? `"${label}" was rejected. Reason: ${reason}. Open My Forms in Settings to re-upload a corrected version.`
+    : `"${label}" was rejected. Open My Forms in Settings to re-upload a corrected version.`;
+  await sendNotificationEmail({
+    to: row.email,
+    subject: `Your form "${label}" needs another look`,
+    heading: "Your form was rejected",
+    body,
+    dealUrl: formsUrl,
+  });
+}
+
+/**
+ * Disclosure reminder (#303): the admin "Send Reminder" button nudges the
+ * deal's client(s) — the party who must sign — about disclosures that were sent
+ * but not yet signed. Mirrors the other helpers: resolves the buyer/seller
+ * participants server-side, links each to their own portal, and fans out with
+ * the same per-recipient opt-out + dedupe. Admin-triggered, so there is no
+ * actor to skip. Invoked best-effort by the admin disclosure-reminder route.
+ */
+export async function emailDisclosureReminder(input: {
+  req: Request;
+  dealId: string;
+}): Promise<void> {
+  const { req, dealId } = input;
+  const origin = originFromRequest(req);
+
+  const clients = await clientParticipants(dealId);
+  const recipients = clients.map((c) => ({
+    userId: c.user_id,
+    email: c.email,
+    url: recipientUrl(origin, c.role, c.user_id, dealId),
+  }));
+
+  await fanOut(recipients, {
+    subject: "Reminder: your disclosures need a signature",
+    heading: "Please sign your disclosures",
+    body: "Your loan disclosures were sent but haven't been signed yet. Please review and sign them so your closing stays on track.",
+  });
 }
 
 // ---------------------------------------------------------------------------

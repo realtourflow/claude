@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { api } from "@/lib/api-client";
 import { useDeals } from "@/hooks/useDeals";
 import { useUsers, AppUser } from "@/hooks/useUsers";
+import { useAgentInvites, AgentInvite } from "@/hooks/useAgentInvites";
 import { useSystemConfig, usePromoCodes, useAuditLog, SystemConfig, CreatePromoCodeInput } from "@/hooks/useAdmin";
 import { Deal } from "@/lib/types";
 import { FormReview } from "@/components/pages/admin/FormReview";
@@ -401,9 +402,19 @@ function AllDeals({ deals }: { deals: Deal[] }) {
 // ─── Pending Disclosures ───────────────────────────────────────────────────────
 
 function PendingDisclosures({ deals }: { deals: Deal[] }) {
+  const [remindedIds, setRemindedIds] = useState<Set<string>>(new Set());
   const pending = deals.filter(
     (d) => d.loanMilestones?.disclosuresOut && !d.loanMilestones?.disclosuresSignedSubmitted,
   );
+
+  async function sendReminder(dealId: string) {
+    try {
+      await api.post<{ ok: boolean }>(`/deals/${dealId}/disclosure-reminder`, {});
+      setRemindedIds((prev) => new Set([...prev, dealId]));
+    } catch {
+      // Silently ignore — admin can retry.
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -428,8 +439,12 @@ function PendingDisclosures({ deals }: { deals: Deal[] }) {
                 {d.health}
               </span>
               <span className="text-xs text-gray-400">{STAGE_LABELS[d.stage]}</span>
-              <button className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 transition-colors">
-                Send Reminder
+              <button
+                onClick={() => sendReminder(d.id)}
+                disabled={remindedIds.has(d.id)}
+                className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 transition-colors disabled:opacity-60 disabled:cursor-default"
+              >
+                {remindedIds.has(d.id) ? 'Reminder Sent' : 'Send Reminder'}
               </button>
             </div>
           ))}
@@ -524,16 +539,21 @@ function StuckDeals({ deals }: { deals: Deal[] }) {
 // ─── Fees Collected ────────────────────────────────────────────────────────────
 
 const FEE_BADGE: Record<string, string> = {
-  paid:    'bg-green-100 text-green-700',
-  waived:  'bg-gray-100 text-gray-400',
-  pending: 'bg-amber-100 text-amber-700',
-  unpaid:  'bg-red-50 text-red-600',
+  paid:     'bg-green-100 text-green-700',
+  waived:   'bg-gray-100 text-gray-400',
+  pending:  'bg-amber-100 text-amber-700',
+  unpaid:   'bg-red-50 text-red-600',
+  refunded: 'bg-gray-200 text-gray-600',
 };
 
 function FeesCollected({ deals }: { deals: Deal[] }) {
   const postCloseDeals = deals.filter((d) => d.stage === 'post_close');
   const paidDeals      = postCloseDeals.filter((d) => d.feeStatus === 'paid');
   const unpaidDeals    = postCloseDeals.filter((d) => d.feeStatus === 'unpaid' || d.feeStatus === 'pending');
+  // #364: a refunded/disputed fee is neither collected nor outstanding — it was
+  // paid then reversed. Excluded from Collected (which only sums 'paid') and
+  // surfaced distinctly so a reversal isn't silently counted as revenue.
+  const refundedDeals  = postCloseDeals.filter((d) => d.feeStatus === 'refunded');
 
   const totalCollected = paidDeals.reduce((s, d) => s + (d.feeAmountCents ?? 7500), 0);
   const totalOutstanding = unpaidDeals.reduce((s, d) => s + (d.feeAmountCents ?? 7500), 0);
@@ -548,7 +568,9 @@ function FeesCollected({ deals }: { deals: Deal[] }) {
         <div className="rounded-xl bg-white px-5 py-5 shadow-sm">
           <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Collected</div>
           <div className="text-2xl font-bold text-green-600">${(totalCollected / 100).toFixed(2)}</div>
-          <div className="text-xs text-gray-400 mt-1">{paidDeals.length} deals paid</div>
+          <div className="text-xs text-gray-400 mt-1">
+            {paidDeals.length} deals paid{refundedDeals.length > 0 ? ` · ${refundedDeals.length} refunded` : ''}
+          </div>
         </div>
         <div className="rounded-xl bg-white px-5 py-5 shadow-sm">
           <div className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">Outstanding</div>
@@ -637,7 +659,7 @@ const PAYMENT_OPTION_LABELS: Record<string, string> = {
   seller_concession: 'Seller concession',
 };
 
-function ActiveFastPass({ deals }: { deals: Deal[] }) {
+function ActiveFastPass({ deals, refresh }: { deals: Deal[]; refresh: () => void }) {
   const [collectedIds, setCollectedIds] = useState<Set<string>>(new Set());
 
   async function collectFastPass(dealId: string) {
@@ -646,6 +668,16 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
       setCollectedIds((prev) => new Set([...prev, dealId]));
     } catch {
       // Silently ignore — user can retry
+    }
+  }
+
+  async function markFastPassPaid(dealId: string) {
+    try {
+      await api.post<{ ok: boolean }>(`/deals/${dealId}/fastpass/mark-paid`, {});
+      // Status flips pending_payment → active; refetch so the row re-buckets.
+      refresh();
+    } catch {
+      // Silently ignore — admin can retry.
     }
   }
 
@@ -703,7 +735,10 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
             )}
           </div>
           {fp?.status === 'pending_payment' && (
-            <button className="ml-2 rounded-lg bg-green-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-600 transition-colors">
+            <button
+              onClick={() => markFastPassPaid(d.id)}
+              className="ml-2 rounded-lg bg-green-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-600 transition-colors"
+            >
               Mark Paid
             </button>
           )}
@@ -882,7 +917,17 @@ function ActiveFastPass({ deals }: { deals: Deal[] }) {
 
 // ─── Smooth Exit ──────────────────────────────────────────────────────────────
 
-function SmoothExitQueue({ deals }: { deals: Deal[] }) {
+function SmoothExitQueue({ deals, refresh }: { deals: Deal[]; refresh: () => void }) {
+  async function activateSmoothExit(dealId: string) {
+    try {
+      await api.post<{ ok: boolean }>(`/deals/${dealId}/smoothexit/activate`, {});
+      // Status flips pending → active; refetch so the row re-buckets.
+      refresh();
+    } catch {
+      // Silently ignore — admin can retry.
+    }
+  }
+
   const allSeDeals = deals.filter((d) => d.smoothExit);
   const seDeals = allSeDeals.filter((d) => d.stage !== 'post_close');
   const completed = allSeDeals.filter((d) => d.stage === 'post_close');
@@ -923,7 +968,10 @@ function SmoothExitQueue({ deals }: { deals: Deal[] }) {
             <div className="text-xs text-gray-400">1% fee</div>
           </div>
           {se.status === 'pending' && (
-            <button className="ml-2 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 transition-colors">
+            <button
+              onClick={() => activateSmoothExit(d.id)}
+              className="ml-2 rounded-lg bg-purple-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-purple-700 transition-colors"
+            >
               Activate
             </button>
           )}
@@ -1233,7 +1281,112 @@ function InviteAgentModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function UserManagement() {
+// Lists agent invites (pending / claimed) and lets an admin revoke an
+// unclaimed one. The GET/DELETE endpoints already existed — this is the UI
+// that finally calls them (#304). A claimed invite exposes no Revoke action.
+function AgentInvitesSection() {
+  const { invites, loading, error, revokeInvite } = useAgentInvites();
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  // Snapshot "now" once (lazy init) so the expiry check stays pure across renders.
+  const [now] = useState(() => Date.now());
+
+  async function handleRevoke(invite: AgentInvite) {
+    setRevokingId(invite.id);
+    try {
+      await revokeInvite(invite.id);
+    } catch {
+      // leave the row in place if the revoke fails
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  function fmtDate(iso: string) {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+      ? '—'
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  return (
+    <section>
+      <div className="mb-3 flex items-center gap-2">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400">Agent Invites</h2>
+        {invites.length > 0 && (
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-bold text-gray-500">{invites.length}</span>
+        )}
+      </div>
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="px-5 py-6 text-center text-sm text-gray-400">Loading invites…</div>
+        ) : error ? (
+          <div className="px-5 py-6 text-center text-sm text-red-500">{error}</div>
+        ) : invites.length === 0 ? (
+          <div className="px-5 py-6 text-center text-sm text-gray-400">No agent invites yet.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-400">
+                <th className="px-5 py-3">Invitee</th>
+                <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3">Sent</th>
+                <th className="px-5 py-3">Expires</th>
+                <th className="px-5 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invites.map((inv) => {
+                const expired = !inv.claimed && new Date(inv.expiresAt).getTime() < now;
+                return (
+                  <tr key={inv.id} className="border-b last:border-0 hover:bg-gray-50/50 transition-colors">
+                    <td className="px-5 py-3">
+                      <div className="font-semibold text-brand-navy text-sm">{inv.name || '—'}</div>
+                      <a href={`mailto:${inv.email}`} className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-brand-navy transition-colors">
+                        <Mail size={11} /> {inv.email}
+                      </a>
+                    </td>
+                    <td className="px-5 py-3">
+                      {inv.claimed ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700">
+                          <ShieldCheck size={11} /> Claimed
+                        </span>
+                      ) : expired ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-600">
+                          <Clock size={11} /> Expired
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+                          <Clock size={11} /> Pending
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-xs text-gray-500">{fmtDate(inv.createdAt)}</td>
+                    <td className="px-5 py-3 text-xs text-gray-500">{fmtDate(inv.expiresAt)}</td>
+                    <td className="px-5 py-3 text-right">
+                      {inv.claimed ? (
+                        <span className="text-xs text-gray-300">—</span>
+                      ) : (
+                        <button
+                          onClick={() => handleRevoke(inv)}
+                          disabled={revokingId === inv.id}
+                          className="inline-flex items-center gap-1 rounded-lg border border-red-100 px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          <Trash2 size={11} /> {revokingId === inv.id ? 'Revoking…' : 'Revoke'}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export function UserManagement() {
   const { users, loading, deactivateUser, activateUser } = useUsers();
   const [showInviteModal, setShowInviteModal] = useState(false);
 
@@ -1379,6 +1532,8 @@ function UserManagement() {
           </section>
         );
       })}
+
+      <AgentInvitesSection />
 
       <div className="rounded-xl border-2 border-dashed border-gray-200 px-5 py-6 text-center">
         <UserPlus size={20} className="mx-auto mb-2 text-gray-300" />
@@ -1882,6 +2037,11 @@ const EVENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   config_update:   { label: 'Config Updated',  color: 'bg-purple-100 text-purple-700' },
   promo_create:    { label: 'Promo Created',   color: 'bg-amber-100 text-amber-700' },
   promo_delete:    { label: 'Promo Deleted',   color: 'bg-red-100 text-red-600' },
+  brokerage_approve: { label: 'Brokerage Approved', color: 'bg-green-100 text-green-700' },
+  brokerage_reject:  { label: 'Brokerage Rejected', color: 'bg-red-100 text-red-600' },
+  fastpass_mark_paid:  { label: 'Fast Pass Marked Paid', color: 'bg-green-100 text-green-700' },
+  smoothexit_activate: { label: 'Smooth Exit Activated', color: 'bg-purple-100 text-purple-700' },
+  disclosure_reminder: { label: 'Disclosure Reminder',   color: 'bg-amber-100 text-amber-700' },
 };
 
 const EVENT_TYPE_OPTIONS = [
@@ -1893,6 +2053,11 @@ const EVENT_TYPE_OPTIONS = [
   { value: 'config_update',   label: 'Config Updates' },
   { value: 'promo_create',    label: 'Promo Creations' },
   { value: 'promo_delete',    label: 'Promo Deletions' },
+  { value: 'brokerage_approve', label: 'Brokerage Approvals' },
+  { value: 'brokerage_reject',  label: 'Brokerage Rejections' },
+  { value: 'fastpass_mark_paid',  label: 'Fast Pass Marked Paid' },
+  { value: 'smoothexit_activate', label: 'Smooth Exit Activations' },
+  { value: 'disclosure_reminder', label: 'Disclosure Reminders' },
 ];
 
 function describeEntry(e: ReturnType<typeof useAuditLog>['entries'][number]): string {
@@ -1913,6 +2078,17 @@ function describeEntry(e: ReturnType<typeof useAuditLog>['entries'][number]): st
       return `${actor} created promo code${code ? ` "${code}"` : ''}`;
     }
     case 'promo_delete': return `${actor} deleted a promo code`;
+    case 'brokerage_approve': {
+      const name = e.metadata?.name as string | null;
+      return `${actor} approved brokerage${name ? ` "${name}"` : ''}`;
+    }
+    case 'brokerage_reject': {
+      const name = e.metadata?.name as string | null;
+      return `${actor} rejected brokerage${name ? ` "${name}"` : ''}`;
+    }
+    case 'fastpass_mark_paid':  return `${actor} marked a Fast Pass paid${deal}`;
+    case 'smoothexit_activate': return `${actor} activated Smooth Exit${deal}`;
+    case 'disclosure_reminder': return `${actor} sent a disclosure reminder${deal}`;
     default: return `${actor} performed ${e.eventType}`;
   }
 }
@@ -2322,7 +2498,7 @@ function CompaniesQueue() {
 
 export default function AdminDashboard() {
   const { section } = useParams<{ section?: string }>();
-  const { deals, loading } = useDeals();
+  const { deals, loading, refresh } = useDeals();
 
   if (section === 'users') return <UserManagement />;
   if (section === 'brokerages') return <CompaniesQueue />;
@@ -2342,8 +2518,8 @@ export default function AdminDashboard() {
     case 'stuck':       return <StuckDeals deals={deals} />;
     case 'fees':        return <FeesCollected deals={deals} />;
     case 'outstanding': return <OutstandingItems deals={deals} />;
-    case 'fastpass':    return <ActiveFastPass deals={deals} />;
-    case 'smoothexit':  return <SmoothExitQueue deals={deals} />;
+    case 'fastpass':    return <ActiveFastPass deals={deals} refresh={refresh} />;
+    case 'smoothexit':  return <SmoothExitQueue deals={deals} refresh={refresh} />;
     case 'arive':       return <AriveStatus deals={deals} />;
     case 'metro':       return <ComingSoon title="Metro View" />;
     case 'promotions':  return <Promotions />;

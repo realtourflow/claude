@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { GET as listAllRoute } from "@/app/api/tasks/route";
 import { GET as listDealsRoute } from "@/app/api/deals/route";
 import {
@@ -7,6 +7,7 @@ import {
 } from "@/app/api/deals/[id]/tasks/route";
 import { PATCH as updateStatusRoute } from "@/app/api/tasks/[id]/status/route";
 import { setVerifyOptionsForTesting } from "@/lib/auth";
+import { setEmailForTesting } from "@/lib/email";
 import { prisma } from "@/lib/db";
 import { apiTaskToFrontend } from "@/hooks/useTasks";
 import { authHeader, getTestSigner } from "../helpers/jwt";
@@ -458,6 +459,121 @@ describe("PATCH /api/tasks/[id]/status — due_date + assignee edits (#187)", ()
   });
 });
 
+describe("PATCH /api/tasks/[id]/status — role reassignment (#255)", () => {
+  it("agent changes a task's role and the change persists (GET reflects it)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id }); // defaults role 'agent'
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ role: "tc" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { role: string };
+    expect(body.role).toBe("tc");
+
+    // Survives reload: the deal's task list now reports the handed-off role,
+    // proving the reassignment left browser memory and reached the DB.
+    const listReq = new Request(`http://localhost/api/deals/${deal.id}/tasks`, {
+      headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+    });
+    const listRes = await listByDealRoute(listReq, ctx(deal.id));
+    const tasks = (await listRes.json()) as { id: string; role: string }[];
+    expect(tasks.find((t) => t.id === task.id)?.role).toBe("tc");
+  });
+
+  it("accepts every valid assignee role", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    for (const role of ["agent", "tc", "buyer", "seller", "third_party", "admin"]) {
+      const task = await createTask({ deal_id: deal.id });
+      const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({ role }),
+      });
+      const res = await updateStatusRoute(req, ctx(task.id));
+      expect(res.status).toBe(200);
+      const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+      expect(row?.role).toBe(role);
+    }
+  });
+
+  it("400 on an invalid role (leaves the row unchanged)", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ role: "wizard" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(400);
+    // Rejected specifically for the bad role — not the generic "no fields to
+    // update" (which would 400 even if `role` were silently dropped).
+    expect((await res.text()).toLowerCase()).toContain("role");
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.role).toBe("agent"); // unchanged
+  });
+
+  it("403 when a participant (not the deal agent) tries to reassign role", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|b" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|b", ["buyer"]),
+      },
+      body: JSON.stringify({ role: "tc" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(403);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.role).toBe("agent"); // unchanged
+  });
+
+  it("changes role and status together in one PATCH", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+    const task = await createTask({ deal_id: deal.id });
+
+    const req = new Request(`http://localhost/api/tasks/${task.id}/status`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|a", ["agent"]),
+      },
+      body: JSON.stringify({ role: "tc", status: "in_progress" }),
+    });
+    const res = await updateStatusRoute(req, ctx(task.id));
+    expect(res.status).toBe(200);
+    const row = await prisma.tasks.findUnique({ where: { id: task.id } });
+    expect(row?.role).toBe("tc");
+    expect(row?.status).toBe("in_progress");
+  });
+});
+
 describe("PATCH /api/tasks/[id]/status", () => {
   it("updates status when the user owns the parent deal", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
@@ -698,5 +814,105 @@ describe("PATCH /api/tasks/[id]/status — malformed body validation (#88)", () 
 
     const res = await patch(task.id, "null");
     expect(res.status).toBe(400);
+  });
+});
+
+// #290 — assigning a task must ALSO persist an in-app `notifications` row (not
+// email-only) for the assignee, and never for the actor who assigned it.
+describe("POST /api/deals/[id]/tasks — in-app notifications (#290)", () => {
+  type SentEmail = {
+    from: string;
+    to: string | string[];
+    subject: string;
+    html: string;
+  };
+
+  /** Records every send so a real Resend call never happens in the test. */
+  function fakeEmail() {
+    const sent: SentEmail[] = [];
+    const client = {
+      emails: {
+        send: async (payload: SentEmail) => {
+          sent.push(payload);
+          return { data: { id: "email_test_1" }, error: null };
+        },
+      },
+    };
+    return { client, sent };
+  }
+
+  afterEach(() => {
+    setEmailForTesting(undefined);
+  });
+
+  async function createTaskAs(
+    dealId: string,
+    sub: string,
+    roles: string[],
+    body: unknown
+  ) {
+    const req = new Request(`http://localhost/api/deals/${dealId}/tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader(sub, roles),
+      },
+      body: JSON.stringify(body),
+    });
+    return createTaskRoute(req, ctx(dealId));
+  }
+
+  it("assigning a task to a buyer participant creates a task_assigned row for the buyer", async () => {
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+    const agent = await createUser({
+      role: "agent",
+      auth0_id: "auth0|a",
+      email: "agent@example.com",
+    });
+    const buyer = await createUser({
+      role: "buyer",
+      auth0_id: "auth0|b",
+      email: "buyer@example.com",
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const res = await createTaskAs(deal.id, "auth0|a", ["agent"], {
+      title: "Upload your pre-approval",
+      assigned_to: buyer.id,
+    });
+    expect(res.status).toBe(201);
+
+    const notes = await prisma.notifications.findMany({
+      where: { user_id: buyer.id },
+    });
+    expect(notes.length).toBe(1);
+    expect(notes[0].type).toBe("task_assigned");
+    expect(notes[0].deal_id).toBe(deal.id);
+    // Email to the assignee unchanged.
+    expect(sent.map((e) => e.to)).toContain("buyer@example.com");
+  });
+
+  it("does not notify the actor when they assign a task to themselves", async () => {
+    const { client, sent } = fakeEmail();
+    setEmailForTesting(client);
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const res = await createTaskAs(deal.id, "auth0|a", ["agent"], {
+      title: "My own follow-up",
+      assigned_to: agent.id,
+    });
+    expect(res.status).toBe(201);
+
+    const notes = await prisma.notifications.findMany({
+      where: { user_id: agent.id },
+    });
+    expect(notes).toEqual([]);
+    // No self-email either (emailTaskAssigned already skips actor === assignee).
+    expect(sent).toEqual([]);
   });
 });

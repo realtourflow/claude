@@ -2,6 +2,10 @@ import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { GET as listNotifsRoute } from "@/app/api/notifications/route";
 import { PATCH as readNotifRoute } from "@/app/api/notifications/[id]/read/route";
 import { POST as readAllRoute } from "@/app/api/notifications/read-all/route";
+import { POST as createMessageRoute } from "@/app/api/deals/[id]/messages/route";
+import { PATCH as advanceStageRoute } from "@/app/api/deals/[id]/stage/route";
+import { POST as createPropRoute } from "@/app/api/deals/[id]/properties/route";
+import { PATCH as patchPropRoute } from "@/app/api/deals/[id]/properties/[propId]/route";
 import {
   GET as getSettingsRoute,
   PUT as putSettingsRoute,
@@ -11,7 +15,7 @@ import { setVerifyOptionsForTesting } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
-import { createUser } from "../helpers/factories";
+import { createUser, createDeal } from "../helpers/factories";
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
@@ -134,6 +138,175 @@ describe("User settings", () => {
       })
     );
     expect(await getRes2.json()).toEqual({ theme: "dark", density: "compact" });
+  });
+});
+
+// #291 — every in-app notification must carry a NON-null, role-appropriate
+// `href` so the AppLayout bell deep-links to the right resource instead of '#'.
+// The href reuses lib/notification-email.ts `recipientUrl` (relative path):
+// agents/admins → /agent/deals/:dealId, buyers → /buyer/:userId,
+// sellers → /seller/:userId, TCs → /tc/deals.
+describe("Notification hrefs are clickable (#291)", () => {
+  function dealCtx(id: string) {
+    return { params: Promise.resolve({ id }) };
+  }
+  function propCtx(id: string, propId: string) {
+    return { params: Promise.resolve({ id, propId }) };
+  }
+
+  type NotifRow = {
+    id: string;
+    title: string;
+    type: string;
+    deal_id: string | null;
+    href: string | null;
+  };
+
+  async function listNotifsFor(sub: string, roles: string[]): Promise<NotifRow[]> {
+    const req = new Request("http://localhost/api/notifications", {
+      headers: { authorization: await authHeader(sub, roles) },
+    });
+    const res = await listNotifsRoute(req);
+    expect(res.status).toBe(200);
+    return (await res.json()) as NotifRow[];
+  }
+
+  // Case 1 — fails today: an agent's client-thread message to a buyer participant
+  // produced a notification with href === null. It must deep-link the buyer to
+  // their own portal (/buyer/:userId), the app's only client deal view.
+  it("Case 1: a message to a buyer participant sets href to the buyer's portal", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|agent", ["agent"]),
+      },
+      body: JSON.stringify({ channel: "client_thread", body: "hi buyer" }),
+    });
+    const res = await createMessageRoute(req, dealCtx(deal.id));
+    expect(res.status).toBe(201);
+
+    const notifs = await listNotifsFor("auth0|buyer", ["buyer"]);
+    expect(notifs).toHaveLength(1);
+    expect(notifs[0].type).toBe("new_message");
+    expect(notifs[0].href).not.toBeNull();
+    expect(notifs[0].href).toBe(`/buyer/${buyer.id}`);
+  });
+
+  // A client's reply notifies the agent — the agent's href is the agent deal route.
+  it("Case 1b: a client's message to the agent sets href to the agent deal route", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|buyer", ["buyer"]),
+      },
+      body: JSON.stringify({ channel: "client_thread", body: "hi agent" }),
+    });
+    const res = await createMessageRoute(req, dealCtx(deal.id));
+    expect(res.status).toBe(201);
+
+    const notifs = await listNotifsFor("auth0|agent", ["agent"]);
+    expect(notifs).toHaveLength(1);
+    expect(notifs[0].type).toBe("new_message");
+    expect(notifs[0].href).toBe(`/agent/deals/${deal.id}`);
+  });
+
+  // Case 2 — a stage change fans out to participants; each href is role-appropriate:
+  // buyers/sellers land on their own portal (agents would use /agent/deals/:id).
+  it("Case 2: a stage change deep-links each participant to their portal", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer" });
+    const seller = await createUser({ role: "seller", auth0_id: "auth0|seller" });
+    const deal = await createDeal({ agent_id: agent.id, stage: "intake" });
+    await prisma.deal_participants.createMany({
+      data: [
+        { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+        { deal_id: deal.id, user_id: seller.id, role: "seller" },
+      ],
+    });
+
+    const req = new Request(`http://localhost/api/deals/${deal.id}/stage`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        authorization: await authHeader("auth0|agent", ["agent"]),
+      },
+      body: JSON.stringify({ stage: "active_search" }),
+    });
+    const res = await advanceStageRoute(req, dealCtx(deal.id));
+    expect(res.status).toBe(200);
+
+    const buyerNotifs = await listNotifsFor("auth0|buyer", ["buyer"]);
+    expect(buyerNotifs).toHaveLength(1);
+    expect(buyerNotifs[0].type).toBe("stage_change");
+    expect(buyerNotifs[0].href).toBe(`/buyer/${buyer.id}`);
+
+    const sellerNotifs = await listNotifsFor("auth0|seller", ["seller"]);
+    expect(sellerNotifs).toHaveLength(1);
+    expect(sellerNotifs[0].type).toBe("stage_change");
+    expect(sellerNotifs[0].href).toBe(`/seller/${seller.id}`);
+  });
+
+  // Case 3 — an offer-request notification targets the deal's agent; its href is
+  // the agent deal route (/agent/deals/:id).
+  it("Case 3: an offer-request notification deep-links the agent to the deal", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|agent" });
+    const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyer" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deal_participants.create({
+      data: { deal_id: deal.id, user_id: buyer.id, role: "buyer" },
+    });
+
+    // Seed a tracked property via the agent POST route (offer_requested defaults false).
+    const seedReq = new Request(
+      `http://localhost/api/deals/${deal.id}/properties`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|agent", ["agent"]),
+        },
+        body: JSON.stringify({ address: "123 Test St" }),
+      }
+    );
+    const seedRes = await createPropRoute(seedReq, dealCtx(deal.id));
+    expect(seedRes.status).toBe(201);
+    const prop = (await seedRes.json()) as { id: string };
+
+    // The buyer flips offer_requested → true, which notifies the agent.
+    const req = new Request(
+      `http://localhost/api/deals/${deal.id}/properties/${prop.id}`,
+      {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|buyer", ["buyer"]),
+        },
+        body: JSON.stringify({ offer_requested: true }),
+      }
+    );
+    const res = await patchPropRoute(req, propCtx(deal.id, prop.id));
+    expect(res.status).toBe(200);
+
+    const notifs = await listNotifsFor("auth0|agent", ["agent"]);
+    const offer = notifs.find((n) => n.type === "offer_requested");
+    expect(offer).toBeDefined();
+    expect(offer?.href).toBe(`/agent/deals/${deal.id}`);
   });
 });
 
