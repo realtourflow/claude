@@ -23,7 +23,7 @@
  * Mirrors pushDealClosingEvent / pushTaskDueEvent in
  * the legacy Go backend.
  */
-import { extractClosingDate, parseDateOnly } from "./arive-dates";
+import { parseDateOnly, resolveClosingDate } from "./arive-dates";
 import { prisma } from "./db";
 import { fanOutUpsert, fanOutDelete, type CalendarEvent } from "./calendar";
 import {
@@ -40,12 +40,20 @@ import {
 export async function processDealClosingPush(dealId: string): Promise<void> {
   const deal = await prisma.deals.findUnique({
     where: { id: dealId },
-    select: { agent_id: true, title: true, address: true, arive_key_dates: true },
+    select: {
+      agent_id: true,
+      title: true,
+      address: true,
+      arive_key_dates: true,
+      closing_date: true,
+    },
   });
   if (!deal) return; // deal deleted since enqueue → nothing to push
 
   const uid = `close-${dealId}`;
-  const closing = extractClosingDate(deal.arive_key_dates);
+  // ARIVE key date wins, else the agent-entered manual closing_date — same
+  // precedence as the iCal feed and the deal serializer (#253/#300).
+  const closing = resolveClosingDate(deal.arive_key_dates, deal.closing_date);
   if (!closing) {
     // Date cleared → delete the event if one was previously pushed.
     await fanOutDelete(deal.agent_id, uid);

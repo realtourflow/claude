@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
-import { extractClosingDate } from "@/lib/arive-dates";
+import { resolveClosingDate } from "@/lib/arive-dates";
 import { AriveTracker, AriveKeyDates, Deal, DealStage, LoanMilestones, FastPassEnrollment, SmoothExitEnrollment } from "@/lib/types";
 import {
   apiDealSchema,
@@ -107,12 +107,12 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
     );
   }
 
-  // ARIVE key dates win when present (same key selection as the calendar push
-  // in lib/jobs.ts and the iCal feed — see lib/arive-dates.ts (#196)); the
+  // ARIVE key dates win when present (same precedence as the calendar push in
+  // lib/jobs.ts and the iCal feed — see lib/arive-dates.ts (#196/#300)); the
   // agent-entered manual closing_date is the fallback anchor for non-ARIVE
   // deals — every seller deal and outside-lender buyer (#253).
   const closingDate =
-    extractClosingDate(d.arive_key_dates) ?? d.closing_date ?? undefined;
+    resolveClosingDate(d.arive_key_dates, d.closing_date) ?? undefined;
 
   // Derive a live "days to close" counter from the closing date so the buyer /
   // seller portal countdown blocks show real data. Guard unparseable dates so
