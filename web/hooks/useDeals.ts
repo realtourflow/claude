@@ -156,7 +156,9 @@ export function apiDealToFrontend(d: ApiDeal): Deal {
       ),
     },
     flags: d.arive_linked ? ['mountain_mortgage'] : [],
-    status: 'active',
+    // Real lifecycle status from the API (#254). Payloads that don't SELECT it
+    // (create RETURNING, /api/me/deals) omit it — a fresh deal is 'active'.
+    status: d.status ?? 'active',
     estimatedCommission: Math.round(price * (commissionPct / 100)),
     commissionPct,
     agentName: d.agent_name,

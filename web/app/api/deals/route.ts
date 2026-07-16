@@ -4,16 +4,25 @@ import { error, json, withAuth } from "@/lib/http";
 import { hasRole } from "@/lib/roles";
 import { resolveUserId } from "@/lib/users";
 import { listDealsForUser } from "@/lib/deals";
-import { createDealBodySchema } from "@/lib/schemas/deal";
+import { createDealBodySchema, DEAL_STATUSES } from "@/lib/schemas/deal";
 import { parseBody } from "@/lib/schemas/parse";
 
 export async function GET(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found — call /users/sync first", 404);
+    // Default pipeline hides non-active deals (#254). `?status=` overrides:
+    // a valid lifecycle status shows only that; `?status=all` shows every
+    // status. An unrecognized value falls back to the active-only default.
+    const requested = new URL(req.url).searchParams.get("status");
+    const statusFilter =
+      requested === "all" || (DEAL_STATUSES as readonly string[]).includes(requested ?? "")
+        ? (requested as string)
+        : undefined;
     const deals = await listDealsForUser(userId, {
       isAdmin: hasRole(claims.roles, ["admin"]),
       isTC: hasRole(claims.roles, ["tc"]),
+      statusFilter,
     });
     return json(deals);
   })) as Response;

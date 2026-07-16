@@ -12,7 +12,7 @@ import type { FastPassUpsellId } from "./fast-pass-catalog";
 
 export type { DealStage, DealType };
 
-export type DealStatus = 'active' | 'fallen_through';
+export type DealStatus = 'active' | 'archived' | 'fallen_through';
 
 // ── Fast Pass enrollment (deal.fastPass) ─────────────────────────────────────
 

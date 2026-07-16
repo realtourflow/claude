@@ -405,7 +405,7 @@ describe("Stage advance posts the drafted client message (#185)", () => {
     const user = await openAdvanceModal();
 
     // Edit the drafted message, exactly like the repro in the ticket.
-    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     const textarea = screen.getByRole("textbox");
     await user.clear(textarea);
     await user.type(textarea, "Custom note for my client");
@@ -439,7 +439,7 @@ describe("Stage advance posts the drafted client message (#185)", () => {
   it("an empty draft posts nothing (stage still advances)", async () => {
     const user = await openAdvanceModal();
 
-    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await user.clear(screen.getByRole("textbox"));
     await user.click(screen.getByRole("button", { name: /confirm & advance/i }));
 
@@ -595,7 +595,7 @@ describe("StageAdvanceModal automation claims match reality (#185)", () => {
     );
     expect(screen.getByText(/client message sent to jane buyer/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /edit/i }));
+    await user.click(screen.getByRole("button", { name: "Edit" }));
     await user.clear(screen.getByRole("textbox"));
 
     expect(screen.queryByText(/client message sent/i)).not.toBeInTheDocument();

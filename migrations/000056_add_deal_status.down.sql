@@ -1,0 +1,2 @@
+ALTER TABLE deals DROP CONSTRAINT IF EXISTS deals_status_check;
+ALTER TABLE deals DROP COLUMN IF EXISTS status;

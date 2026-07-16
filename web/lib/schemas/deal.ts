@@ -48,6 +48,35 @@ export const buyerStatusPatchBodySchema = z.object({
 });
 export type BuyerStatusPatchBody = z.output<typeof buyerStatusPatchBodySchema>;
 
+/**
+ * The deal lifecycle status (#254). `active` deals live in the pipeline;
+ * `archived` / `fallen_through` are soft-ended and excluded from the default
+ * list. Enforced at the DB by `deals_status_check` (migration 000056).
+ */
+export const DEAL_STATUSES = ["active", "archived", "fallen_through"] as const;
+export const dealStatusSchema = z.enum(DEAL_STATUSES);
+export type DealStatus = z.output<typeof dealStatusSchema>;
+
+/**
+ * PATCH /api/deals/[id] (#254) — correct a deal's core identity or soft-archive
+ * it. `.strict()` rejects unknown keys, which is how `stage` (owned solely by
+ * the /stage route + its history invariant) 400s here instead of silently
+ * doing nothing. All fields optional; an empty patch (no editable field) 400s
+ * in the handler. title cannot be null (NOT NULL); address/price/closing_date
+ * accept null to CLEAR. Garbage types (price "banana", bad status, bad date)
+ * 400 at the boundary instead of 500ing inside Postgres.
+ */
+export const dealPatchBodySchema = z
+  .object({
+    title: z.string().optional(),
+    address: z.string().nullish(),
+    price: z.union([z.number(), decimalString]).nullish(),
+    closing_date: dateOnlyString.nullish(),
+    status: dealStatusSchema.optional(),
+  })
+  .strict();
+export type DealPatchBody = z.output<typeof dealPatchBodySchema>;
+
 // ---------------------------------------------------------------------------
 // Responses (wire shape the hooks consume)
 // ---------------------------------------------------------------------------
@@ -91,6 +120,12 @@ export const apiDealSchema = z.object({
   type: z.enum(["buy", "sell"]),
   stage: z.string(),
   health: z.enum(["green", "yellow", "red"]),
+  /**
+   * Lifecycle status (#254): active | archived | fallen_through. Optional —
+   * payloads that don't SELECT it (e.g. the create RETURNING, /api/me/deals)
+   * omit it and the adapter defaults to 'active'.
+   */
+  status: dealStatusSchema.optional(),
   title: z.string(),
   address: z.string().nullable(),
   /** Postgres DECIMAL serialized as text by the API (`price::text`). */

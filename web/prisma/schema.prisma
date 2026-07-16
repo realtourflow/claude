@@ -166,6 +166,7 @@ model deals {
   buyer_status            String?
   closing_date            DateTime?             @db.Date
   checklist_seeded_at     DateTime?             @db.Timestamptz(6)
+  status                  String                @default("active")
   audit_log               audit_log[]
   checklist_items         checklist_items[]
   deal_contingencies      deal_contingencies[]
