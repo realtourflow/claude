@@ -712,3 +712,162 @@ describe("ARIVE link + sync + webhook", () => {
     });
   });
 });
+
+// #364 (umbrella #283): refund / dispute / failed-payment handling for the
+// closing fee. Charges and disputes don't carry the checkout metadata, so the
+// handler resolves the deal by retrieving the PaymentIntent (which we stamp with
+// deal_id/type at checkout). Fee only — fast_pass / smooth_exit are sibling slices.
+describe("POST /api/stripe/webhook — fee refund / dispute / failed payment (#364)", () => {
+  function webhookReq() {
+    return new Request("http://localhost/api/stripe/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "t=fake,v1=fake" },
+      body: "{}",
+    });
+  }
+
+  // Injects an event plus a paymentIntents.retrieve stub so the handler can read
+  // deal_id/type off the PaymentIntent referenced by a charge/dispute.
+  function setEvent(
+    event: Record<string, unknown>,
+    piMetadata?: Record<string, string> | null
+  ) {
+    setStripeForTesting({
+      checkout: { sessions: { create: async () => ({ id: "x", url: null }) } },
+      paymentIntents: {
+        retrieve: async (id: string) =>
+          ({ id, metadata: piMetadata ?? {} }) as unknown as Stripe.PaymentIntent,
+      },
+      webhooks: {
+        constructEvent: () => event as unknown as Stripe.Event,
+      },
+    });
+  }
+
+  async function paidFeeDeal() {
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: {
+        fee_status: "paid",
+        fee_checkout_session_id: "cs_paid",
+        fee_paid_at: new Date(),
+      },
+    });
+    return deal;
+  }
+
+  it("charge.refunded (full) on a paid fee → fee_status 'refunded'", async () => {
+    const deal = await paidFeeDeal();
+    setEvent(
+      {
+        type: "charge.refunded",
+        data: {
+          object: {
+            id: "ch_1",
+            payment_intent: "pi_1",
+            amount: 7500,
+            amount_refunded: 7500,
+          },
+        },
+      },
+      { deal_id: deal.id, type: "closing_fee" }
+    );
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fee_status).toBe("refunded");
+  });
+
+  it("charge.dispute.created on a paid fee → fee_status 'refunded'", async () => {
+    const deal = await paidFeeDeal();
+    setEvent(
+      {
+        type: "charge.dispute.created",
+        data: { object: { id: "dp_1", payment_intent: "pi_1" } },
+      },
+      { deal_id: deal.id, type: "closing_fee" }
+    );
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    const row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fee_status).toBe("refunded");
+  });
+
+  it("payment_intent.payment_failed reverts a 'pending' fee to 'unpaid', leaves 'paid' alone", async () => {
+    const agent = await createUser({ role: "agent" });
+    const pending = await createDeal({ agent_id: agent.id });
+    await prisma.deals.update({
+      where: { id: pending.id },
+      data: { fee_status: "pending" },
+    });
+    setEvent({
+      type: "payment_intent.payment_failed",
+      data: {
+        object: {
+          id: "pi_2",
+          metadata: { deal_id: pending.id, type: "closing_fee" },
+        },
+      },
+    });
+    let res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    let row = await prisma.deals.findUnique({ where: { id: pending.id } });
+    expect(row?.fee_status).toBe("unpaid");
+
+    const paid = await paidFeeDeal();
+    setEvent({
+      type: "payment_intent.payment_failed",
+      data: {
+        object: { id: "pi_3", metadata: { deal_id: paid.id, type: "closing_fee" } },
+      },
+    });
+    res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    row = await prisma.deals.findUnique({ where: { id: paid.id } });
+    expect(row?.fee_status).toBe("paid");
+  });
+
+  it("a PARTIAL refund leaves the fee 'paid'; a non-fee (fast_pass) refund leaves the fee alone", async () => {
+    const partial = await paidFeeDeal();
+    setEvent(
+      {
+        type: "charge.refunded",
+        data: {
+          object: {
+            id: "ch_2",
+            payment_intent: "pi_4",
+            amount: 7500,
+            amount_refunded: 5000,
+          },
+        },
+      },
+      { deal_id: partial.id, type: "closing_fee" }
+    );
+    let res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    let row = await prisma.deals.findUnique({ where: { id: partial.id } });
+    expect(row?.fee_status).toBe("paid");
+
+    const nonFee = await paidFeeDeal();
+    setEvent(
+      {
+        type: "charge.refunded",
+        data: {
+          object: {
+            id: "ch_3",
+            payment_intent: "pi_5",
+            amount: 322400,
+            amount_refunded: 322400,
+          },
+        },
+      },
+      { deal_id: nonFee.id, type: "fast_pass" }
+    );
+    res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    row = await prisma.deals.findUnique({ where: { id: nonFee.id } });
+    expect(row?.fee_status).toBe("paid");
+  });
+});
