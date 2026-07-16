@@ -180,6 +180,12 @@ export async function createSmoothExitUpsellCheckout(
       },
     ],
     mode: "payment",
+    // Stamp deal_id/type onto the PaymentIntent so a later refund/dispute webhook
+    // (which references only the PaymentIntent, not the checkout metadata) can
+    // resolve the deal and reverse the upsell (#366). Same pattern as the fee (#364).
+    payment_intent_data: {
+      metadata: { deal_id: input.dealId, type: "smooth_exit_upsell" },
+    },
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata: { deal_id: input.dealId, type: "smooth_exit_upsell" },
@@ -212,6 +218,12 @@ export async function createFastPassCheckout(
       },
     ],
     mode: "payment",
+    // Stamp deal_id/type onto the PaymentIntent so a later refund/dispute webhook
+    // (which references only the PaymentIntent, not the checkout metadata) can
+    // resolve the deal and reverse the enrollment (#365). Same pattern as the fee (#364).
+    payment_intent_data: {
+      metadata: { deal_id: input.dealId, type: "fast_pass" },
+    },
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata: { deal_id: input.dealId, type: "fast_pass" },

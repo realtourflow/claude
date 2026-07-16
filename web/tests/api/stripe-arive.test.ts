@@ -871,3 +871,307 @@ describe("POST /api/stripe/webhook — fee refund / dispute / failed payment (#3
     expect(row?.fee_status).toBe("paid");
   });
 });
+
+// #365 / #366: reflect a refund/dispute on the Fast Pass enrollment (fast_pass
+// JSONB) and the Smooth Exit upsell (smooth_exit JSONB). Same shape as the fee
+// (#364): a Charge/Dispute carries only a payment_intent id, so the handler
+// retrieves the PI metadata (deal_id/type stamped at checkout) to route the
+// refund. Both flips MERGE keys into the JSONB (jsonb_set) — sibling enrollment
+// fields must survive (#260 clobber guard). Partial refunds are skipped for all
+// surfaces, consistent with the fee.
+describe("POST /api/stripe/webhook — fast_pass / smooth_exit refund / dispute (#365/#366)", () => {
+  function webhookReq() {
+    return new Request("http://localhost/api/stripe/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "t=fake,v1=fake" },
+      body: "{}",
+    });
+  }
+
+  // Injects an event plus a paymentIntents.retrieve stub so the handler can read
+  // deal_id/type off the PaymentIntent referenced by a charge/dispute.
+  function setEvent(
+    event: Record<string, unknown>,
+    piMetadata?: Record<string, string> | null
+  ) {
+    setStripeForTesting({
+      checkout: { sessions: { create: async () => ({ id: "x", url: null }) } },
+      paymentIntents: {
+        retrieve: async (id: string) =>
+          ({ id, metadata: piMetadata ?? {} }) as unknown as Stripe.PaymentIntent,
+      },
+      webhooks: {
+        constructEvent: () => event as unknown as Stripe.Event,
+      },
+    });
+  }
+
+  // Seeds a deal with a fully-paid Fast Pass enrollment, shaped like
+  // POST /deals/[id]/fastpass persists it, plus the webhook-stamped paid fields.
+  async function paidFastPassDeal() {
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: {
+        fast_pass: {
+          status: "active",
+          payment_option: "now",
+          selected_upsells: ["staging_consult"],
+          total_cents: 322400,
+          paid: true,
+          checkout_session_id: "cs_fp_paid",
+          enrolled_at: new Date().toISOString(),
+          paid_at: new Date().toISOString(),
+        },
+      },
+    });
+    return deal;
+  }
+
+  // Seeds a deal with a fully-paid Smooth Exit upsell enrollment.
+  async function paidSmoothExitDeal() {
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: {
+        smooth_exit: {
+          status: "active",
+          payment_option: "from_proceeds",
+          selected_upsells: ["staging_consult"],
+          upsell_total_cents: 24700,
+          upsells_paid: true,
+          upsells_checkout_session_id: "cs_se_paid",
+          enrolled_at: new Date().toISOString(),
+          upsells_paid_at: new Date().toISOString(),
+        },
+      },
+    });
+    return deal;
+  }
+
+  // Case 1 (#365): a full charge.refunded on a paid fast_pass flips paid=false /
+  // refunded=true and preserves sibling enrollment fields.
+  it("charge.refunded (full) on a paid fast_pass → paid=false, refunded=true; siblings survive", async () => {
+    const deal = await paidFastPassDeal();
+    setEvent(
+      {
+        type: "charge.refunded",
+        data: {
+          object: {
+            id: "ch_fp_1",
+            payment_intent: "pi_fp_1",
+            amount: 322400,
+            amount_refunded: 322400,
+          },
+        },
+      },
+      { deal_id: deal.id, type: "fast_pass" }
+    );
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.$queryRaw<
+      {
+        status: string;
+        paid: boolean;
+        refunded: boolean;
+        selected: unknown;
+        total_cents: number;
+      }[]
+    >`
+      SELECT fast_pass->>'status'                    AS status,
+             (fast_pass->>'paid')::boolean           AS paid,
+             (fast_pass->>'refunded')::boolean       AS refunded,
+             fast_pass->'selected_upsells'           AS selected,
+             (fast_pass->>'total_cents')::int        AS total_cents
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].paid).toBe(false);
+    expect(rows[0].refunded).toBe(true);
+    // Sibling enrollment fields survive the merge (no clobber).
+    expect(rows[0].status).toBe("active");
+    expect(rows[0].selected).toEqual(["staging_consult"]);
+    expect(rows[0].total_cents).toBe(322400);
+  });
+
+  // Case 2 (#365): a dispute on a paid fast_pass triggers the same reversal.
+  it("charge.dispute.created on a paid fast_pass → paid=false, refunded=true", async () => {
+    const deal = await paidFastPassDeal();
+    setEvent(
+      {
+        type: "charge.dispute.created",
+        data: { object: { id: "dp_fp_1", payment_intent: "pi_fp_2" } },
+      },
+      { deal_id: deal.id, type: "fast_pass" }
+    );
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.$queryRaw<
+      { paid: boolean; refunded: boolean }[]
+    >`
+      SELECT (fast_pass->>'paid')::boolean     AS paid,
+             (fast_pass->>'refunded')::boolean AS refunded
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].paid).toBe(false);
+    expect(rows[0].refunded).toBe(true);
+  });
+
+  // Case 3 (#366): a full charge.refunded on a paid smooth_exit upsell flips
+  // upsells_paid=false / upsells_refunded=true and preserves siblings (#260).
+  it("charge.refunded (full) on a paid smooth_exit upsell → upsells_paid=false, upsells_refunded=true; siblings survive", async () => {
+    const deal = await paidSmoothExitDeal();
+    setEvent(
+      {
+        type: "charge.refunded",
+        data: {
+          object: {
+            id: "ch_se_1",
+            payment_intent: "pi_se_1",
+            amount: 24700,
+            amount_refunded: 24700,
+          },
+        },
+      },
+      { deal_id: deal.id, type: "smooth_exit_upsell" }
+    );
+    const res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+
+    const rows = await prisma.$queryRaw<
+      {
+        status: string;
+        upsells_paid: boolean;
+        upsells_refunded: boolean;
+        selected: unknown;
+        total_cents: number;
+      }[]
+    >`
+      SELECT smooth_exit->>'status'                        AS status,
+             (smooth_exit->>'upsells_paid')::boolean       AS upsells_paid,
+             (smooth_exit->>'upsells_refunded')::boolean   AS upsells_refunded,
+             smooth_exit->'selected_upsells'               AS selected,
+             (smooth_exit->>'upsell_total_cents')::int     AS total_cents
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].upsells_paid).toBe(false);
+    expect(rows[0].upsells_refunded).toBe(true);
+    // Sibling enrollment fields survive the merge (#260 clobber guard).
+    expect(rows[0].status).toBe("active");
+    expect(rows[0].selected).toEqual(["staging_consult"]);
+    expect(rows[0].total_cents).toBe(24700);
+  });
+
+  // Case 4: cross-surface isolation + partial-refund skip.
+  it("a fast_pass refund touches neither smooth_exit nor the fee, and vice-versa; a partial fast_pass refund is a no-op", async () => {
+    // Deal carrying paid fast_pass + paid smooth_exit + paid fee at once.
+    const agent = await createUser({ role: "agent" });
+    const deal = await createDeal({ agent_id: agent.id });
+    await prisma.deals.update({
+      where: { id: deal.id },
+      data: {
+        fee_status: "paid",
+        fee_checkout_session_id: "cs_fee_paid",
+        fee_paid_at: new Date(),
+        fast_pass: {
+          status: "active",
+          selected_upsells: ["staging_consult"],
+          total_cents: 322400,
+          paid: true,
+        },
+        smooth_exit: {
+          status: "active",
+          selected_upsells: ["staging_consult"],
+          upsell_total_cents: 24700,
+          upsells_paid: true,
+        },
+      },
+    });
+
+    // A fast_pass refund flips ONLY fast_pass.
+    setEvent(
+      {
+        type: "charge.refunded",
+        data: {
+          object: {
+            id: "ch_iso_fp",
+            payment_intent: "pi_iso_fp",
+            amount: 322400,
+            amount_refunded: 322400,
+          },
+        },
+      },
+      { deal_id: deal.id, type: "fast_pass" }
+    );
+    let res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    let rows = await prisma.$queryRaw<
+      { fp_paid: boolean; se_paid: boolean }[]
+    >`
+      SELECT (fast_pass->>'paid')::boolean          AS fp_paid,
+             (smooth_exit->>'upsells_paid')::boolean AS se_paid
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].fp_paid).toBe(false);
+    expect(rows[0].se_paid).toBe(true); // smooth_exit untouched
+    let row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fee_status).toBe("paid"); // fee untouched
+
+    // A smooth_exit refund flips ONLY smooth_exit (fast_pass already refunded,
+    // fee still paid).
+    setEvent(
+      {
+        type: "charge.refunded",
+        data: {
+          object: {
+            id: "ch_iso_se",
+            payment_intent: "pi_iso_se",
+            amount: 24700,
+            amount_refunded: 24700,
+          },
+        },
+      },
+      { deal_id: deal.id, type: "smooth_exit_upsell" }
+    );
+    res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    rows = await prisma.$queryRaw<
+      { fp_paid: boolean; se_paid: boolean }[]
+    >`
+      SELECT (fast_pass->>'paid')::boolean          AS fp_paid,
+             (smooth_exit->>'upsells_paid')::boolean AS se_paid
+      FROM deals WHERE id = ${deal.id}::uuid
+    `;
+    expect(rows[0].se_paid).toBe(false);
+    row = await prisma.deals.findUnique({ where: { id: deal.id } });
+    expect(row?.fee_status).toBe("paid"); // fee still untouched
+
+    // A PARTIAL fast_pass refund leaves a paid fast_pass paid.
+    const partial = await paidFastPassDeal();
+    setEvent(
+      {
+        type: "charge.refunded",
+        data: {
+          object: {
+            id: "ch_fp_partial",
+            payment_intent: "pi_fp_partial",
+            amount: 322400,
+            amount_refunded: 100000,
+          },
+        },
+      },
+      { deal_id: partial.id, type: "fast_pass" }
+    );
+    res = await stripeWebhook(webhookReq());
+    expect(res.status).toBe(200);
+    rows = await prisma.$queryRaw<{ fp_paid: boolean; se_paid: boolean }[]>`
+      SELECT (fast_pass->>'paid')::boolean          AS fp_paid,
+             (fast_pass->>'paid')::boolean          AS se_paid
+      FROM deals WHERE id = ${partial.id}::uuid
+    `;
+    expect(rows[0].fp_paid).toBe(true);
+  });
+});
