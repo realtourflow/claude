@@ -5,6 +5,7 @@ import {
   CHECKLIST_ELIGIBLE_STAGES,
   DEFAULT_CHECKLIST_ITEMS,
   checklistHasAccess,
+  sellerDefaultsFor,
 } from "@/lib/checklist";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -18,14 +19,41 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       return error("deal not found", 404);
     }
 
-    // Auto-seed the defaults exactly once per deal, at an eligible stage. The
-    // persistent marker deals.checklist_seeded_at — NOT a live item count —
-    // decides "seeded before?", so an intentionally emptied checklist stays
-    // empty instead of resurrecting all 17 defaults on the next load (#264).
     const deal = await prisma.deals.findUnique({
       where: { id: dealId },
-      select: { stage: true, checklist_seeded_at: true },
+      select: { type: true, stage: true, checklist_seeded_at: true },
     });
+
+    // Seller-portal defaults (#261): seed the stage-appropriate seller set for
+    // sell deals (listing prep at active_search, final prep at pre_close). This
+    // is intentionally INDEPENDENT of the checklist_seeded_at marker: a sell
+    // deal seeds seller items at active_search AND, later, the TC set at
+    // under_contract, so one boolean marker can't gate both. Idempotency here
+    // comes from the partial unique index on (deal_id, label) WHERE NOT
+    // is_custom — skipDuplicates makes a re-GET at the same stage a no-op — and
+    // we deliberately do NOT stamp checklist_seeded_at, leaving the TC seeding
+    // path (#264) untouched.
+    if (deal) {
+      const sellerDefaults = sellerDefaultsFor(deal.type, deal.stage);
+      if (sellerDefaults.length > 0) {
+        await prisma.checklist_items.createMany({
+          data: sellerDefaults.map((d, i) => ({
+            deal_id: dealId,
+            label: d.label,
+            category: d.category,
+            assigned_to: d.assignedTo,
+            sort_order: i,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    // Auto-seed the TC closing defaults exactly once per deal, at an eligible
+    // stage. The persistent marker deals.checklist_seeded_at — NOT a live item
+    // count — decides "seeded before?", so an intentionally emptied checklist
+    // stays empty instead of resurrecting all 17 defaults on the next load
+    // (#264).
     if (
       deal &&
       deal.checklist_seeded_at === null &&

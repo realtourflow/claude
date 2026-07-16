@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactElement } from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { MyDeal } from "@/hooks/useMyDeals";
 import type { Offer } from "@/hooks/useOffers";
@@ -82,8 +82,53 @@ vi.mock("@/hooks/useNotifications", () => ({
   }),
 }));
 
+// The checklist cards (#261) read/write the persisted checklist API through the
+// real useChecklist hook. We mock the api-client so a render triggers a real
+// GET and a toggle issues a real PATCH we can assert on — no fabricated state.
+const { apiGet, apiPatch } = vi.hoisted(() => ({
+  apiGet: vi.fn(),
+  apiPatch: vi.fn(),
+}));
+vi.mock("@/lib/api-client", () => ({
+  api: {
+    get: (path: string) => apiGet(path),
+    patch: (path: string, body: unknown) => apiPatch(path, body),
+    post: vi.fn(() => Promise.resolve({})),
+    put: vi.fn(() => Promise.resolve({})),
+    delete: vi.fn(() => Promise.resolve({})),
+    getBlob: vi.fn(() => Promise.resolve(new Blob())),
+  },
+  setTokenGetter: vi.fn(),
+  ApiError: class ApiError extends Error {},
+}));
+
 import { postMessage } from "@/hooks/useMessages";
 import SellerView from "@/components/pages/seller/SellerView";
+
+type ApiChecklistItem = {
+  id: string;
+  deal_id: string;
+  label: string;
+  category: string;
+  checked: boolean;
+  assigned_to: string;
+  is_custom: boolean;
+  sort_order: number;
+};
+
+function apiChecklistItem(
+  overrides: Partial<ApiChecklistItem> & { id: string; label: string }
+): ApiChecklistItem {
+  return {
+    deal_id: DEAL_ID,
+    category: "Listing Prep",
+    checked: false,
+    assigned_to: "seller",
+    is_custom: false,
+    sort_order: 0,
+    ...overrides,
+  };
+}
 
 const DEAL_ID = "5f0f6f6a-9b1c-4f6e-8a2d-3c4b5a697e01";
 
@@ -160,6 +205,10 @@ beforeEach(() => {
   mockMarkRead.mockClear();
   dealOverrides = {};
   vi.mocked(postMessage).mockReset();
+  apiGet.mockReset();
+  apiPatch.mockReset();
+  apiGet.mockResolvedValue([]);
+  apiPatch.mockResolvedValue({});
 });
 
 describe("SellerView at offer_active — offers are real, never fabricated (#182)", () => {
@@ -381,5 +430,105 @@ describe("SellerView — message send failures are surfaced, draft preserved (#2
     expect(alert.textContent ?? "").toMatch(/fail|again|try/i);
     // …and the draft is not lost, so they can retry.
     expect(screen.getByPlaceholderText(/message your agent/i)).toHaveValue("Please call me back");
+  });
+});
+
+// ─── Listing-prep checklist is persisted, never fabricated (#261) ────────────
+// ListingPrepCard used to keep checked state in useState(new Set([0, 1])) — it
+// pre-checked "Deep clean / declutter" and "Minor repairs completed" on every
+// load with no server data, toggles vanished on reload, and the agent never saw
+// progress. It now reads/writes the persisted checklist API (seller items).
+
+const LISTING_PREP_LABELS = [
+  "Deep clean / declutter",
+  "Minor repairs completed",
+  "Professional photos scheduled",
+  "Listing copy approved",
+  "Disclosures package complete",
+  "Lockbox installed",
+];
+
+function sellerPrepItems(): ApiChecklistItem[] {
+  return LISTING_PREP_LABELS.map((label, i) =>
+    apiChecklistItem({ id: `prep-${i}`, label, sort_order: i })
+  );
+}
+
+describe("SellerView at active_search — listing-prep checklist is real, never fabricated (#261)", () => {
+  it("pre-checks nothing: it fetches the checklist and reflects only server state (all unchecked)", async () => {
+    dealOverrides = { stage: "active_search" };
+    apiGet.mockResolvedValue(sellerPrepItems());
+    renderSeller(<SellerView />);
+
+    // The card fetches the persisted checklist for this deal.
+    await waitFor(() =>
+      expect(apiGet).toHaveBeenCalledWith(`/deals/${DEAL_ID}/checklist`)
+    );
+    await screen.findByText("Deep clean / declutter");
+
+    // No fabricated pre-checks: progress is 0/6, never the old fake 2/6.
+    expect(screen.getByText(/0\s*\/\s*6/)).toBeTruthy();
+    expect(screen.queryByText(/2\s*\/\s*6/)).toBeNull();
+
+    // The two formerly hard-checked rows render unchecked (no strikethrough).
+    expect(screen.getByText("Deep clean / declutter").className).not.toMatch(/line-through/);
+    expect(screen.getByText("Minor repairs completed").className).not.toMatch(/line-through/);
+  });
+
+  it("reflects server-confirmed checked state for items the API returns as checked", async () => {
+    dealOverrides = { stage: "active_search" };
+    const items = sellerPrepItems();
+    items[0].checked = true; // "Deep clean / declutter" already done server-side
+    apiGet.mockResolvedValue(items);
+    renderSeller(<SellerView />);
+
+    await screen.findByText("Deep clean / declutter");
+    // Checked item is struck through; progress counts it.
+    expect(screen.getByText("Deep clean / declutter").className).toMatch(/line-through/);
+    expect(screen.getByText(/1\s*\/\s*6/)).toBeTruthy();
+  });
+
+  it("toggling a listing-prep item issues the checklist PATCH and reflects the new state", async () => {
+    dealOverrides = { stage: "active_search" };
+    apiGet.mockResolvedValue(sellerPrepItems());
+    renderSeller(<SellerView />);
+
+    const row = await screen.findByText("Professional photos scheduled");
+    fireEvent.click(row);
+
+    // PATCH the specific item's checked flag.
+    await waitFor(() =>
+      expect(apiPatch).toHaveBeenCalledWith(
+        `/deals/${DEAL_ID}/checklist/prep-2`,
+        { checked: true }
+      )
+    );
+    // Optimistic + confirmed: the row now renders checked.
+    await waitFor(() =>
+      expect(screen.getByText("Professional photos scheduled").className).toMatch(/line-through/)
+    );
+  });
+});
+
+describe("SellerView at pre_close — pre-close checklist is real, not static decoration (#261)", () => {
+  it("renders the seller pre-close items from the API and toggling issues a PATCH", async () => {
+    dealOverrides = { stage: "pre_close" };
+    apiGet.mockResolvedValue([
+      apiChecklistItem({ id: "pc-0", label: "Complete agreed repairs", category: "Pre-Close" }),
+      apiChecklistItem({ id: "pc-1", label: "Confirm possession date", category: "Pre-Close", sort_order: 1 }),
+    ]);
+    renderSeller(<SellerView />);
+
+    await waitFor(() =>
+      expect(apiGet).toHaveBeenCalledWith(`/deals/${DEAL_ID}/checklist`)
+    );
+    const row = await screen.findByText("Complete agreed repairs");
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(apiPatch).toHaveBeenCalledWith(
+        `/deals/${DEAL_ID}/checklist/pc-0`,
+        { checked: true }
+      )
+    );
   });
 });
