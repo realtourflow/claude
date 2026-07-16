@@ -1,4 +1,4 @@
-import { extractClosingDate, parseDateOnly } from "@/lib/arive-dates";
+import { parseDateOnly, resolveClosingDate } from "@/lib/arive-dates";
 import { prisma } from "@/lib/db";
 import { renderICal, type ICalEvent } from "@/lib/ical";
 
@@ -20,9 +20,11 @@ export async function GET(_req: Request, ctx: Ctx): Promise<Response> {
       id: string;
       title: string;
       arive_key_dates: unknown;
+      closing_date: string | null;
     }[]
   >`
-    SELECT deals.id, deals.title, deals.arive_key_dates
+    SELECT deals.id, deals.title, deals.arive_key_dates,
+           deals.closing_date::text AS closing_date
     FROM deals
     WHERE deals.agent_id = ${user.id}::uuid
        OR EXISTS (
@@ -34,9 +36,10 @@ export async function GET(_req: Request, ctx: Ctx): Promise<Response> {
   const events: ICalEvent[] = [];
 
   for (const d of deals) {
-    // Same key selection as the calendar push (lib/jobs.ts) and the deal
-    // serializer (hooks/useDeals.ts) — see lib/arive-dates.ts (#196).
-    const closingStr = extractClosingDate(d.arive_key_dates);
+    // ARIVE key date wins, else the agent-entered manual closing_date — same
+    // precedence as the calendar push (lib/jobs.ts) and the deal serializer
+    // (hooks/useDeals.ts). See lib/arive-dates.ts (#196/#300).
+    const closingStr = resolveClosingDate(d.arive_key_dates, d.closing_date);
     if (closingStr) {
       const day = parseDateOnly(closingStr);
       if (day) {
