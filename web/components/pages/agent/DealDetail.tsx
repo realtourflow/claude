@@ -189,10 +189,18 @@ export default function DealDetail() {
       </button>
 
       {/* Deal header */}
-      <DealHeader deal={localDeal} onFlagChange={async (flags) => {
-        await api.patch(`/deals/${localDeal.id}/flags`, flags).catch(() => {});
-        refreshDeal();
-      }} />
+      <DealHeader
+        deal={localDeal}
+        canEdit={activeUser?.id === deal.agentId}
+        onFlagChange={async (flags) => {
+          await api.patch(`/deals/${localDeal.id}/flags`, flags).catch(() => {});
+          refreshDeal();
+        }}
+        onSave={async (patch) => {
+          await api.patch(`/deals/${localDeal.id}`, patch).catch(() => {});
+          refreshDeal();
+        }}
+      />
 
       {/* Stage transition bar — agents, TCs, admins only */}
       {canAdvanceStage && deal.status !== 'fallen_through' && (

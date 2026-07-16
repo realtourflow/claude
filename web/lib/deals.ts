@@ -88,6 +88,8 @@ export type DealRow = {
   type: string;
   stage: string;
   health: string;
+  /** Lifecycle status (#254): active | archived | fallen_through. */
+  status: string;
   title: string;
   address: string | null;
   price: string | null;
@@ -133,24 +135,42 @@ export type DealWithStats = DealRow & {
  * List deals visible to the given user. Agents see their own deals; TCs see
  * only the deals of agents who have linked them (users.tc_user_id = tc.id) —
  * never platform-wide (#172); admins see all.
+ *
+ * By default only `active` deals are returned — archived / fallen_through deals
+ * (#254) leave the pipeline, dashboards, and TC view. Pass `statusFilter` to
+ * override: a specific status ('archived' | 'fallen_through' | 'active') shows
+ * only that status; 'all' shows every status.
  */
 export async function listDealsForUser(
   userId: string,
-  opts: { isAdmin: boolean; isTC: boolean }
+  opts: { isAdmin: boolean; isTC: boolean; statusFilter?: string }
 ): Promise<DealWithStats[]> {
   // Read the admin-editable stage thresholds ONCE per list call — never per row
   // (the health CASE runs as a correlated subquery for every deal).
   const thresholds = await getStageThresholds();
-  const filter = opts.isAdmin
-    ? Prisma.sql``
-    : opts.isTC
-      ? // Linked agents' deals, plus the caller's own (covers dual-role users).
-        Prisma.sql`WHERE (deals.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid) OR deals.agent_id = ${userId}::uuid)`
-      : Prisma.sql`WHERE deals.agent_id = ${userId}::uuid`;
+
+  // Visibility scope (agent owns / TC linked / admin sees all) AND lifecycle
+  // status, combined into one WHERE so archived deals never leak into a list
+  // scoped for someone else.
+  const conds: Prisma.Sql[] = [];
+  if (!opts.isAdmin) {
+    conds.push(
+      opts.isTC
+        ? // Linked agents' deals, plus the caller's own (covers dual-role users).
+          Prisma.sql`(deals.agent_id IN (SELECT id FROM users WHERE tc_user_id = ${userId}::uuid) OR deals.agent_id = ${userId}::uuid)`
+        : Prisma.sql`deals.agent_id = ${userId}::uuid`
+    );
+  }
+  if (opts.statusFilter !== "all") {
+    conds.push(Prisma.sql`deals.status = ${opts.statusFilter ?? "active"}`);
+  }
+  const filter = conds.length
+    ? Prisma.sql`WHERE ${Prisma.join(conds, " AND ")}`
+    : Prisma.sql``;
 
   return prisma.$queryRaw<DealWithStats[]>`
     SELECT deals.id, deals.agent_id, deals.type::text AS type, deals.stage::text AS stage,
-           ${healthExpr(thresholds)} AS health,
+           ${healthExpr(thresholds)} AS health, deals.status,
            deals.title, deals.address, deals.price::text AS price, deals.arive_linked,
            deals.arive_milestones, deals.arive_key_dates, deals.arive_loan_status,
            deals.fee_status, deals.fee_amount_cents, deals.fee_paid_at,
@@ -183,7 +203,7 @@ export async function getDealForAgent(
   const thresholds = await getStageThresholds();
   const rows = await prisma.$queryRaw<DealRow[]>`
     SELECT id, agent_id, type::text AS type, stage::text AS stage,
-           ${healthExpr(thresholds)} AS health,
+           ${healthExpr(thresholds)} AS health, status,
            title, address, price::text AS price, arive_linked,
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,
@@ -207,7 +227,7 @@ export async function getDealById(dealId: string): Promise<DealRow | null> {
   const thresholds = await getStageThresholds();
   const rows = await prisma.$queryRaw<DealRow[]>`
     SELECT id, agent_id, type::text AS type, stage::text AS stage,
-           ${healthExpr(thresholds)} AS health,
+           ${healthExpr(thresholds)} AS health, status,
            title, address, price::text AS price, arive_linked,
            arive_loan_id, arive_milestones, arive_key_dates, arive_loan_status, arive_synced_at,
            notes, fee_status, fee_amount_cents, fee_paid_at,
