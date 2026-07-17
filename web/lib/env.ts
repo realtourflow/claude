@@ -154,6 +154,13 @@ const shape = z.object({
   // unaffected. Kept distinct from CRON_SECRET so a token that rides in a URL
   // can't be replayed against the cron/ops endpoints.
   INDEXNOW_WEBHOOK_SECRET: z.string().default(""),
+
+  // Shared secret gating /api/invites/role — the email→role lookup the Auth0
+  // Post-Login Action calls to resolve a signing-in user's role. Without it the
+  // route is an unauthenticated oracle for enumerating accounts/invites (#271).
+  // The Action must send it in the `x-invite-role-token` header. Empty = the
+  // route is disabled (503); a wrong/missing token → 401 (fail closed).
+  INVITE_ROLE_SECRET: z.string().default(""),
 });
 
 const schema = shape
