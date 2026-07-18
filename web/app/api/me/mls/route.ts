@@ -14,6 +14,7 @@ import { error, json, withAuth } from "@/lib/http";
 import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { getSimplyretsClient, SimplyRetsAuthError } from "@/lib/simplyrets";
+import { encryptField } from "@/lib/crypto";
 
 export async function GET(req: Request): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
@@ -67,12 +68,14 @@ export async function PATCH(req: Request): Promise<Response> {
       }
     }
 
-    // NULLIF('') so an empty string clears the column (disconnect).
+    // Encrypt at rest (#273): the validated creds are written as AES-256-GCM
+    // ciphertext (enc:v1:...), never plaintext. An empty string still clears the
+    // column (disconnect) — we only encrypt a non-empty value.
     await prisma.users.update({
       where: { id: userId },
       data: {
-        mls_key: key === "" ? null : key,
-        mls_secret: secret === "" ? null : secret,
+        mls_key: key === "" ? null : encryptField(key),
+        mls_secret: secret === "" ? null : encryptField(secret),
         updated_at: new Date(),
       },
     });

@@ -14,6 +14,7 @@ import { prisma } from "@/lib/db";
 import { resolveUserId } from "@/lib/users";
 import { hasDealAccess } from "@/lib/deals";
 import { getSimplyretsClient, type SearchParams } from "@/lib/simplyrets";
+import { decryptField } from "@/lib/crypto";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -43,11 +44,17 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
 
     const params = parseSearchParams(new URL(req.url).searchParams);
 
+    // Decrypt the stored MLS creds before authenticating to SimplyRETS (#273).
+    // decryptField transparently passes legacy plaintext rows through unchanged,
+    // so pre-encryption creds keep working until the agent next re-saves.
+    const mlsKey = decryptField(agent.mls_key);
+    const mlsSecret = agent.mls_secret ? decryptField(agent.mls_secret) : "";
+
     let listings;
     try {
       listings = await getSimplyretsClient().search(
-        agent.mls_key,
-        agent.mls_secret ?? "",
+        mlsKey,
+        mlsSecret,
         params
       );
     } catch (e) {
