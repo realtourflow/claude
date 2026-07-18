@@ -326,3 +326,54 @@ describe("GET/POST /api/jobs/process (cron sweep route)", () => {
     }
   });
 });
+
+// ── 6. safe to run on a frequent (every-5-min) cron ───────────────────────────
+//
+// #299 tightens the /api/jobs/process cron from daily (`0 6 * * *`) to
+// `*/5 * * * *`. That cadence is only safe if the drain is a cheap no-op when
+// nothing is due AND an already-drained job is never pushed a second time —
+// otherwise firing every 5 minutes would spam duplicate calendar events. These
+// tests assert both properties already hold for the existing sweep (pg-boss job
+// consumption + calendar_event_map idempotency); they should pass as written.
+
+describe("safe to call frequently (every-5-min cron)", () => {
+  it("is a fast no-op that pushes nothing when the queue is empty", async () => {
+    // Tripwire: fail loudly if a drain ever touches the provider edge with
+    // nothing queued (it must not).
+    const calls = fakeCalendar(() => {
+      throw new Error("drain hit the calendar edge with nothing queued");
+    });
+
+    // Back-to-back drains — exactly what a tight cron does.
+    expect(await processCalendarJobs({ limit: 25 })).toEqual({ processed: 0, failed: 0 });
+    expect(await processCalendarJobs({ limit: 25 })).toEqual({ processed: 0, failed: 0 });
+
+    expect(calls).toHaveLength(0);
+    expect(await prisma.calendar_event_map.count()).toBe(0);
+  });
+
+  it("does not double-push a queued job across two consecutive drains", async () => {
+    const { agent, deal } = await seedConnectedDeal();
+    await enqueueCalendarJob({ kind: "deal-closing", id: deal.id });
+    const calls = fakeCalendar(() => okJson("gevt-q6"));
+
+    // First drain pushes the event once (a single create).
+    expect(await processCalendarJobs({ limit: 25 })).toEqual({ processed: 1, failed: 0 });
+    // Second drain fires immediately (the next cron tick, ~5 min later) — the
+    // job was consumed, so there is nothing left to push.
+    expect(await processCalendarJobs({ limit: 25 })).toEqual({ processed: 0, failed: 0 });
+
+    // Exactly one create POST across BOTH drains — no duplicate calendar event.
+    expect(calls.filter((c) => c.method === "POST" && c.url === G_EVENTS)).toHaveLength(1);
+
+    // ...and a single mapping row, so a later sweep would PATCH (not re-create).
+    const maps = await prisma.calendar_event_map.findMany({
+      where: { user_id: agent.id, internal_uid: `close-${deal.id}` },
+    });
+    expect(maps).toHaveLength(1);
+    expect(maps[0].external_event_id).toBe("gevt-q6");
+
+    // The durable job is consumed — no future sweep will re-push it.
+    expect(await runnableJobs()).toHaveLength(0);
+  });
+});
