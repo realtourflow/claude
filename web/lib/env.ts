@@ -57,6 +57,17 @@ const shape = z.object({
   // is REQUIRED with at least 32 chars — enforced by the superRefine below.
   BLOB_CAP_SECRET: z.string().default(""),
 
+  // AES-256-GCM key for app-level encryption of at-rest secrets (lib/crypto.ts)
+  // — today the per-agent SimplyRETS MLS credentials (users.mls_key /
+  // mls_secret). A 32-byte key provided as 64 hex chars (`openssl rand -hex 32`)
+  // or base64; parseFieldKey throws if it decodes to anything other than 32
+  // bytes. REQUIRED in production before deploy: with no key, a new MLS connect
+  // (which encrypts before storing) fails. Empty is fine for local dev/CI — the
+  // crypto seam injects a fixed test key there — but a real connect without a
+  // key throws a clear config error. Legacy plaintext rows still read fine with
+  // no key (decrypt passes them through), so this isn't a fail-closed env guard.
+  FIELD_ENCRYPTION_KEY: z.string().default(""),
+
   STRIPE_SECRET_KEY: z.string().default(""),
   STRIPE_WEBHOOK_SECRET: z.string().default(""),
 

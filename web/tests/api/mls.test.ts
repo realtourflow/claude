@@ -11,11 +11,22 @@ import {
   type SimplyRetsClient,
   type SearchParams,
 } from "@/lib/simplyrets";
+import {
+  ENC_PREFIX,
+  createFieldCrypto,
+  parseFieldKey,
+  setCryptoForTesting,
+} from "@/lib/crypto";
 import type { MLSListing } from "@/hooks/useMLS";
 import { prisma } from "@/lib/db";
 import { authHeader, getTestSigner } from "../helpers/jwt";
 import { truncateAll } from "../helpers/db";
 import { createUser, createDeal } from "../helpers/factories";
+
+// A fixed, deterministic field-encryption key so the crypto seam round-trips in
+// tests without ever depending on a real FIELD_ENCRYPTION_KEY env var.
+const TEST_FIELD_KEY_HEX =
+  "2222222222222222222222222222222222222222222222222222222222222222";
 
 beforeAll(async () => {
   const { verifyOpts } = await getTestSigner();
@@ -24,10 +35,15 @@ beforeAll(async () => {
 
 afterEach(() => {
   setSimplyretsForTesting(undefined);
+  setCryptoForTesting(undefined);
 });
 
 beforeEach(async () => {
   await truncateAll();
+  // Inject a deterministic crypto impl for the whole file — real AES-256-GCM
+  // under a fixed test key (so stored creds are genuinely ciphertext, and the
+  // read path genuinely decrypts).
+  setCryptoForTesting(createFieldCrypto(parseFieldKey(TEST_FIELD_KEY_HEX)));
 });
 
 function ctx(id: string) {
@@ -122,7 +138,8 @@ describe("GET /api/me/mls", () => {
 });
 
 describe("PATCH /api/me/mls", () => {
-  it("saves key + secret (read-back via prisma) and returns { ok, connected:true }", async () => {
+  // Case 1 (#273): creds must be stored ENCRYPTED at rest — never plaintext.
+  it("stores key + secret as ciphertext (enc:v1:...), NOT plaintext; returns { ok, connected:true }", async () => {
     const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
     setSimplyretsForTesting(fakeClient());
 
@@ -143,8 +160,88 @@ describe("PATCH /api/me/mls", () => {
       where: { id: agent.id },
       select: { mls_key: true, mls_secret: true },
     });
-    expect(row?.mls_key).toBe("real-key");
-    expect(row?.mls_secret).toBe("real-secret");
+    // The raw DB values are ciphertext, not the plaintext the agent sent.
+    expect(row?.mls_key).not.toBe("real-key");
+    expect(row?.mls_secret).not.toBe("real-secret");
+    expect(row?.mls_key?.startsWith(ENC_PREFIX)).toBe(true);
+    expect(row?.mls_secret?.startsWith(ENC_PREFIX)).toBe(true);
+
+    // ...and they decrypt back to exactly what was sent.
+    const crypto = createFieldCrypto(parseFieldKey(TEST_FIELD_KEY_HEX));
+    expect(crypto.decryptField(row!.mls_key!)).toBe("real-key");
+    expect(crypto.decryptField(row!.mls_secret!)).toBe("real-secret");
+  });
+
+  // Case 2 (#273): the round-trip — stored ciphertext is decrypted before it
+  // reaches SimplyRETS, so the client authenticates with the ORIGINAL plaintext.
+  it("round-trips: PATCH stores ciphertext, listing search hands SimplyRETS the decrypted plaintext creds", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+
+    const calls: { key: string; secret: string; params: SearchParams }[] = [];
+    setSimplyretsForTesting(fakeClient({ calls }));
+
+    // Connect through the real PATCH path (validates + encrypts + stores).
+    const patch = await patchMlsRoute(
+      new Request("http://localhost/api/me/mls", {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          authorization: await authHeader("auth0|a", ["agent"]),
+        },
+        body: JSON.stringify({ key: "plain-key", secret: "plain-secret" }),
+      })
+    );
+    expect(patch.status).toBe(200);
+
+    // Sanity: the row is ciphertext at rest.
+    const row = await prisma.users.findUnique({
+      where: { id: agent.id },
+      select: { mls_key: true },
+    });
+    expect(row?.mls_key?.startsWith(ENC_PREFIX)).toBe(true);
+
+    const deal = await createDeal({ agent_id: agent.id });
+    const searchRes = await searchRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/listings/search`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(searchRes.status).toBe(200);
+
+    // The last stub call (the listing search) received PLAINTEXT, not ciphertext.
+    const searchCall = calls[calls.length - 1];
+    expect(searchCall.key).toBe("plain-key");
+    expect(searchCall.secret).toBe("plain-secret");
+    expect(searchCall.key.startsWith(ENC_PREFIX)).toBe(false);
+    expect(searchCall.secret.startsWith(ENC_PREFIX)).toBe(false);
+  });
+
+  // Case 3 (#273): legacy plaintext rows (written before encryption shipped, no
+  // enc:v1: prefix) must remain readable — decrypt-on-read passes them through
+  // unchanged, so listing search still authenticates with them.
+  it("reads LEGACY PLAINTEXT rows transparently: listing search still uses them unchanged", async () => {
+    const agent = await createUser({ role: "agent", auth0_id: "auth0|a" });
+    // Simulate a pre-encryption row: raw plaintext, no enc:v1: prefix.
+    await prisma.users.update({
+      where: { id: agent.id },
+      data: { mls_key: "legacy-key", mls_secret: "legacy-secret" },
+    });
+    const deal = await createDeal({ agent_id: agent.id });
+
+    const calls: { key: string; secret: string; params: SearchParams }[] = [];
+    setSimplyretsForTesting(fakeClient({ calls }));
+
+    const res = await searchRoute(
+      new Request(`http://localhost/api/deals/${deal.id}/listings/search`, {
+        headers: { authorization: await authHeader("auth0|a", ["agent"]) },
+      }),
+      ctx(deal.id)
+    );
+    expect(res.status).toBe(200);
+    // The legacy plaintext passed straight through the decrypt helper.
+    expect(calls[0].key).toBe("legacy-key");
+    expect(calls[0].secret).toBe("legacy-secret");
   });
 
   it("real 401 (SimplyRetsAuthError) → 400 invalid + nothing saved", async () => {
