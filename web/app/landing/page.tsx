@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import {
   LayoutDashboard,
@@ -144,20 +145,14 @@ export default function LandingPage() {
             Blog
           </Link>
           <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 9,
-                background: S.navy,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
-            >
-              <LayoutDashboard size={22} color={S.gold} />
-            </div>
+            <Image
+              src="/logo.png"
+              alt="RealTourFlow"
+              width={38}
+              height={38}
+              style={{ flexShrink: 0 }}
+              priority
+            />
             <span
               style={{
                 fontSize: "clamp(22px, 5vw, 28px)",
