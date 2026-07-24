@@ -1,0 +1,11 @@
+-- #375: store a Claude-vision photo-analysis result on a tracked property.
+-- One JSONB blob holds the whole result — condition, feature tags, flags, an
+-- agent-facing summary, plus provenance (model, photos analyzed, timestamp,
+-- disclaimer). Nullable: a property has no analysis until an agent runs one.
+--
+-- This is AGENT-INTERNAL. Condition/defect judgments must never reach the
+-- buyer/seller portals, so the API's property serializer strips this column for
+-- non-owning callers exactly as it does agent_private_note (#375). Kept as a
+-- single JSONB (not typed columns) because the tag/flag shape will evolve with
+-- the insights UI (#376) and cost-guardrail work (#377) without a migration each.
+ALTER TABLE tracked_properties ADD COLUMN photo_analysis jsonb;
