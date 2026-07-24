@@ -21,6 +21,14 @@ export type SearchParams = {
   maxPrice?: number;
   cities?: string[];
   minBeds?: number;
+  /**
+   * Bedroom / square-footage bounds and `status: "Closed"` drive the comparable
+   * -sales pull (#374) — comps need SOLD listings bracketed around the subject,
+   * not the active-listing search the buyer portal does.
+   */
+  maxBeds?: number;
+  minArea?: number;
+  maxArea?: number;
   status?: string;
   limit?: number;
 };
@@ -75,6 +83,11 @@ type SimplyRetsListing = {
     daysOnMarket?: number;
     mlsId?: number | string;
   };
+  // Present on CLOSED listings — the actual sale, which is what a comp is.
+  sales?: {
+    closePrice?: number;
+    closeDate?: string;
+  };
   remarks?: string;
 };
 
@@ -106,6 +119,15 @@ export class DefaultSimplyRetsClient implements SimplyRetsClient {
     }
     if (params.minBeds && params.minBeds > 0) {
       q.set("minbeds", String(params.minBeds));
+    }
+    if (params.maxBeds && params.maxBeds > 0) {
+      q.set("maxbeds", String(params.maxBeds));
+    }
+    if (params.minArea && params.minArea > 0) {
+      q.set("minarea", String(Math.round(params.minArea)));
+    }
+    if (params.maxArea && params.maxArea > 0) {
+      q.set("maxarea", String(Math.round(params.maxArea)));
     }
     q.set("status", params.status && params.status !== "" ? params.status : "Active");
     const limit = params.limit && params.limit > 0 ? params.limit : 12;
@@ -158,6 +180,15 @@ function mapListing(l: SimplyRetsListing): MLSListing {
       status: l.mls?.status ?? "",
       daysOnMarket: l.mls?.daysOnMarket ?? 0,
     },
+    // Only attached when the feed actually carried a sale, so active-listing
+    // callers (and their tests) see the exact same shape as before.
+    sales:
+      l.sales?.closePrice != null || l.sales?.closeDate != null
+        ? {
+            closePrice: l.sales?.closePrice ?? 0,
+            closeDate: l.sales?.closeDate ?? "",
+          }
+        : undefined,
     remarks: l.remarks ?? "",
   };
 }
