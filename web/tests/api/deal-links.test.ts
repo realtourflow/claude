@@ -129,6 +129,23 @@ describe("POST /api/deals/[id]/link — create bridge link", () => {
     expect(await prisma.deal_links.count()).toBe(0);
   });
 
+  it("400s when counterpart_deal_id is not a uuid (rather than 500ing in Postgres)", async () => {
+    const { buyDeal } = await seedBridgePair();
+    const res = await postLink(buyDeal.id, "not-a-uuid", "auth0|agentA");
+    expect(res.status).toBe(400);
+    expect(await prisma.deal_links.count()).toBe(0);
+  });
+
+  it("404s when the URL deal id is not a uuid", async () => {
+    await seedBridgePair();
+    const res = await postLink(
+      "garbage-id",
+      "11111111-1111-4111-8111-111111111111",
+      "auth0|agentA"
+    );
+    expect(res.status).toBe(404);
+  });
+
   it("400s when linking a deal to itself", async () => {
     const { buyDeal } = await seedBridgePair();
     const res = await postLink(buyDeal.id, buyDeal.id, "auth0|agentA");
@@ -211,9 +228,10 @@ describe("GET /api/deals/[id]/link — read bridge link", () => {
     expect(counterpart.type).toBe("sell");
   });
 
-  it("lets a buyer participant read the link", async () => {
+  it("lets a buyer participant read the link, but HIDES the counterpart summary", async () => {
     const { buyDeal, sellDeal } = await seedBridgePair();
     const buyer = await createUser({ role: "buyer", auth0_id: "auth0|buyerP" });
+    // Participant on the BUY leg only — no access to the sell deal.
     await prisma.deal_participants.create({
       data: { deal_id: buyDeal.id, user_id: buyer.id, role: "buyer" },
     });
@@ -223,7 +241,38 @@ describe("GET /api/deals/[id]/link — read bridge link", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { link: Record<string, unknown> | null };
     expect(body.link).not.toBeNull();
-    expect((body.link as Record<string, unknown>).sell_deal_id).toBe(sellDeal.id);
+    const link = body.link as Record<string, unknown>;
+    expect(link.sell_deal_id).toBe(sellDeal.id);
+    // The other transaction's title/address must not leak to someone who is
+    // not on that deal (same-client is not enforced).
+    expect(link.counterpart).toBeNull();
+    expect(JSON.stringify(body)).not.toContain("Sell 9 Old Rd");
+  });
+
+  it("includes the counterpart summary for a participant on BOTH legs", async () => {
+    const { buyDeal, sellDeal } = await seedBridgePair();
+    const client = await createUser({ role: "buyer", auth0_id: "auth0|bothP" });
+    // The real bridge case: one client buying and selling.
+    await prisma.deal_participants.create({
+      data: { deal_id: buyDeal.id, user_id: client.id, role: "buyer" },
+    });
+    await prisma.deal_participants.create({
+      data: { deal_id: sellDeal.id, user_id: client.id, role: "seller" },
+    });
+    await postLink(buyDeal.id, sellDeal.id, "auth0|agentA");
+
+    const res = await getLink(buyDeal.id, "auth0|bothP", ["buyer"]);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { link: Record<string, unknown> };
+    const counterpart = body.link.counterpart as Record<string, unknown>;
+    expect(counterpart.id).toBe(sellDeal.id);
+    expect(counterpart.title).toBe("Sell 9 Old Rd");
+  });
+
+  it("404s on a malformed deal id instead of 500ing", async () => {
+    await seedBridgePair();
+    const res = await getLink("not-a-uuid", "auth0|agentA");
+    expect(res.status).toBe(404);
   });
 
   it("404s for a stranger with no access to the deal", async () => {

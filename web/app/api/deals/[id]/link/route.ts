@@ -6,6 +6,8 @@ import { hasDealAccess } from "@/lib/deals";
 
 type Ctx = { params: Promise<{ id: string }> };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 type DealLinkRow = Awaited<ReturnType<typeof prisma.deal_links.findFirst>>;
 
 /**
@@ -36,16 +38,31 @@ async function counterpartSummary(
   return rows[0] ?? null;
 }
 
+/** The OTHER leg of the bridge, relative to the deal you're viewing from. */
+function counterpartIdOf(link: NonNullable<DealLinkRow>, dealId: string): string {
+  return link.buy_deal_id === dealId ? link.sell_deal_id : link.buy_deal_id;
+}
+
 /**
  * Serialize a link relative to the deal it's being viewed from: `this_side`
  * tells the caller whether the current deal is the buy or sell leg, and
  * `counterpart` summarizes the OTHER deal. The stored orientation
  * (buy_deal_id / sell_deal_id) is always returned verbatim so it never depends
  * on which side you asked from.
+ *
+ * `includeCounterpart` gates the summary: being on ONE leg does not entitle you
+ * to the other leg's title/address. Same-client is not enforced (#378), so a
+ * co-buyer or lending partner on the buy deal may have no business seeing the
+ * sell deal's address. Callers pass the result of a real access check; when
+ * false the summary is `null` and only the opaque deal UUIDs remain (useless
+ * without access — every deal route access-checks independently).
  */
-async function serializeLinkForDeal(link: NonNullable<DealLinkRow>, dealId: string) {
+async function serializeLinkForDeal(
+  link: NonNullable<DealLinkRow>,
+  dealId: string,
+  includeCounterpart: boolean
+) {
   const isBuySide = link.buy_deal_id === dealId;
-  const counterpartId = isBuySide ? link.sell_deal_id : link.buy_deal_id;
   return {
     id: link.id,
     buy_deal_id: link.buy_deal_id,
@@ -53,7 +70,9 @@ async function serializeLinkForDeal(link: NonNullable<DealLinkRow>, dealId: stri
     agent_id: link.agent_id,
     created_at: link.created_at,
     this_side: isBuySide ? "buy" : "sell",
-    counterpart: await counterpartSummary(counterpartId),
+    counterpart: includeCounterpart
+      ? await counterpartSummary(counterpartIdOf(link, dealId))
+      : null,
   };
 }
 
@@ -69,13 +88,21 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
+    // A malformed id can't name a real deal — 404 rather than letting the
+    // ::uuid cast blow up inside Postgres as a 500.
+    if (!UUID_RE.test(dealId)) return error("deal not found", 404);
     // Read is open to anyone on the deal (agent owner or participant) — the
     // buyer/seller portals can surface "your other transaction".
     if (!(await hasDealAccess(dealId, userId))) return error("deal not found", 404);
 
     const link = await findLinkForDeal(dealId);
     if (!link) return json({ link: null });
-    return json({ link: await serializeLinkForDeal(link, dealId) });
+    // Access to THIS leg is not access to the other one — check separately.
+    const canSeeCounterpart = await hasDealAccess(
+      counterpartIdOf(link, dealId),
+      userId
+    );
+    return json({ link: await serializeLinkForDeal(link, dealId, canSeeCounterpart) });
   })) as Response;
 }
 
@@ -93,6 +120,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
+    if (!UUID_RE.test(dealId)) return error("deal not found", 404);
 
     let body: CreateBody;
     try {
@@ -102,6 +130,10 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     }
     const counterpartId = body.counterpart_deal_id;
     if (!counterpartId) return error("counterpart_deal_id is required", 400);
+    // Validate the shape at the boundary: a garbage id used to reach Postgres
+    // and surface as a 500 instead of an honest 400.
+    if (!UUID_RE.test(counterpartId))
+      return error("counterpart_deal_id must be a uuid", 400);
     if (counterpartId === dealId)
       return error("a deal cannot be linked to itself", 400);
 
@@ -144,7 +176,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       const link = await prisma.deal_links.create({
         data: { buy_deal_id: buyDealId, sell_deal_id: sellDealId, agent_id: userId },
       });
-      return json(await serializeLinkForDeal(link, dealId), 201);
+      // The creator necessarily owns BOTH legs (checked above), so the
+      // counterpart summary is always theirs to see.
+      return json(await serializeLinkForDeal(link, dealId, true), 201);
     } catch (err) {
       // Unique-constraint violation from a concurrent insert → 409, not 500.
       if (
@@ -168,6 +202,7 @@ export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
   return (await withAuth(req, async (claims): Promise<Response> => {
     const userId = await resolveUserId(claims.sub);
     if (!userId) return error("user not found", 404);
+    if (!UUID_RE.test(dealId)) return error("deal not found", 404);
 
     const owned = await prisma.deals.findFirst({
       where: { id: dealId, agent_id: userId },
