@@ -16,6 +16,7 @@ import { useContingencies, ContingencyStatus } from "@/hooks/useContingencies";
 import { AddContingencyForm } from "@/components/contingencies/AddContingencyForm";
 import Image from "next/image";
 import IntakeCard from "@/components/intake/IntakeCard";
+import PropertyInsights from "@/components/deal/PropertyInsights";
 import DealInviteModal from "@/components/DealInviteModal";
 import { Calendar, CheckCircle2, Circle, AlertCircle, Loader2, MessageSquare, Zap, ChevronDown, Mail, RefreshCw, Pencil, Plus, X, Star, Users, ExternalLink, Home, Link as LinkIcon, Lock, DollarSign, LogOut, Shield, ShieldCheck, ShieldOff } from "lucide-react";
 import { STAGE_LABELS, FLAG_LABELS } from "@/components/deal/shared";
@@ -1159,6 +1160,9 @@ function AgentPropertyRow({ prop, onRemove, onUpdateAgentNote }: { prop: Tracked
           </div>
         </div>
       )}
+
+      {/* Property AI insights — comp range + photo tags (#376) */}
+      <PropertyInsights prop={prop} />
     </div>
   );
 }
