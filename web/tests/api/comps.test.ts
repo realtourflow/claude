@@ -38,6 +38,7 @@ function soldListing(
     closePrice?: number;
     closeDate?: string;
     city?: string;
+    postalCode?: string;
     beds?: number;
     area?: number;
   } = {}
@@ -49,7 +50,7 @@ function soldListing(
       full: "1 Comp St",
       city: overrides.city ?? "Hoover",
       state: "AL",
-      postalCode: "",
+      postalCode: overrides.postalCode ?? "",
     },
     property: {
       bedrooms: overrides.beds ?? 3,
@@ -112,7 +113,9 @@ async function getComps(
 }
 
 /** Agent with MLS connected, a buy deal, and a 3bd/2000sqft subject property. */
-async function seedSubject(opts: { mls?: boolean; city?: string } = {}) {
+async function seedSubject(
+  opts: { mls?: boolean; city?: string; address?: string } = {}
+) {
   const agent = await createUser({ role: "agent", auth0_id: "auth0|agentA" });
   if (opts.mls !== false) {
     // Stored plaintext — decryptField passes legacy plaintext straight through.
@@ -125,7 +128,7 @@ async function seedSubject(opts: { mls?: boolean; city?: string } = {}) {
   const property = await prisma.tracked_properties.create({
     data: {
       deal_id: deal.id,
-      address: "500 Subject Ln",
+      address: opts.address ?? "500 Subject Ln",
       city: opts.city ?? "Hoover",
       state: "AL",
       beds: 3,
@@ -225,6 +228,46 @@ describe("GET /deals/:id/properties/:propId/comps — happy path", () => {
     const res = await getComps(deal.id, property.id, "auth0|agentA");
     const body = (await res.json()) as { comps: { mlsId: string }[] };
     expect(body.comps.map((c) => c.mlsId)).not.toContain("active");
+  });
+
+  it("rejects an outlier sale and reports the count", async () => {
+    const { deal, property } = await seedSubject();
+    const wild = soldListing({ mlsId: "wild", closePrice: 1_500_000 });
+    setSimplyretsForTesting(fakeClient([...fiveSales(), wild]));
+
+    const res = await getComps(deal.id, property.id, "auth0|agentA");
+    const body = (await res.json()) as {
+      outliers_removed: number;
+      comps: { mlsId: string }[];
+    };
+    expect(body.outliers_removed).toBe(1);
+    expect(body.comps.map((c) => c.mlsId)).not.toContain("wild");
+  });
+
+  it("scopes to the subject's ZIP when its address carries one", async () => {
+    // Address ends in a ZIP → same-ZIP comps win over same-city other-ZIP ones.
+    const { deal, property } = await seedSubject({
+      address: "500 Subject Ln, Hoover, AL 35244",
+    });
+    const inZip = [200000, 220000, 240000].map((p, i) =>
+      soldListing({ mlsId: `z${i}`, closePrice: p, postalCode: "35244" })
+    );
+    const otherZip = soldListing({
+      mlsId: "farzip",
+      closePrice: 999000,
+      postalCode: "35080",
+    });
+    setSimplyretsForTesting(fakeClient([...inZip, otherZip]));
+
+    const res = await getComps(deal.id, property.id, "auth0|agentA");
+    const body = (await res.json()) as {
+      subject: { postal_code: string | null };
+      tier_used: string;
+      comps: { mlsId: string }[];
+    };
+    expect(body.subject.postal_code).toBe("35244");
+    expect(body.tier_used).toContain("same ZIP");
+    expect(body.comps.map((c) => c.mlsId)).not.toContain("farzip");
   });
 });
 

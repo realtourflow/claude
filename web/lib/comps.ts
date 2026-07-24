@@ -7,10 +7,16 @@
  * an agent who may have to defend it.
  *
  * Product decisions baked in (Paul, 2026-07-23):
- * - Match on same city + beds ±1 + sqft ±20%, closed in the last 6 months.
- * - When that's too thin, WIDEN automatically up the tier ladder and report how
- *   far it had to go (`tier_used` / `widened`) rather than silently returning a
- *   range built from almost nothing.
+ * - Match on beds ±1 + sqft ±20%, closed in the last 6 months, scoped to the
+ *   subject's POSTAL CODE when we know it (same-ZIP is the tightest tier) and
+ *   otherwise the subject's city. SimplyRETS has no radius search, so ZIP is the
+ *   finest geography available — it keeps a big city from mixing neighborhoods.
+ * - When a tier is too thin, WIDEN automatically (ZIP→city, 6mo→12mo, then the
+ *   size band) and report how far it went (`tier_used` / `widened`) rather than
+ *   quietly building a range from two sales.
+ * - Reject statistical OUTLIERS (a single wildly-off sale) via a Tukey IQR fence
+ *   before ranging — but only with enough comps to detect them and never so
+ *   aggressively that it starves the range below MIN_COMPS.
  * - Output a RANGE only — never a single "this is the price" number — always
  *   carrying the not-an-appraisal disclaimer.
  */
@@ -20,6 +26,8 @@ export type CompCandidate = {
   mlsId: string;
   address: string;
   city: string;
+  /** ZIP (5-digit or ZIP+4); "" when the feed omits it. */
+  postalCode: string;
   /** Actual sale price. Candidates without a real one are dropped. */
   closePrice: number;
   /** ISO date (YYYY-MM-DD) the sale closed. */
@@ -29,9 +37,10 @@ export type CompCandidate = {
   sqft: number;
 };
 
-/** The property being priced. */
+/** The property being priced. `postalCode` is optional — city is the fallback. */
 export type CompSubject = {
   city: string;
+  postalCode?: string;
   beds: number;
   baths: number;
   sqft: number;
@@ -43,8 +52,10 @@ export type CompAnalysis = {
   basis: "price_per_sqft" | "close_price" | null;
   median_price_per_sqft: number | null;
   tier_used: string | null;
-  /** True when the tightest tier was too thin and the match had to be relaxed. */
+  /** True when the tightest available tier was too thin and had to be relaxed. */
   widened: boolean;
+  /** How many statistical outliers the IQR fence dropped before ranging. */
+  outliers_removed: number;
   /** `no_comps` | `insufficient_comps`, else null. */
   reason: string | null;
   disclaimer: string;
@@ -60,8 +71,17 @@ export const MIN_COMPS = 3;
 /** Cap on comps returned/used, most recent first — keeps payloads bounded. */
 export const MAX_COMPS = 10;
 
+/**
+ * Outlier rejection needs enough points to be meaningful — a Tukey fence over
+ * 3–4 values is noise. Below this, we keep every comp.
+ */
+export const OUTLIER_MIN_COMPS = 5;
+
+type CompScope = "postal" | "city";
+
 type CompTier = {
   label: string;
+  scope: CompScope;
   monthsBack: number;
   bedsDelta: number;
   /** Fractional sqft tolerance, e.g. 0.2 → ±20%. */
@@ -69,16 +89,21 @@ type CompTier = {
 };
 
 /**
- * The widening ladder. Each rung is a strict superset of the one before, so
- * match counts only ever grow as we descend — the loop can stop at the first
- * rung that clears MIN_COMPS.
+ * The widening ladder, tightest first. Postal-scoped rungs only apply when the
+ * subject has a known ZIP (they're filtered out otherwise, so a subject with no
+ * ZIP behaves exactly as city-scoped comps always did). Each city rung is a
+ * superset of the one before, so match counts only grow as we descend.
  */
 export const COMP_TIERS: readonly CompTier[] = [
-  { label: "sold 6mo, beds ±1, sqft ±20%", monthsBack: 6, bedsDelta: 1, sqftPct: 0.2 },
-  { label: "sold 12mo, beds ±1, sqft ±20%", monthsBack: 12, bedsDelta: 1, sqftPct: 0.2 },
-  { label: "sold 12mo, beds ±1, sqft ±35%", monthsBack: 12, bedsDelta: 1, sqftPct: 0.35 },
-  { label: "sold 12mo, beds ±2, sqft ±50%", monthsBack: 12, bedsDelta: 2, sqftPct: 0.5 },
+  { label: "same ZIP, sold 6mo, beds ±1, sqft ±20%", scope: "postal", monthsBack: 6, bedsDelta: 1, sqftPct: 0.2 },
+  { label: "same city, sold 6mo, beds ±1, sqft ±20%", scope: "city", monthsBack: 6, bedsDelta: 1, sqftPct: 0.2 },
+  { label: "same city, sold 12mo, beds ±1, sqft ±20%", scope: "city", monthsBack: 12, bedsDelta: 1, sqftPct: 0.2 },
+  { label: "same city, sold 12mo, beds ±1, sqft ±35%", scope: "city", monthsBack: 12, bedsDelta: 1, sqftPct: 0.35 },
+  { label: "same city, sold 12mo, beds ±2, sqft ±50%", scope: "city", monthsBack: 12, bedsDelta: 2, sqftPct: 0.5 },
 ];
+
+/** The loosest tier — used to bracket the single MLS fetch that feeds the ladder. */
+export const WIDEST_TIER = COMP_TIERS[COMP_TIERS.length - 1];
 
 /**
  * Linear-interpolated percentile over an ASCENDING-sorted array.
@@ -94,8 +119,29 @@ export function percentile(sorted: number[], p: number): number {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
 
+/** Tukey [Q1 − 1.5·IQR, Q3 + 1.5·IQR] fence over an unsorted sample. */
+export function tukeyFence(values: number[]): { lo: number; hi: number } {
+  const sorted = [...values].sort((a, b) => a - b);
+  const q1 = percentile(sorted, 0.25);
+  const q3 = percentile(sorted, 0.75);
+  const iqr = q3 - q1;
+  return { lo: q1 - 1.5 * iqr, hi: q3 + 1.5 * iqr };
+}
+
+/** The 5-digit ZIP at the END of an address ("... AL 35244" / "...-1234"), else "". */
+export function extractPostalCode(address: string): string {
+  const m = address.match(/(\d{5})(?:-\d{4})?\s*$/);
+  return m ? m[1] : "";
+}
+
 function normCity(s: string): string {
   return s.trim().toLowerCase();
+}
+
+/** First 5-digit run of a postal string (drops the +4), else "". */
+function normPostal(s: string): string {
+  const m = s.match(/\d{5}/);
+  return m ? m[0] : "";
 }
 
 function monthsAgo(now: Date, months: number): Date {
@@ -119,7 +165,12 @@ function matchesTier(
   tier: CompTier,
   cutoff: Date
 ): boolean {
-  if (normCity(c.city) !== normCity(subject.city)) return false;
+  if (tier.scope === "postal") {
+    if (!subject.postalCode) return false;
+    if (normPostal(c.postalCode) !== subject.postalCode) return false;
+  } else if (normCity(c.city) !== normCity(subject.city)) {
+    return false;
+  }
 
   if (subject.beds > 0 && c.beds > 0) {
     if (Math.abs(c.beds - subject.beds) > tier.bedsDelta) return false;
@@ -135,37 +186,9 @@ function matchesTier(
   return closed >= cutoff;
 }
 
-/**
- * Derive the range. Price-per-sqft is preferred because it normalizes for size
- * — a 20%-larger comp shouldn't drag the estimate up on its own. Falls back to
- * raw close prices when neither the subject nor the comps carry usable sqft.
- */
-function buildRange(comps: CompCandidate[], subject: CompSubject) {
-  if (subject.sqft > 0) {
-    const ppsf = comps
-      .filter((c) => c.sqft > 0)
-      .map((c) => c.closePrice / c.sqft)
-      .sort((a, b) => a - b);
-    if (ppsf.length > 0) {
-      return {
-        range: {
-          low: roundToThousand(percentile(ppsf, 0.25) * subject.sqft),
-          high: roundToThousand(percentile(ppsf, 0.75) * subject.sqft),
-        },
-        basis: "price_per_sqft" as const,
-        median_price_per_sqft: Math.round(percentile(ppsf, 0.5) * 100) / 100,
-      };
-    }
-  }
-  const prices = comps.map((c) => c.closePrice).sort((a, b) => a - b);
-  return {
-    range: {
-      low: roundToThousand(percentile(prices, 0.25)),
-      high: roundToThousand(percentile(prices, 0.75)),
-    },
-    basis: "close_price" as const,
-    median_price_per_sqft: null,
-  };
+/** Per-comp figure the range is built on, given the chosen basis. */
+function metricOf(c: CompCandidate, basis: "price_per_sqft" | "close_price"): number {
+  return basis === "price_per_sqft" ? c.closePrice / c.sqft : c.closePrice;
 }
 
 /**
@@ -180,52 +203,99 @@ export function analyzeComps(
   // A sale with no real price can't anchor anything.
   const priced = candidates.filter((c) => c.closePrice > 0);
 
+  // Postal rungs only make sense when we know the subject's ZIP.
+  const tiers = COMP_TIERS.filter(
+    (t) => t.scope === "city" || !!subject.postalCode
+  );
+
   let selected: CompCandidate[] = [];
-  let tierIndex = 0;
-  for (let i = 0; i < COMP_TIERS.length; i++) {
-    const tier = COMP_TIERS[i];
-    const cutoff = monthsAgo(now, tier.monthsBack);
-    selected = priced.filter((c) => matchesTier(c, subject, tier, cutoff));
-    tierIndex = i;
+  let localIndex = 0;
+  for (let i = 0; i < tiers.length; i++) {
+    const cutoff = monthsAgo(now, tiers[i].monthsBack);
+    selected = priced.filter((c) => matchesTier(c, subject, tiers[i], cutoff));
+    localIndex = i;
     if (selected.length >= MIN_COMPS) break;
   }
 
-  const tierUsed = COMP_TIERS[tierIndex].label;
-  const widened = tierIndex > 0;
+  const tierUsed = tiers[localIndex].label;
+  const widened = localIndex > 0;
 
-  // Most recent first, then capped.
-  const ordered = [...selected]
+  // Most recent first, then capped to the relevant window.
+  const pool = [...selected]
     .sort((a, b) => new Date(b.closeDate).getTime() - new Date(a.closeDate).getTime())
     .slice(0, MAX_COMPS);
 
-  const base = {
-    tier_used: tierUsed,
-    widened,
-    disclaimer: COMP_DISCLAIMER,
-  };
+  const base = { tier_used: tierUsed, widened, disclaimer: COMP_DISCLAIMER };
 
-  if (ordered.length === 0) {
+  if (pool.length === 0) {
     return {
       ...base,
       comps: [],
       range: null,
       basis: null,
       median_price_per_sqft: null,
+      outliers_removed: 0,
       reason: "no_comps",
     };
   }
-  if (ordered.length < MIN_COMPS) {
+
+  // Price-per-sqft normalizes for size, but only when enough comps carry sqft;
+  // otherwise range on raw close prices over the whole pool.
+  const basis: "price_per_sqft" | "close_price" =
+    subject.sqft > 0 && pool.filter((c) => c.sqft > 0).length >= MIN_COMPS
+      ? "price_per_sqft"
+      : "close_price";
+  const usable = basis === "price_per_sqft" ? pool.filter((c) => c.sqft > 0) : pool;
+
+  if (usable.length < MIN_COMPS) {
     // Found something, but too thin to publish a defensible range.
     return {
       ...base,
-      comps: ordered,
+      comps: pool,
       range: null,
       basis: null,
       median_price_per_sqft: null,
+      outliers_removed: 0,
       reason: "insufficient_comps",
     };
   }
 
-  const { range, basis, median_price_per_sqft } = buildRange(ordered, subject);
-  return { ...base, comps: ordered, range, basis, median_price_per_sqft, reason: null };
+  // Reject outliers via a Tukey fence — but never into insufficiency, and only
+  // with enough points for the fence to mean anything.
+  let kept = usable;
+  let outliersRemoved = 0;
+  if (usable.length >= OUTLIER_MIN_COMPS) {
+    const { lo, hi } = tukeyFence(usable.map((c) => metricOf(c, basis)));
+    const within = usable.filter((c) => {
+      const m = metricOf(c, basis);
+      return m >= lo && m <= hi;
+    });
+    if (within.length >= MIN_COMPS && within.length < usable.length) {
+      kept = within;
+      outliersRemoved = usable.length - within.length;
+    }
+  }
+
+  const metrics = kept.map((c) => metricOf(c, basis)).sort((a, b) => a - b);
+  const p25 = percentile(metrics, 0.25);
+  const p75 = percentile(metrics, 0.75);
+
+  const range =
+    basis === "price_per_sqft"
+      ? { low: roundToThousand(p25 * subject.sqft), high: roundToThousand(p75 * subject.sqft) }
+      : { low: roundToThousand(p25), high: roundToThousand(p75) };
+  const median_price_per_sqft =
+    basis === "price_per_sqft"
+      ? Math.round(percentile(metrics, 0.5) * 100) / 100
+      : null;
+
+  return {
+    ...base,
+    comps: kept,
+    range,
+    basis,
+    median_price_per_sqft,
+    outliers_removed: outliersRemoved,
+    reason: null,
+  };
 }

@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   analyzeComps,
   percentile,
+  tukeyFence,
+  extractPostalCode,
   COMP_DISCLAIMER,
   MIN_COMPS,
   type CompCandidate,
@@ -23,6 +25,7 @@ function comp(overrides: Partial<CompCandidate> = {}): CompCandidate {
     mlsId: "m1",
     address: "1 Test St",
     city: "Hoover",
+    postalCode: "",
     closePrice: 240000,
     closeDate: "2026-06-01",
     beds: 3,
@@ -195,5 +198,109 @@ describe("analyzeComps — automatic widening", () => {
     expect(res.comps).toHaveLength(0);
     expect(res.range).toBeNull();
     expect(res.reason).toBe("no_comps");
+  });
+});
+
+describe("extractPostalCode", () => {
+  it("pulls the ZIP off the end of an address", () => {
+    expect(extractPostalCode("500 Subject Ln, Hoover, AL 35244")).toBe("35244");
+    expect(extractPostalCode("1 Main St, Hoover, AL 35244-1234")).toBe("35244");
+  });
+
+  it("returns '' when there is no trailing ZIP", () => {
+    expect(extractPostalCode("500 Subject Ln")).toBe("");
+    // A 5-digit street number is NOT a ZIP (not at the end).
+    expect(extractPostalCode("35244 Cahaba River Rd")).toBe("");
+  });
+});
+
+describe("tukeyFence", () => {
+  it("brackets Q1-1.5·IQR .. Q3+1.5·IQR", () => {
+    // [100,110,120,130,140] → Q1 110, Q3 130, IQR 20 → [80, 160].
+    expect(tukeyFence([120, 100, 140, 110, 130])).toEqual({ lo: 80, hi: 160 });
+  });
+});
+
+describe("analyzeComps — postal-code proximity", () => {
+  const subjZip = subject({ postalCode: "35244" });
+
+  it("scopes the tightest tier to the subject's ZIP", () => {
+    const comps = [
+      ...[200000, 220000, 240000].map((p, i) =>
+        comp({ mlsId: `in${i}`, closePrice: p, postalCode: "35244" })
+      ),
+      // Same city, different ZIP — must be excluded while same-ZIP comps suffice.
+      comp({ mlsId: "otherzip", closePrice: 900000, postalCode: "35080" }),
+    ];
+    const res = analyzeComps(comps, subjZip, NOW);
+
+    expect(res.tier_used).toContain("same ZIP");
+    expect(res.widened).toBe(false);
+    expect(res.comps.map((c) => c.mlsId)).not.toContain("otherzip");
+    expect(res.comps).toHaveLength(3);
+  });
+
+  it("widens from ZIP to city when the ZIP is too thin", () => {
+    const comps = [
+      comp({ mlsId: "z1", closePrice: 240000, postalCode: "35244" }),
+      ...[200000, 220000, 260000].map((p, i) =>
+        comp({ mlsId: `c${i}`, closePrice: p, postalCode: "35080" })
+      ),
+    ];
+    const res = analyzeComps(comps, subjZip, NOW);
+
+    // Only one same-ZIP sale → falls through to same-city.
+    expect(res.tier_used).toContain("same city");
+    expect(res.widened).toBe(true);
+    expect(res.comps.length).toBeGreaterThanOrEqual(MIN_COMPS);
+  });
+
+  it("uses city scope (no ZIP tier) when the subject has no postal code", () => {
+    const res = analyzeComps(fiveComps(), subject(), NOW);
+    expect(res.tier_used).toContain("same city");
+    expect(res.tier_used).not.toContain("ZIP");
+  });
+});
+
+describe("analyzeComps — outlier rejection", () => {
+  it("drops a wild sale via the IQR fence and ranges on the survivors", () => {
+    // Five tight comps at $100–120/sqft + one 5× outlier.
+    const comps = [
+      ...[200000, 210000, 220000, 230000, 240000].map((p, i) =>
+        comp({ mlsId: `t${i}`, closePrice: p })
+      ),
+      comp({ mlsId: "wild", closePrice: 1000000 }),
+    ];
+    const res = analyzeComps(comps, subject(), NOW);
+
+    expect(res.outliers_removed).toBe(1);
+    expect(res.comps.map((c) => c.mlsId)).not.toContain("wild");
+    // Range reflects the clean five ($105–115/sqft × 2000 sqft).
+    expect(res.range).toEqual({ low: 210000, high: 230000 });
+  });
+
+  it("does not reject with too few comps to detect outliers (n < 5)", () => {
+    const comps = [
+      comp({ mlsId: "a", closePrice: 200000 }),
+      comp({ mlsId: "b", closePrice: 220000 }),
+      comp({ mlsId: "c", closePrice: 240000 }),
+      comp({ mlsId: "wild", closePrice: 900000 }),
+    ];
+    const res = analyzeComps(comps, subject(), NOW);
+    expect(res.outliers_removed).toBe(0);
+    expect(res.comps.map((c) => c.mlsId)).toContain("wild");
+  });
+
+  it("never rejects so hard it starves the range below MIN_COMPS", () => {
+    // Bimodal: 3 low + 2 high. A naive fence might cull one cluster; the guard
+    // keeps at least MIN_COMPS, so nothing is dropped here.
+    const comps = [
+      ...[200000, 205000, 210000].map((p, i) => comp({ mlsId: `lo${i}`, closePrice: p })),
+      ...[900000, 950000].map((p, i) => comp({ mlsId: `hi${i}`, closePrice: p })),
+    ];
+    const res = analyzeComps(comps, subject(), NOW);
+    // Whatever the fence proposes, the result stays >= MIN_COMPS.
+    expect(res.comps.length).toBeGreaterThanOrEqual(MIN_COMPS);
+    expect(res.range).not.toBeNull();
   });
 });

@@ -20,7 +20,8 @@ import { getSimplyretsClient } from "@/lib/simplyrets";
 import { decryptField } from "@/lib/crypto";
 import {
   analyzeComps,
-  COMP_TIERS,
+  extractPostalCode,
+  WIDEST_TIER,
   MAX_COMPS,
   type CompCandidate,
   type CompSubject,
@@ -34,17 +35,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /**
  * How many closed listings to pull. The widening ladder runs locally, so we
  * fetch ONE superset bracketed by the widest tier and let analyzeComps narrow
- * it — rather than making a round trip per tier.
+ * it — rather than making a round trip per tier. Kept city-scoped (not ZIP) so
+ * the local ZIP→city widening can happen off a single fetch.
  */
 const FETCH_LIMIT = 100;
-
-const WIDEST = COMP_TIERS[COMP_TIERS.length - 1];
 
 function toCandidate(l: MLSListing): CompCandidate {
   return {
     mlsId: l.mlsId,
     address: l.address.full,
     city: l.address.city,
+    postalCode: l.address.postalCode,
     // Listings with no sale price are dropped by analyzeComps.
     closePrice: l.sales?.closePrice ?? 0,
     closeDate: l.sales?.closeDate ?? "",
@@ -90,6 +91,10 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
 
     const subject: CompSubject = {
       city: property.city,
+      // ZIP scopes the tightest comp tier; parsed from the address since
+      // tracked_properties has no postal column. Absent → city scope (no worse
+      // than before). See extractPostalCode.
+      postalCode: extractPostalCode(property.address),
       beds: Number(property.beds),
       baths: Number(property.baths),
       sqft: property.sqft,
@@ -107,14 +112,14 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
         limit: FETCH_LIMIT,
         ...(subject.beds > 0
           ? {
-              minBeds: Math.max(0, subject.beds - WIDEST.bedsDelta),
-              maxBeds: subject.beds + WIDEST.bedsDelta,
+              minBeds: Math.max(0, subject.beds - WIDEST_TIER.bedsDelta),
+              maxBeds: subject.beds + WIDEST_TIER.bedsDelta,
             }
           : {}),
         ...(subject.sqft > 0
           ? {
-              minArea: subject.sqft * (1 - WIDEST.sqftPct),
-              maxArea: subject.sqft * (1 + WIDEST.sqftPct),
+              minArea: subject.sqft * (1 - WIDEST_TIER.sqftPct),
+              maxArea: subject.sqft * (1 + WIDEST_TIER.sqftPct),
             }
           : {}),
       });
@@ -133,6 +138,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
         address: property.address,
         city: property.city,
         state: property.state,
+        postal_code: subject.postalCode || null,
         beds: subject.beds,
         baths: subject.baths,
         sqft: subject.sqft,
@@ -145,6 +151,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
       max_comps: MAX_COMPS,
       tier_used: analysis.tier_used,
       widened: analysis.widened,
+      outliers_removed: analysis.outliers_removed,
       reason: analysis.reason,
       disclaimer: analysis.disclaimer,
     });
