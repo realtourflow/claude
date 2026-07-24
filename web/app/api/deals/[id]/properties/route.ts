@@ -10,13 +10,17 @@ type PropertyRow = Awaited<
 >[number];
 
 /**
- * Wire serializer for tracked_properties. `agent_private_note` is labeled
- * "only you see this" in the agent UI — it must never reach non-owner
- * callers (buyers/sellers are deal participants and pass hasDealAccess).
+ * Wire serializer for tracked_properties. `agent_private_note` and
+ * `photo_analysis` are agent-internal — the note is labeled "only you see this",
+ * and the AI photo analysis (#375) carries condition/defect judgments that must
+ * never reach the buyer/seller portals. Both are stripped for non-owner callers
+ * (buyers/sellers are deal participants and pass hasDealAccess).
  */
 function serializeProperty(row: PropertyRow, includeAgentPrivate: boolean) {
-  const { agent_private_note, ...shared } = row;
-  return includeAgentPrivate ? { ...shared, agent_private_note } : shared;
+  const { agent_private_note, photo_analysis, ...shared } = row;
+  return includeAgentPrivate
+    ? { ...shared, agent_private_note, photo_analysis }
+    : shared;
 }
 
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
