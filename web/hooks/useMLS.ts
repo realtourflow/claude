@@ -24,6 +24,11 @@ export type MLSListing = {
     status: string;
     daysOnMarket: number;
   };
+  /** Only present on CLOSED listings — drives comparable-sales analysis (#374). */
+  sales?: {
+    closePrice: number;
+    closeDate: string;
+  };
   remarks: string;
 };
 
