@@ -2,20 +2,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import PropertyInsights from "@/components/deal/PropertyInsights";
-import type { TrackedProperty, PhotoAnalysis } from "@/hooks/useProperties";
-import {
-  usePropertyComps,
-  useAnalyzePhotos,
-  type CompsResponse,
-} from "@/hooks/usePropertyInsights";
+import type { TrackedProperty } from "@/hooks/useProperties";
+import { usePropertyComps, type CompsResponse } from "@/hooks/usePropertyInsights";
 
 vi.mock("@/hooks/usePropertyInsights", () => ({
   usePropertyComps: vi.fn(),
-  useAnalyzePhotos: vi.fn(),
 }));
 
 const compsRun = vi.fn();
-const photosRun = vi.fn();
 
 function mockComps(over: Partial<ReturnType<typeof usePropertyComps>> = {}) {
   vi.mocked(usePropertyComps).mockReturnValue({
@@ -24,15 +18,6 @@ function mockComps(over: Partial<ReturnType<typeof usePropertyComps>> = {}) {
     loading: false,
     error: "",
     ran: false,
-    ...over,
-  });
-}
-function mockPhotos(over: Partial<ReturnType<typeof useAnalyzePhotos>> = {}) {
-  vi.mocked(useAnalyzePhotos).mockReturnValue({
-    run: photosRun,
-    data: null,
-    loading: false,
-    error: "",
     ...over,
   });
 }
@@ -70,28 +55,15 @@ const RANGE: CompsResponse = {
   disclaimer: "Estimated from recent comparable sales. Not an appraisal.",
 };
 
-const ANALYSIS: PhotoAnalysis = {
-  condition: "good",
-  features: ["hardwood floors", "granite counters"],
-  flags: ["dated bathroom"],
-  summary: "Well-kept 3BR; guest bath dated.",
-  photos_analyzed: 4,
-  model: "claude-opus-4-8",
-  analyzed_at: "2026-07-24T00:00:00Z",
-  disclaimer: "AI-generated from listing photos. Not a home inspection.",
-};
-
 beforeEach(() => {
   vi.clearAllMocks();
   mockComps();
-  mockPhotos();
 });
 
-describe("PropertyInsights — comps", () => {
-  it("offers a Comp range button and triggers the run on click", () => {
+describe("PropertyInsights — comp range", () => {
+  it("offers a Pull comps button and triggers the run on click", () => {
     render(<PropertyInsights prop={makeProp()} />);
-    const btn = screen.getByRole("button", { name: /comp range/i });
-    fireEvent.click(btn);
+    fireEvent.click(screen.getByRole("button", { name: /pull comps/i }));
     expect(compsRun).toHaveBeenCalledTimes(1);
   });
 
@@ -141,43 +113,5 @@ describe("PropertyInsights — comps", () => {
     mockComps({ loading: true });
     render(<PropertyInsights prop={makeProp()} />);
     expect(screen.getByText(/pulling comps/i)).toBeInTheDocument();
-  });
-});
-
-describe("PropertyInsights — photo tags", () => {
-  it("offers an Analyze photos button and triggers the run when there is no stored analysis", () => {
-    render(<PropertyInsights prop={makeProp()} />);
-    fireEvent.click(screen.getByRole("button", { name: /analyze photos/i }));
-    expect(photosRun).toHaveBeenCalledTimes(1);
-  });
-
-  it("renders stored photo tags: condition, features, flags, summary, disclaimer", () => {
-    render(<PropertyInsights prop={makeProp({ photoAnalysis: ANALYSIS })} />);
-    expect(screen.getByText("good")).toBeInTheDocument();
-    expect(screen.getByText("hardwood floors")).toBeInTheDocument();
-    expect(screen.getByText("granite counters")).toBeInTheDocument();
-    expect(screen.getByText("dated bathroom")).toBeInTheDocument();
-    expect(screen.getByText(/well-kept 3br/i)).toBeInTheDocument();
-    expect(screen.getByText(/4 photos analyzed/i)).toBeInTheDocument();
-    expect(screen.getByText(/not a home inspection/i)).toBeInTheDocument();
-    // Re-analyze affordance replaces the initial button once tags exist.
-    expect(screen.getByRole("button", { name: /re-analyze photos/i })).toBeInTheDocument();
-  });
-
-  it("prefers a just-returned analysis over stale stored tags", () => {
-    mockPhotos({ data: { ...ANALYSIS, condition: "poor", summary: "fresh result" } });
-    render(<PropertyInsights prop={makeProp({ photoAnalysis: ANALYSIS })} />);
-    expect(screen.getByText("poor")).toBeInTheDocument();
-    expect(screen.getByText(/fresh result/i)).toBeInTheDocument();
-  });
-
-  it("shows the analyzing spinner and an error on failure", () => {
-    mockPhotos({ loading: true });
-    const { rerender } = render(<PropertyInsights prop={makeProp()} />);
-    expect(screen.getByText(/analyzing photos/i)).toBeInTheDocument();
-
-    mockPhotos({ error: "photo analysis is not configured" });
-    rerender(<PropertyInsights prop={makeProp()} />);
-    expect(screen.getByText(/not configured/i)).toBeInTheDocument();
   });
 });

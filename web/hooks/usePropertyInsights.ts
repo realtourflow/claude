@@ -1,13 +1,12 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
-import type { PhotoAnalysis } from "@/hooks/useProperties";
 
 /**
- * Property AI insights, agent-facing (#376). Both endpoints are owning-agent-
- * only and cost money per call, so they are ON-DEMAND mutations (mirroring
- * useMLSListings) — never auto-fetched on render.
+ * Property comp-analysis insight, agent-facing (#376). The comps endpoint is
+ * owning-agent-only and costs money per call, so it is an ON-DEMAND mutation
+ * (mirroring useMLSListings) — never auto-fetched on render.
  */
 
 export type CompCandidate = {
@@ -64,33 +63,5 @@ export function usePropertyComps(dealId: string | undefined, propId: string) {
     loading: mutation.isPending,
     error: mutation.error ? errorMessage(mutation.error) : "",
     ran: mutation.isSuccess,
-  };
-}
-
-/**
- * On-demand photo analysis. `photoUrls` defaults to the property thumbnail
- * server-side when omitted. On success we invalidate the property list so the
- * freshly-stored `photo_analysis` re-renders on the card.
- */
-export function useAnalyzePhotos(dealId: string | undefined, propId: string) {
-  const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: async (photoUrls?: string[]) => {
-      if (!dealId) throw new Error("no deal");
-      const body = photoUrls && photoUrls.length > 0 ? { photo_urls: photoUrls } : {};
-      return api.post<{ analysis: PhotoAnalysis }>(
-        `/deals/${dealId}/properties/${propId}/analyze-photos`,
-        body
-      );
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["properties", dealId ?? ""] });
-    },
-  });
-  return {
-    run: (photoUrls?: string[]) => mutation.mutate(photoUrls),
-    data: mutation.data?.analysis ?? null,
-    loading: mutation.isPending,
-    error: mutation.error ? errorMessage(mutation.error) : "",
   };
 }

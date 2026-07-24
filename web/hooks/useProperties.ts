@@ -5,24 +5,6 @@ import { api } from "@/lib/api-client";
 
 export type PropertyStatus = 'interested' | 'toured' | 'not_for_me' | 'offer_submitted';
 
-export type PropertyCondition = 'excellent' | 'good' | 'fair' | 'poor' | 'unknown';
-
-/**
- * Claude-vision photo analysis stored on a property (#375). Agent-only — the
- * API serializer strips it for buyers/sellers, so it's only ever present here
- * for the owning agent. Shape mirrors the stored JSONB verbatim.
- */
-export type PhotoAnalysis = {
-  condition: PropertyCondition;
-  features: string[];
-  flags: string[];
-  summary: string;
-  photos_analyzed: number;
-  model: string;
-  analyzed_at: string;
-  disclaimer: string;
-};
-
 export type TrackedProperty = {
   id: string;
   dealId: string;
@@ -41,7 +23,6 @@ export type TrackedProperty = {
   buyerNote?: string;
   agentPrivateNote?: string;
   offerRequested?: boolean;
-  photoAnalysis?: PhotoAnalysis;
 };
 
 type ApiProperty = {
@@ -62,7 +43,6 @@ type ApiProperty = {
   buyer_note?: string | null;
   agent_private_note?: string | null;
   offer_requested: boolean;
-  photo_analysis?: PhotoAnalysis | null;
 };
 
 function fromApi(p: ApiProperty): TrackedProperty {
@@ -84,7 +64,6 @@ function fromApi(p: ApiProperty): TrackedProperty {
     buyerNote: p.buyer_note ?? undefined,
     agentPrivateNote: p.agent_private_note ?? undefined,
     offerRequested: p.offer_requested,
-    photoAnalysis: p.photo_analysis ?? undefined,
   };
 }
 
