@@ -55,12 +55,17 @@ vi.mock("@auth0/auth0-react", async (importOriginal) => {
 });
 
 // SSR never invokes a queryFn, but hydration does once the gate flips. Stub the
-// GET to a promise that never settles so the test stays off the network.
+// GET to a rejection so the test stays off the network and every promise it
+// starts actually settles — both pages pass `retry: false`, so react-query
+// takes the one failure and stops.
 vi.mock("@/lib/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api-client")>();
   return {
     ...actual,
-    api: { ...actual.api, get: () => new Promise(() => {}) },
+    api: {
+      ...actual.api,
+      get: () => Promise.reject(new Error("network disabled in this test")),
+    },
   };
 });
 
