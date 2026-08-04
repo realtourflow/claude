@@ -47,14 +47,18 @@ import { useAuthStore } from "@/lib/store/authStore";
 import { api, ApiError } from "@/lib/api-client";
 import { stubLocalStorage } from "../helpers/local-storage";
 
-const localStore = stubLocalStorage();
-
 /** Text of the whole error screen, whitespace-normalised. */
 function screenText(container: HTMLElement): string {
   return (container.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
 beforeEach(() => {
+  // Re-stubbed per test rather than once at module scope: afterEach's
+  // restoreAllMocks/clearAllMocks run between tests, and AuthSetup reads the
+  // bare `localStorage` identifier to decide whether a pending invite needs
+  // claiming first. Each test gets its own empty store, so "no pending invite"
+  // is a guarantee rather than leftover state.
+  stubLocalStorage();
   auth0State.isLoading = false;
   auth0State.isAuthenticated = true;
   auth0State.error = undefined;
@@ -66,7 +70,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.clearAllMocks();
-  localStore.reset();
+  vi.unstubAllGlobals();
 });
 
 describe("RootRedirect — /users/sync error screens (#397)", () => {
